@@ -53,7 +53,7 @@
                     <li class="nav-item"><a class="nav-link" href="https://chat.whatsapp.com/CPjp84Qz6uM5t9Oq88Qb4Q" target="_blank"><i class="bi bi-question-circle"></i>&nbsp;Help</a></li>
                 </ul>
                 <div v-cloak v-if="auth">
-                    <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
+                    <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;${auth.name}</a></span>&nbsp;
                     <button id="logout" type="button" class="btn btn-outline-danger" @click="onLogout">Logout</button>
                 </div>
             </div>
@@ -68,7 +68,7 @@
                 Your login session has expired, please <a :href="'login.html?return=' + encodeLoginReturnUrl()">login again</a>.
             </div>
             <div v-else>
-                {{http_err}}
+                ${http_err}
             </div>
         </div>
 
@@ -105,22 +105,33 @@
                 <h6 class="card-header">Included Session Types:</h6>
                 <div class="card-body">
                     <div v-for="session_type in session_types" class="form-check">
-                        <input type="checkbox" class="form-check-input" v-model="session_type.enabled"> <!--@click="selectSessionType(session_type)"> -->
-                        <label class="form-check-label">{{session_type.name}}</label>
+                        <input type="checkbox" class="form-check-input" v-model="session_type.enabled">
+                        <label class="form-check-label">${session_type.name}</label>
                     </div>
                 </div>
             </div>
-            <table class="table table-hover">
+
+            <table class="table align-middle">
                 <thead>
                     <tr>
+                        <th scope="col">Rank</th>
+                        <th scope="col">Sessions Attended</th>
                         <th scope="col">Name</th>
-                        <th scope="col">Attended</th>
                     </tr>
                 </thead>
-                <tbody>
-                    <tr v-for="stat in stats_data">
-                        <td>{{stat.name}}</td>
-                        <td>{{stat.attended_count}}</td>
+                <tbody v-for="ranking in stats_categorized">
+                    <tr>
+                        <td :rowspan="ranking.subentries.length + 1">
+                            <span v-if="ranking.rank == 1" title="Gold Medal" class="fs-1">🥇</span>
+                            <span v-if="ranking.rank == 2" title="Silver Medal" class="fs-1">🥈</span>
+                            <span v-if="ranking.rank == 3" title="Bronze Medal" class="fs-1">🥉</span>
+                            <span v-if="ranking.rank >= 4">${ranking.rank}</span>
+                        </td>
+                        <td :rowspan="ranking.subentries.length + 1">${ranking.attended_count}</td>
+                        <td>${ranking.initial.name}</td>
+                    </tr>
+                    <tr v-for="subentry in ranking.subentries">
+                        <td>${subentry.name}</td>
                     </tr>
                 </tbody>
             </table>
@@ -146,6 +157,7 @@
         to: null
     })
     const stats_data = ref([])
+    const stats_categorized = ref([])
 
     async function loadSessionTypes() {
         return fetch(SERVER_URL + "/session_types", {
@@ -176,7 +188,6 @@
             }
         }
         let url = SERVER_URL + "/stats/attendance?" + urlParams.toString()
-        console.log("(Re)loading stats...", url)
         return fetch(url, {
             headers: {
                 'Authorization': 'Bearer ' + auth.value.access_token
@@ -199,19 +210,42 @@
     }
 
     function onFilterModified() {
-        loadStats().then(stats => stats_data.value = stats)
+        loadStats().then(stats => stats_categorized.value = categorizeStats(stats))
+    }
+
+    function categorizeStats(raw_data) {
+        let categorized = []
+        let rank = 0
+        let current = null
+        for (var entry of raw_data) {
+            if (current !== null && current.attended_count !== null && current.attended_count === entry.attended_count) {
+                current.subentries.push(entry)
+            } else {
+                rank ++
+                current = {
+                    rank: rank,
+                    attended_count: entry.attended_count,
+                    initial: entry,
+                    subentries: []
+                }
+                categorized.push(current)
+            }
+        }
+        return categorized
     }
 
     watch(filter, onFilterModified)
 
-    createApp({
+    const app = createApp({
         setup() {
             return {
-                auth, http_err, session_types, filter, stats_data,
+                auth, http_err, session_types, filter, stats_data, stats_categorized,
                 onLogout, isAdmin, encodeLoginReturnUrl
             }
         }
-    }).mount('#app')
+    })
+    app.config.compilerOptions.delimiters = ['${', '}']
+    app.mount('#app')
 
     let jwtRaw = localStorage.getItem("jwt")
     if (jwtRaw) {
@@ -221,12 +255,12 @@
                 session_types.push({
                     id: session_type.id,
                     name: session_type.name,
-                    enabled: true
+                    enabled: session_type.requires_trainer
                 })
             }
             watch(session_types, onFilterModified)
             return loadStats()
-        }).then(stats => stats_data.value = stats)
+        }).then(stats => stats_categorized.value = categorizeStats(stats))
     } else {
         auth.value = null
     }
