@@ -8,7 +8,7 @@ use serde::Deserialize;
 use sqlx::{Error, FromRow, query_as, QueryBuilder, Row};
 use sqlx::postgres::PgRow;
 
-use crate::{AppState, is_admin, parse_opt_date, SessionLocation, SessionType};
+use crate::{AppState, parse_opt_date, SessionLocation, SessionType};
 use crate::claims::Claims;
 
 #[derive(Serialize, Deserialize, FromRow, Debug)]
@@ -70,12 +70,12 @@ pub async fn list_bookings(
             AND s.session_type = t.id");
 
     if let Some(person_id) = person_id {
-        if person_id != claim.uid && !is_admin(&claim) {
+        if person_id != claim.uid && !claim.has_role("admin") {
             return Err(Custom(Status::Forbidden, "only admins can view bookings for other users".to_string()))
         }
         qb.push(" AND b.person_id = ");
         qb.push_bind(person_id);
-    } else if !is_admin(&claim) {
+    } else if !claim.has_role("admin") {
         return Err(Custom(Status::Forbidden, "only admins can view bookings for other users".to_string()))
     }
 
@@ -102,7 +102,8 @@ pub async fn list_bookings(
 
 #[post("/bookings", data="<booking>")]
 pub async fn create_booking(state: &State<AppState>, claim: Claims, booking: Json<SessionBooking>) -> Result<Json<Option<SessionBooking>>, Custom<String>> {
-    if booking.person_id != claim.uid && !is_admin(&claim) {
+    claim.assert_roles_contains("member")?;
+    if booking.person_id != claim.uid && !claim.has_role("admin") {
         return Err(Custom(Status::Forbidden, "not allowed to create bookings for other users".to_string()));
     }
     let booking_created = query_as("INSERT INTO booking (person_id, session_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING person_id, session_id")
@@ -117,7 +118,8 @@ pub async fn create_booking(state: &State<AppState>, claim: Claims, booking: Jso
 
 #[delete("/bookings?<session_id>&<person_id>")]
 pub async fn delete_booking(state: &State<AppState>, claim: Claims, person_id: i64, session_id: i64) -> Result<Json<Option<SessionBooking>>, Custom<String>> {
-    if person_id != claim.uid && !is_admin(&claim) {
+    claim.assert_roles_contains("member")?;
+    if person_id != claim.uid && !claim.has_role("admin") {
         return Err(Custom(Status::Forbidden, "not allowed to cancel bookings for other users".to_string()));
     }
     let booking_deleted = query_as("DELETE FROM booking WHERE person_id = $1 AND session_id = $2 RETURNING person_id, session_id")

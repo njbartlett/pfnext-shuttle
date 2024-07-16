@@ -8,7 +8,6 @@ use rocket::{
     request::{FromRequest, Outcome},
     response::status::Custom,
 };
-use rocket::response::status::Forbidden;
 use serde::{Deserialize, Serialize};
 use crate::AppState;
 
@@ -124,5 +123,59 @@ impl Claims {
 
         Ok(token)
     }
+
+    pub(crate) fn has_role(&self, required_role: &str) -> bool {
+        return self.roles.iter().any(|r| r == required_role);
+    }
+
+    pub(crate) fn assert_roles_contains(&self, required_role: &str) -> Result<(), Custom<String>> {
+        if !self.has_role(required_role) {
+            return Err(Custom(Status::Forbidden, format!("missing required role: {}", required_role)));
+        }
+        Ok(())
+    }
+
 }
 
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use chrono::Duration;
+    use rocket::http::Status;
+    use rocket::response::status::Custom;
+    use crate::claims::AuthenticationError;
+
+    use super::Claims;
+
+    #[test]
+    fn missing_bearer() {
+        let secrets = shuttle_runtime::SecretStore::new(BTreeMap::from([
+            ("TOKEN_KEY".to_owned(), "let me in".to_owned().into())
+        ]));
+        let claim_err = Claims::from_authorization("no-Bearer-prefix", &secrets).unwrap_err();
+
+        assert_eq!(claim_err, AuthenticationError::Missing);
+    }
+
+    #[test]
+    fn to_token_and_back() {
+        let claim = Claims::create(1, "joe@example.com", &vec!("member".to_string()), Duration::minutes(1));
+        let secrets = shuttle_runtime::SecretStore::new(BTreeMap::from([
+            ("TOKEN_KEY".to_owned(), "let me in".to_owned().into())
+        ]));
+        let token = claim.into_token(&secrets).unwrap();
+        let token = format!("Bearer {token}");
+
+        let claim = Claims::from_authorization(&token, &secrets).unwrap();
+
+        assert_eq!(claim.email, "joe@example.com");
+    }
+
+    #[test]
+    fn assert_roles_any() {
+        let claim = Claims::create(1, "joe@example.com", &vec!("member".to_string()), Duration::minutes(1));
+        assert_eq!(claim.assert_roles_contains("member"), Ok(()));
+        assert_eq!(claim.assert_roles_contains("admin"), Err(Custom(Status::Forbidden, "missing required role: admin".to_string())));
+    }
+
+}

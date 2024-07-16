@@ -37,12 +37,12 @@
     <!-- Main Content -->
     <div class="container-lg" v-cloak>
         <!-- REST errors -->
-        <div class="alert alert-danger shadow m-2 p-2" role="alert" v-if="http_err">
+        <div class="alert alert-danger shadow my-3" role="alert" v-if="http_err">
             {{http_err}}
         </div>
 
         <!-- Not logged in section -->
-        <div class="card border-danger shadow m-2 p-2" v-if="!auth">
+        <div class="card border-danger shadow my-3" v-if="!auth">
             <div class="card-body text-danger">
                 <p class="card-text">
                     You are not logged in. Please return to the <a href="login.html">login page</a>.
@@ -51,7 +51,7 @@
         </div> <!-- End not logged in section -->
 
         <!-- Logged in section -->
-        <div id="loggedInSection" v-if="auth">
+        <div id="loggedInSection" v-else>
             <!-- Welcome Header -->
             <div class="card shadow my-3">
                 <h5 class="card-header">Welcome, {{auth.name}}!</h5>
@@ -60,14 +60,8 @@
                 </div>
             </div>
 
-            <div v-if="http_err" class="my-2">
-                <div class="alert alert-danger">
-                    {{http_err}}
-                </div>
-            </div>
-
             <!-- Show sessions -->
-            <div v-else class="card shadow my-3">
+            <div class="card shadow my-3">
                 <h5 class="card-header"><i class="bi bi-list-check"></i> Sessions Available to Book</h5>
                 <div class="card-body">
                     <nav aria-label="Session Pagination">
@@ -85,7 +79,7 @@
                                 <th scope="col">Date & Time</th>
                                 <th scope="col">Trainer</th>
                                 <th scope="col">Type & Location</th>
-                                <th scope="col">Actions</th>
+                                <th v-if="auth.roles.includes('member')" scope="col">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -94,7 +88,7 @@
                                 <td>{{session.trainer.name}}</td>
                                 <td>{{session.session_type.name}}, <a :href="'http://www.google.com/maps/search/' + encodeURIComponent(session.location.address)" target="_blank">{{session.location.name}}</a></td>
                                 <!-- Member book/cancel -->
-                                <td>
+                                <td v-if="auth.roles.includes('member')">
                                     <span v-if="session.booked">
                                         <span>Booked!</span> <button class="btn btn-outline-danger btn-sm" @click="userCancelBooking(session)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</button>
                                     </span>
@@ -293,8 +287,8 @@
     </div> <!-- end main content -->
 
 </div> <!-- End App -->
-<div class="navbar-fixed-bottom">
-    &copy;2024 Neil Bartlett, all rights reserved. Page version 201
+<div style="position: absolute; bottom: 0;">
+    &copy;2024 Neil Bartlett, all rights reserved. Page version 202
 </div>
 </body>
 
@@ -547,9 +541,7 @@
                 }
             }
         })
-        .catch(error => error.text().then(text => {
-            console.log("Error: ", text)
-        }))
+        .catch(error => error.text().then(error_text => http_err.value = error_text))
         .then(_ => {
             loadSessionAttendees(session)
         })

@@ -53,26 +53,13 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
     }
 }
 
-fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>, to: Option<String>, qb: &'a mut QueryBuilder<Postgres>) -> Result<(), Custom<String>> {
-    qb.push("SELECT s.id, s.datetime, s.duration_mins, t.id as session_type_id, t.name as session_type_name, loc.id as location_id, loc.name as location_name, loc.address as location_address, trainer.id as trainer_id, trainer.name as trainer_name, trainer.email as trainer_email, \
-        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count");
-    if let Some(booking_person_id) = booking_person_id {
-        qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
-        qb.push_bind(booking_person_id);
-        qb.push(") THEN true ELSE false END AS booked");
-    }
-    qb.push(" FROM session as s, session_type as t, location as loc, person as trainer \
-        WHERE s.session_type = t.id AND s.location = loc.id AND s.trainer = trainer.id");
-
-    if let Some(from) = parse_opt_date(from)? {
-        qb.push(" AND s.datetime >= ");
-        qb.push_bind(from);
-    }
-    if let Some(to) = parse_opt_date(to)? {
-        qb.push(" AND s.datetime <= ");
-        qb.push_bind(to);
-    }
-    Ok(())
+#[derive(Deserialize, Debug)]
+struct NewSession {
+    datetime: DateTime<Utc>,
+    duration_mins: i32,
+    session_type_id: i32,
+    location_id: i32,
+    trainer_id: i64
 }
 
 #[get("/sessions?<from>&<to>")]
@@ -105,13 +92,26 @@ pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64
         .map(|r| Json(r))
 }
 
-#[derive(Deserialize, Debug)]
-struct NewSession {
-    datetime: DateTime<Utc>,
-    duration_mins: i32,
-    session_type_id: i32,
-    location_id: i32,
-    trainer_id: i64
+fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>, to: Option<String>, qb: &'a mut QueryBuilder<Postgres>) -> Result<(), Custom<String>> {
+    qb.push("SELECT s.id, s.datetime, s.duration_mins, t.id as session_type_id, t.name as session_type_name, loc.id as location_id, loc.name as location_name, loc.address as location_address, trainer.id as trainer_id, trainer.name as trainer_name, trainer.email as trainer_email, \
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count");
+    if let Some(booking_person_id) = booking_person_id {
+        qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
+        qb.push_bind(booking_person_id);
+        qb.push(") THEN true ELSE false END AS booked");
+    }
+    qb.push(" FROM session as s, session_type as t, location as loc, person as trainer \
+        WHERE s.session_type = t.id AND s.location = loc.id AND s.trainer = trainer.id");
+
+    if let Some(from) = parse_opt_date(from)? {
+        qb.push(" AND s.datetime >= ");
+        qb.push_bind(from);
+    }
+    if let Some(to) = parse_opt_date(to)? {
+        qb.push(" AND s.datetime <= ");
+        qb.push_bind(to);
+    }
+    Ok(())
 }
 
 #[post("/sessions", data="<new_session>")]
@@ -122,8 +122,8 @@ pub async fn create_session(
 ) -> Result<Created<Json<BigintRecord>>, Custom<String>> {
     // Admins can create any session. Trainers can only create sessions with themselves as the trainer.
     // Nobody else can create sessions.
-    if !claims.roles.contains(&"admin".to_string()) {
-        if claims.roles.contains(&"trainer".to_string()) {
+    if !claims.has_role("admin") {
+        if claims.has_role("trainer") {
             if !claims.uid.eq(&new_session.trainer_id) {
                 return Err(Custom(Status::Forbidden, "trainers can only create sessions for themselves".to_string()));
             }
@@ -195,8 +195,8 @@ pub async fn update_session(
     qb.push(" WHERE id = ");
     qb.push_bind(session_id);
 
-    if !claims.roles.contains(&"admin".to_string()) {
-        if claims.roles.contains(&"trainer".to_string()) {
+    if !claims.has_role("admin") {
+        if claims.has_role("trainer") {
             qb.push(" AND trainer = ");
             qb.push_bind(claims.uid);
         } else {
@@ -212,12 +212,6 @@ pub async fn update_session(
         .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not updatable by current user", session_id)))?;
     info!("Updating session id {} with data {:?}", id_record.id, new_session);
     Ok(NoContent)
-}
-
-#[derive(Serialize, Debug)]
-pub struct SessionDate {
-    date: chrono::NaiveDate,
-    sessions: Vec<SessionFullRecord>
 }
 
 #[get("/locations")]

@@ -54,7 +54,7 @@ pub struct LoginRequest {
 #[response(status = 200, content_type = "application/json")]
 pub struct LoginResponse {
     inner: Json<LoggedInUser>,
-    cookie: Header<'static>
+    // cookie: Header<'static>
 }
 
 #[derive(Serialize)]
@@ -81,16 +81,16 @@ impl LoginResponse {
         logged_in_user: LoggedInUser,
         secrets: &shuttle_runtime::SecretStore
     ) -> Result<Self, Custom<String>> {
-        let refresh_token = Claims::create(
-            logged_in_user.id,
-            &logged_in_user.email,
-            &logged_in_user.roles,
-            REFRESH_TOKEN_EXIRATION
-        ).into_token(secrets)?;
+        // let refresh_token = Claims::create(
+        //     logged_in_user.id,
+        //     &logged_in_user.email,
+        //     &logged_in_user.roles,
+        //     REFRESH_TOKEN_EXIRATION
+        // ).into_token(secrets)?;
         let cookie_expiry = Utc::now().add(REFRESH_TOKEN_EXIRATION);
         Ok(Self {
             inner: Json(logged_in_user),
-            cookie: Header::new("Set-Cookie", format!("refresh_token={};HttpOnly;Expires={}", refresh_token, cookie_expiry.to_rfc2822()))
+            // cookie: Header::new("Set-Cookie", format!("refresh_token={};HttpOnly;Expires={}", refresh_token, cookie_expiry.to_rfc2822()))
         })
     }
 }
@@ -385,7 +385,7 @@ impl FromRow<'_, PgRow> for User {
 
 #[get("/users/list?<role>")]
 pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<String>) -> Result<Json<Vec<User>>, Custom<String>> {
-    if !is_admin(&claim) {
+    if !claim.has_role("admin") {
         return Err(Custom(Status::Forbidden, "admin only".to_string()));
     }
 
@@ -421,9 +421,8 @@ fn build_login_response(
     login_record: UserLoginRecord,
     secrets: &shuttle_runtime::SecretStore
 ) -> Result<LoginResponse, Custom<String>> {
-    let roles = parse_roles(&login_record.roles);
-
     // Create access token
+    let roles = parse_roles(&login_record.roles);
     let access_token = Claims::create(login_record.id, &login_record.email, &roles, ACCESS_TOKEN_TTL).into_token(secrets)?;
 
     // Build login response body
@@ -431,7 +430,8 @@ fn build_login_response(
         id: login_record.id,
         name: login_record.name,
         email: login_record.email,
-        roles, access_token
+        roles,
+        access_token
     };
 
     LoginResponse::from_logged_in_user(body, secrets)
@@ -470,8 +470,4 @@ async fn send_email<'x>(
     client.send(message)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-}
-
-fn is_admin(claims: &Claims) -> bool {
-    claims.roles.contains(&"admin".to_string()) || claims.roles.contains(&"trainer".to_string())
 }

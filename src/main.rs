@@ -14,8 +14,6 @@ use rocket::serde::Serialize;
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
 use shuttle_runtime::CustomError;
 use sqlx::{Executor, FromRow, PgPool};
-use crate::claims::Claims;
-
 
 mod claims;
 mod sessions;
@@ -99,10 +97,6 @@ pub struct SessionLocation {
     address: String
 }
 
-
-fn is_admin(claims: &Claims) -> bool {
-    claims.roles.contains(&"admin".to_string()) || claims.roles.contains(&"trainer".to_string())
-}
 
 fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, Custom<String>> {
     if str.is_none() {
