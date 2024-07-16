@@ -1,5 +1,6 @@
 use chrono::{DateTime, FixedOffset, Utc};
 use rocket::form::validate::Contains;
+use rocket::futures::TryFutureExt;
 use rocket::http::hyper::body::HttpBody;
 use rocket::http::Status;
 use rocket::response::status::{Accepted, Created, Custom, NoContent, NotFound};
@@ -8,11 +9,11 @@ use rocket::serde::json::Json;
 use rocket::State;
 use serde::Serialize;
 use shuttle_runtime::__internals::tracing_subscriber::fmt::writer::OptionalWriter;
-use sqlx::{Error, FromRow, Postgres, query_as, QueryBuilder, Row};
+use sqlx::{Error, FromRow, PgPool, Postgres, query_as, QueryBuilder, Row};
 use sqlx::postgres::{PgArguments, PgRow};
 use sqlx::query::QueryAs;
 
-use crate::{AppState, BigintRecord, parse_opt_date, SessionLocation, SessionTrainer, SessionType};
+use crate::{AppState, BigintRecord, log_info, parse_opt_date, SessionLocation, SessionTrainer, SessionType};
 use crate::claims::Claims;
 
 #[derive(Serialize, Clone, Debug)]
@@ -21,8 +22,8 @@ pub struct SessionFullRecord {
     datetime: DateTime<Utc>,
     duration_mins: i32,
     session_type: SessionType,
-    location: SessionLocation,
-    trainer: SessionTrainer,
+    location: Option<SessionLocation>,
+    trainer: Option<SessionTrainer>,
     booked: bool,
     booking_count: i64,
     max_booking_count: Option<i64>,
@@ -31,24 +32,38 @@ pub struct SessionFullRecord {
 
 impl FromRow<'_, PgRow> for SessionFullRecord {
     fn from_row(row: &PgRow) -> Result<Self, Error> {
+        let session_id: i64 = row.try_get("id")?;
+        let trainer_id: Option<i64> = row.try_get("trainer_id").ok();
+        let trainer: Option<SessionTrainer> = match trainer_id {
+            Some(id) => Some(SessionTrainer {
+                id,
+                name: row.try_get("trainer_name")?,
+                email: row.try_get("trainer_email")?,
+            }),
+            None => None
+        };
+
+        let location_id: Option<i32> = row.try_get("location_id").ok();
+        let location: Option<SessionLocation> = match location_id {
+            Some(id) => Some(SessionLocation{
+                id,
+                name: row.try_get("location_name")?,
+                address: row.try_get("location_address")?
+            }),
+            None => None
+        };
+
         Ok(SessionFullRecord {
-            id: row.try_get("id")?,
+            id: session_id,
             datetime: row.try_get("datetime")?,
             duration_mins: row.try_get("duration_mins")?,
             session_type: SessionType{
                 id: row.try_get("session_type_id")?,
-                name: row.try_get("session_type_name")?
+                name: row.try_get("session_type_name")?,
+                requires_trainer: row.try_get("session_type_requires_trainer").ok().unwrap_or(true)
             },
-            location: SessionLocation {
-                id: row.try_get("location_id")?,
-                name: row.try_get("location_name")?,
-                address: row.try_get("location_address")?
-            },
-            trainer: SessionTrainer {
-                id: row.try_get("trainer_id")?,
-                name: row.try_get("trainer_name")?,
-                email: row.try_get("trainer_email")?,
-            },
+            location,
+            trainer,
             booked: row.try_get("booked").ok().unwrap_or(false),
             booking_count: row.try_get("booking_count")?,
             max_booking_count: row.try_get("max_booking_count").ok(),
@@ -62,10 +77,24 @@ struct NewSession {
     datetime: DateTime<Utc>,
     duration_mins: i32,
     session_type_id: i32,
-    location_id: i32,
-    trainer_id: i64,
+    location_id: Option<i32>,
+    trainer_id: Option<i64>,
     max_bookings: Option<i64>,
     notes: Option<String>
+}
+
+impl NewSession {
+    async fn validate(self: &Self, pool: &PgPool) -> Result<(), String> {
+        if self.trainer_id.is_none() {
+            let session_type: SessionType = SessionType::find_by_id(pool, self.session_type_id)
+                .await?
+                .ok_or(format!("Session type not found with id {}", self.session_type_id))?;
+            if session_type.requires_trainer {
+                return Err(format!("Sessions of type '{}' require a trainer.", session_type.name));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[get("/sessions?<from>&<to>")]
@@ -86,7 +115,7 @@ pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<
 pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64) -> Result<Json<SessionFullRecord>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
     build_session_query(Some(claim.uid), None, None, &mut qb)?;
-    qb.push(" AND s.id = ");
+    qb.push(" WHERE s.id = ");
     qb.push_bind(session_id);
     info!("build_session_query compiled SQL: {}", qb.sql());
 
@@ -99,22 +128,37 @@ pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64
 }
 
 fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>, to: Option<String>, qb: &'a mut QueryBuilder<Postgres>) -> Result<(), Custom<String>> {
-    qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, t.id as session_type_id, t.name as session_type_name, loc.id as location_id, loc.name as location_name, loc.address as location_address, trainer.id as trainer_id, trainer.name as trainer_name, trainer.email as trainer_email, \
+    qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, \
+        t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, \
+        loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, \
+        trainer.id AS trainer_id, trainer.name AS trainer_name, trainer.email AS trainer_email, \
         (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count, s.max_booking_count as max_booking_count");
+
     if let Some(booking_person_id) = booking_person_id {
         qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
         qb.push_bind(booking_person_id);
         qb.push(") THEN true ELSE false END AS booked");
     }
-    qb.push(" FROM session as s, session_type as t, location as loc, person as trainer \
-        WHERE s.session_type = t.id AND s.location = loc.id AND s.trainer = trainer.id");
 
-    if let Some(from) = parse_opt_date(from)? {
-        qb.push(" AND s.datetime >= ");
+    qb.push(" FROM session as s \
+        INNER JOIN session_type AS t ON s.session_type = t.id \
+        LEFT JOIN location AS loc ON s.location = loc.id \
+        LEFT JOIN person AS trainer ON s.trainer = trainer.id");
+
+    let parsed_from = parse_opt_date(from)?;
+    let parsed_to = parse_opt_date(to)?;
+    if let Some(from) = parsed_from {
+        qb.push(" WHERE s.datetime >= ");
         qb.push_bind(from);
     }
-    if let Some(to) = parse_opt_date(to)? {
-        qb.push(" AND s.datetime <= ");
+    if let Some(to) = parsed_to {
+        let operator: String;
+        if parsed_from.is_some() {
+            operator = String::from(" AND");
+        } else {
+            operator = String::from(" WHERE");
+        }
+        qb.push(operator + " s.datetime <= ");
         qb.push_bind(to);
     }
     Ok(())
@@ -130,13 +174,17 @@ pub async fn create_session(
     // Nobody else can create sessions.
     if !claims.has_role("admin") {
         if claims.has_role("trainer") {
-            if !claims.uid.eq(&new_session.trainer_id) {
+            if !Some(claims.uid).eq(&new_session.trainer_id) {
                 return Err(Custom(Status::Forbidden, "trainers can only create sessions for themselves".to_string()));
             }
         } else {
             return Err(Custom(Status::Forbidden, "only admins or trainers can create sessions".to_string()));
         }
     }
+
+    new_session.validate(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 
     let id_record: BigintRecord = query_as("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id")
         .bind(&new_session.datetime)
@@ -219,6 +267,10 @@ pub async fn update_session(
     }
     qb.push(" RETURNING id");
 
+    new_session.validate(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
+
     let id_record: BigintRecord = qb.build_query_as()
         .fetch_optional(&state.pool)
         .await
@@ -239,7 +291,7 @@ pub async fn list_locations(state: &State<AppState>) -> Result<Json<Vec<SessionL
 
 #[get("/session_types")]
 pub async fn list_session_types(state: &State<AppState>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
-    query_as("SELECT id, name FROM session_type")
+    query_as("SELECT id, name, requires_trainer FROM session_type")
         .fetch_all(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))

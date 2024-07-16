@@ -22,7 +22,8 @@ pub struct PersonRow {
 #[derive(FromRow, Serialize)]
 pub struct SessionTypeRow {
     id: i32,
-    name: String
+    name: String,
+    requires_trainer: bool
 }
 
 #[derive(FromRow, Serialize)]

@@ -123,8 +123,8 @@
                 <div class="mb-2"> <!-- trainer row -->
                     <label for="editSessionTrainer" class="form-label">Trainer</label>
                     <select id="editSessionTrainer" class="form-control" :class="{'is-invalid': session_data_validation.trainer_id}" v-model="session_data.trainer_id" required>
-                        <option disabled value="">Select trainer&hellip;</option>
                         <option v-for="trainer in admin_trainer_list" :value="trainer.id">{{trainer.name}}</option>
+                        <option :value="null">None</option>
                     </select>
                     <div class="invalid-feedback">
                         {{session_data_validation.trainer_id}}
@@ -134,8 +134,8 @@
                 <div class="mb-2"> <!-- location row -->
                     <label for="editSessionLocation" class="form-label">Location</label>
                     <select id="editSessionLocation" class="form-control" :class="{'is-invalid': session_data_validation.location_id}" v-model="session_data.location_id" required>
-                        <option disabled value="">Select location&hellip;</option>
                         <option v-for="location in admin_location_list" :value="location.id">{{location.name}}</option>
+                        <option :value="null">None/Other</option>
                     </select>
                     <div class="invalid-feedback">
                         {{session_data_validation.location_id}}
@@ -184,7 +184,6 @@
                 </div>
             </form>
         </div> <!-- end logged in section -->
-
     </div> <!-- end main content -->
 
 </div> <!-- end vue app -->
@@ -394,10 +393,23 @@
     function validateEditSession(new_data, val) {
         val.date = new_data.date ? null : "Date is required"
         val.time = new_data.time ? null : "Time is required"
-        val.session_type_id = new_data.session_type_id ? null : "Session type must be selected"
+
+        val.trainer_id = null
+        if (new_data.session_type_id) {
+            val.session_type_id = null
+            if (new_data.trainer_id === null) {
+                for (var session_type of admin_session_type_list.value) {
+                    if (session_type.id === new_data.session_type_id && session_type.requires_trainer) {
+                        val.trainer_id = "Sessions of type '" + session_type.name + "' require a trainer to be selected."
+                    }
+                }
+            }
+        } else {
+            val.session_type_id = "Session type must be selected"
+        }
         val.duration_mins = new_data.duration_mins !== null && new_data.duration_mins >= 0 ? null : "Duration must be positive"
-        val.trainer_id = new_data.trainer_id ? null : "Trainer must be selected"
-        val.location_id = new_data.location_id ? null : "Location must be selected"
+        // val.trainer_id = new_data.trainer_id ? null : "Trainer must be selected"
+        // val.location_id = new_data.location_id ? null : "Location must be selected"
         val.max_bookings = (!new_data.max_bookings_enabled || (new_data.max_bookings !== null && new_data.max_bookings >= 0)) ? null : "Max bookings must be positive if enabled"
 
         val.ready = val.date === null &&
@@ -405,7 +417,7 @@
             val.session_type_id === null &&
             val.duration_mins === null &&
             val.trainer_id === null &&
-            val.location_id === null &&
+            // val.location_id === null &&
             val.max_bookings === null
     }
 

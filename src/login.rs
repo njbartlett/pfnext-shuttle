@@ -23,7 +23,7 @@ use urlencoding::encode;
 use crate::{AppState, CountResult};
 use crate::claims::Claims;
 
-const ACCESS_TOKEN_TTL: Duration = Duration::hours(2);
+const ACCESS_TOKEN_TTL: Duration = Duration::hours(3);
 const REFRESH_TOKEN_EXIRATION: Duration = Duration::days(1);
 
 const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {

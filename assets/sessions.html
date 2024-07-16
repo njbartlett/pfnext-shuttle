@@ -117,9 +117,9 @@
                 <thead>
                     <tr>
                         <th scope="col">When</th>
-                        <th scope="col">Who</th>
+                        <th scope="col">Trainer</th>
                         <th scope="col">What &amp; Where</th>
-                        <th scope="col"></th>
+                        <th scope="col"></th> <!-- empty label for attendance count badge -->
                         <th v-if="auth.roles.includes('member')" scope="col">Actions</th>
                         <th v-if="isAdmin(auth)" scope="col"></th>
                     </tr>
@@ -127,8 +127,14 @@
                 <tbody v-for="session in session_data">
                     <tr class="border-top" :class="{'session-past': isPast(session.datetime), 'border-bottom': !session.notes}">
                         <td :rowspan="session.notes ? 2 : 1">{{displayDate(session.datetime)}} {{displayTime(session.datetime)}}</td>
-                        <td :rowspan="session.notes ? 2 : 1">{{session.trainer.name}}</td>
-                        <td>{{session.session_type.name}}, <a :href="'http://www.google.com/maps/search/' + encodeURIComponent(session.location.address)" target="_blank">{{session.location.name}}</a></td>
+                        <td :rowspan="session.notes ? 2 : 1">
+                            <div v-if="session.trainer">{{session.trainer.name}}</div>
+                            <div v-else>N/A</div>
+                        </td>
+                        <td>
+                            <span>{{session.session_type.name}}</span>
+                            <span v-if="session.location">, {{session.location.name}}</span>
+                        </td>
                         <td>
                             <span v-if="session.max_booking_count" class="badge rounded-pill"
                                   :class="{'text-bg-danger': session.booking_count >= session.max_booking_count, 'text-bg-primary': session.booking_count < session.max_booking_count}"
@@ -167,8 +173,8 @@
                             </div>
                         </td>
                     </tr>
-                    <tr v-if="session.notes" class="border-bottom">
-                        <td colspan="10">{{session.notes}}</td>
+                    <tr v-if="session.notes" class="border-bottom" :class="{'session-past': isPast(session.datetime)}">
+                        <td colspan="4"><i class="bi bi-info-circle"></i> {{session.notes}}</td>
                     </tr>
                 </tbody>
             </table>

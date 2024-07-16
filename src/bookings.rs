@@ -28,13 +28,23 @@ pub struct SessionBookingFull {
     session_id: i64,
     session_datetime: DateTime<Utc>,
     session_duration_mins: i32,
-    session_location: SessionLocation,
+    session_location: Option<SessionLocation>,
     session_type: SessionType,
     attended: bool
 }
 
 impl FromRow<'_, PgRow> for SessionBookingFull {
     fn from_row(row: &'_ PgRow) -> Result<Self, Error> {
+        let location_id: Option<i32> = row.try_get("session_location_id").ok();
+        let location: Option<SessionLocation> = match location_id {
+            Some(id) => Some(SessionLocation{
+                id,
+                name: row.try_get("session_location_name")?,
+                address: row.try_get("session_location_address")?,
+            }),
+            None => None
+        };
+
         Ok(SessionBookingFull {
             person_id: row.try_get("person_id")?,
             person_name: row.try_get("person_name")?,
@@ -42,14 +52,11 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
             session_id: row.try_get("session_id")?,
             session_datetime: row.try_get("session_datetime")?,
             session_duration_mins: row.try_get("session_duration_mins")?,
-            session_location: SessionLocation {
-                id: row.try_get("session_location_id")?,
-                name: row.try_get("session_location_name")?,
-                address: row.try_get("session_location_address")?,
-            },
+            session_location: location,
             session_type: SessionType{
                 id: row.try_get("session_type_id")?,
-                name: row.try_get("session_type_name")?
+                name: row.try_get("session_type_name")?,
+                requires_trainer: row.try_get("session_type_requires_trainer").ok().unwrap_or(true)
             },
             attended: row.try_get("attended").ok().unwrap_or(false)
         })
@@ -65,39 +72,46 @@ pub async fn list_bookings(
     from: Option<String>,
     to: Option<String>
 ) -> Result<Json<Vec<SessionBookingFull>>, Custom<String>> {
-    let mut qb = QueryBuilder::new("SELECT b.person_id, p.name as person_name, p.email as person_email, b.session_id, \
-                s.datetime as session_datetime, s.duration_mins as session_duration_mins, s.location as session_location_id, l.name as session_location_name, l.address as session_location_address, \
-                s.session_type as session_type_id, t.name as session_type_name, b.attended as attended \
-            FROM booking as b, person as p, session as s, location as l, session_type as t \
-            WHERE b.person_id = p.id \
-            AND b.session_id = s.id \
-            AND s.location = l.id \
-            AND s.session_type = t.id");
+    let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, \
+                s.datetime AS session_datetime, s.duration_mins AS session_duration_mins, s.location AS session_location_id, l.name AS session_location_name, l.address AS session_location_address, \
+                s.session_type AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, b.attended \
+            FROM booking as b \
+            JOIN person AS p ON b.person_id = p.id \
+            JOIN session AS s ON b.session_id = s.id \
+            JOIN session_type AS t ON s.session_type = t.id \
+            LEFT JOIN location AS l ON s.location = l.id ");
+
+    let mut where_op = String::from(" WHERE");
 
     if let Some(person_id) = person_id {
         if person_id != claim.uid && !claim.has_role("admin") {
             return Err(Custom(Status::Forbidden, "only admins can view bookings for other users".to_string()))
         }
-        qb.push(" AND b.person_id = ");
+        qb.push(where_op + " b.person_id = ");
         qb.push_bind(person_id);
+        where_op = String::from(" AND");
     } else if !claim.has_role("admin") {
         return Err(Custom(Status::Forbidden, "only admins can view bookings for other users".to_string()))
     }
 
     if let Some(session_id) = session_id {
-        qb.push(" AND b.session_id = ");
+        qb.push(where_op + " b.session_id = ");
         qb.push_bind(session_id);
+        where_op = String::from(" AND");
     }
     if let Some(from) = parse_opt_date(from)? {
-        qb.push(" AND s.datetime >= ");
+        qb.push(where_op + " s.datetime >= ");
         qb.push_bind(from);
+        where_op = String::from(" AND");
     }
     if let Some(to) = parse_opt_date(to)? {
-        qb.push(" AND s.datetime <= ");
+        qb.push(where_op + " s.datetime <= ");
         qb.push_bind(to);
+        where_op = String::from(" AND");
     }
 
     qb.push(" ORDER BY session_datetime, person_name");
+    info!("list_bookings compiled SQL: {}", qb.sql());
     let bookings = qb.build_query_as()
         .fetch_all(&state.pool)
         .await

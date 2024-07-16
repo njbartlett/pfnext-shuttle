@@ -19,8 +19,9 @@ use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins};
 use serde::Deserialize;
 use shuttle_runtime::CustomError;
 use shuttle_runtime::Error::StringInterpolation;
-use sqlx::{Executor, FromRow, PgPool};
+use sqlx::{Column, Executor, FromRow, PgPool, query, query_as, Row};
 use sqlx::migrate::MigrationSource;
+use sqlx::postgres::PgRow;
 use crate::claims::AuthenticationError;
 
 mod claims;
@@ -132,7 +133,18 @@ struct BigintRecord {
 #[derive(FromRow, Serialize, Clone, Debug)]
 pub struct SessionType {
     id: i32,
-    name: String
+    name: String,
+    requires_trainer: bool
+}
+
+impl SessionType {
+    async fn find_by_id(pool: &PgPool, id: i32) -> Result<Option<Self>, String> {
+        query_as("SELECT * FROM session_type WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -162,4 +174,11 @@ fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, 
     println!("Parsed input {:?} to {:?}", &str, parsed);
     //.map_err(|e| BadRequest(e.to_string()))?;
     Ok(Some(parsed.map_err(|e| Custom(Status::UnprocessableEntity, e.to_string()))?))
+}
+
+fn log_info(row: &PgRow) -> () {
+    let cols = row.columns();
+    for col in cols {
+        info!("Column: {}", col.name())
+    }
 }

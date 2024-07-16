@@ -95,6 +95,7 @@
                 <thead>
                     <tr>
                         <th scope="col">Date & Time</th>
+                        <th scope="col">Type</th>
                         <th scope="col">Location</th>
                         <th v-if="bookings_pagination.past" scope="col">Attended?</th>
                         <th scope="col"></th>
@@ -103,7 +104,8 @@
                 <tbody>
                     <tr v-for="booking in bookings_list">
                         <td>{{displayDate(booking.session_datetime)}} at {{displayTime(booking.session_datetime)}}</td>
-                        <td><a :href="'http://www.google.com/maps/search/' + encodeURIComponent(booking.session_location.address)" target="_blank">{{booking.session_location.name}}</a></td>
+                        <td>{{booking.session_type.name}}</td>
+                        <td><a v-if="booking.session_location" :href="'http://www.google.com/maps/search/' + encodeURIComponent(booking.session_location.address)" target="_blank">{{booking.session_location.name}}</a></td>
                         <td v-if="bookings_pagination.past">
                             <span v-if="booking.attended" class="text-success"><i class="bi bi-check-circle"> Attended</i></span>
                             <span v-else class="text-danger"><i class="bi bi-x-circle"> Didn't Attend</i></span>
