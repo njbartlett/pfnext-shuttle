@@ -117,7 +117,7 @@ async fn rocket(
             login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::list_users, login::delete_user, login::update_user,
             sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session,
             sessions::list_locations, sessions::list_session_types, sessions::update_session,
-            bookings::list_bookings, bookings::create_booking, bookings::delete_booking, bookings::update_booking,
+            bookings::list_bookings, bookings::create_booking, bookings::delete_booking, bookings::update_booking, bookings::get_attendance_stats,
             backup::backup_all
         ])
         .manage(state);

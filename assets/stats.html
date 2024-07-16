@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>Another Level &dash; Bookings</title>
+    <title>Another Level &dash; Attendance stats</title>
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
@@ -22,6 +22,7 @@
     <script src="js/popper.min.js"></script>
     <script src="js/bootstrap.min.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/lodash.min.js"></script>
 </head>
 
 <body>
@@ -40,7 +41,7 @@
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
-                    <li class="nav-item"><a class="nav-link active" aria-current="page">Bookings</a></li>
+                    <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
                     <!-- Admin only links -->
                     <li v-cloak v-if="isAdmin(auth)" class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
@@ -55,16 +56,12 @@
                     <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
                     <button id="logout" type="button" class="btn btn-outline-danger" @click="onLogout">Logout</button>
                 </div>
-                <div v-else class="btn-group" role="group">
-                    <a id="navbarLogin" class="btn btn-primary" href="login.html">Login</a>
-                    <a id="navbarRegister" class="btn btn-primary" href="register.html">Register</a>
-                </div>
             </div>
         </div>
     </nav>
 
     <!-- Main Content -->
-    <div class="container-fluid" v-cloak>
+    <div class="container-lg" v-cloak>
         <!-- REST errors -->
         <div v-if="http_err" class="alert alert-danger my-2" role="alert">
             <div v-if="'authorization token expired' === http_err">
@@ -86,42 +83,48 @@
 
         <!-- Logged in section -->
         <div id="loggedInSection" v-if="auth">
-            <!-- Show bookings -->
-            <h2 class="my-3">My Bookings</h2>
-            <!-- booking table pagination -->
-            <nav aria-label="Bookings Navigation">
-                <ul class="pagination justify-content-center">
-                    <li class="page-item" :class="{ active: bookings_pagination.past }"><a class="page-link" @click.stop="setPagePast">Past</a></li>
-                    <li class="page-item" :class="{ active: !bookings_pagination.past }"><a class="page-link" @click.stop="setPageFuture">Upcoming</a></li>
-                </ul>
-            </nav> <!-- end booking table pagination -->
-
-            <!-- bookings table -->
-            <table class="table table-hover table-sm">
+            <h2>Attendance Stats</h2>
+            <div class="card my-2">
+                <h6 class="card-header">Date Range</h6>
+                <div class="card-body">
+                    <form>
+                        <div class="row">
+                            <div class="col">
+                                <label for="fromDate" class="form-label">From</label>
+                                <input id="fromDate" class="form-control" type="date" v-model="filter.from">
+                            </div>
+                            <div class="col">
+                                <label for="toDate" class="form-label">To</label>
+                                <input id="toDate" class="form-control" type="date" v-model="filter.to">
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="card my-2">
+                <h6 class="card-header">Included Session Types:</h6>
+                <div class="card-body">
+                    <div v-for="session_type in session_types" class="form-check">
+                        <input type="checkbox" class="form-check-input" v-model="session_type.enabled"> <!--@click="selectSessionType(session_type)"> -->
+                        <label class="form-check-label">{{session_type.name}}</label>
+                    </div>
+                </div>
+            </div>
+            <table class="table table-hover">
                 <thead>
                     <tr>
-                        <th scope="col">Date & Time</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Location</th>
-                        <th v-if="bookings_pagination.past" scope="col">Attended?</th>
-                        <th scope="col"></th>
+                        <th scope="col">Name</th>
+                        <th scope="col">Attended</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="booking in bookings_list">
-                        <td>{{displayDate(booking.session_datetime)}} at {{displayTime(booking.session_datetime)}}</td>
-                        <td>{{booking.session_type.name}}</td>
-                        <td><a v-if="booking.session_location" :href="'http://www.google.com/maps/search/' + encodeURIComponent(booking.session_location.address)" target="_blank">{{booking.session_location.name}}</a></td>
-                        <td v-if="bookings_pagination.past">
-                            <span v-if="booking.attended" class="text-success"><i class="bi bi-check-circle"> Attended</i></span>
-                            <span v-else class="text-danger"><i class="bi bi-x-circle"> Didn't Attend</i></span>
-                        </td>
-                        <td><a href="#" class="link-danger" :class="{'d-none': bookings_pagination.past}" @click.prevent="cancelBooking(booking)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a></td>
+                    <tr v-for="stat in stats_data">
+                        <td>{{stat.name}}</td>
+                        <td>{{stat.attended_count}}</td>
                     </tr>
                 </tbody>
             </table>
         </div> <!-- End logged in section -->
-
     </div> <!-- end main content -->
 </div> <!-- end Vue app -->
 
@@ -135,19 +138,17 @@
 <script type="module">
     import { createApp, reactive, ref, watch } from './js/vue.esm-browser.js'
 
-    // Current user information
     const auth = ref(null)
     const http_err = ref(null)
-    const bookings_list = ref([])
-    const bookings_pagination = ref({
-        past: false
+    const session_types = reactive([])
+    const filter = reactive({
+        from: null,
+        to: null
     })
+    const stats_data = ref([])
 
-    async function loadBookings() {
-        let date_query = bookings_pagination.value.past ? "to" : "from"
-        let now = new Date()
-        http_err.value = null
-        fetch(SERVER_URL + "/bookings?person_id=" + auth.value.id + "&" + date_query + "=" + now.toISOString(), {
+    async function loadSessionTypes() {
+        return fetch(SERVER_URL + "/session_types", {
             headers: {
                 'Authorization': 'Bearer ' + auth.value.access_token
             },
@@ -156,58 +157,55 @@
         }).then(res => {
             if (!res.ok) throw res
             return res.json()
-        }).then(bookings => {
-            bookings_list.value = bookings
-        }).catch(err => {
-            err.text().then(error_text => http_err.value = error_text)
         })
     }
 
-    async function cancelBooking(booking) {
-        http_err.value = null
-        fetch(SERVER_URL + "/bookings?person_id=" + booking.person_id + "&session_id=" + booking.session_id, {
-            method: "DELETE",
-            headers: {
-                'Authorization': 'Bearer ' + auth.value.access_token
-            },
-            withCredentials: true,
-            credentials: 'include'
-        }).then(res => {
-            if (!res.ok) throw res
-            return res.json()
-        }).then(deleted_booking => {
-            if (deleted_booking && deleted_booking.person_id === booking.person_id && deleted_booking.session_id === booking.session_id) {
-                let index = bookings_list.value.indexOf(booking)
-                if (index >= 0) {
-                    bookings_list.value.splice(index, 1)
-                }
+    async function loadStats() {
+        let urlParams = new URLSearchParams()
+        if (filter.from) {
+            let from = new Date(filter.from + " 00:00:00Z")
+            urlParams.set("from", from.toISOString())
+        }
+        if (filter.to) {
+            let to = new Date(filter.to + " 23:59:59Z")
+            urlParams.set("to", to.toISOString())
+        }
+        for (let session_type of session_types) {
+            if (session_type.enabled) {
+                urlParams.append("session_type", session_type.id)
             }
+        }
+        let url = SERVER_URL + "/stats/attendance?" + urlParams.toString()
+        console.log("(Re)loading stats...", url)
+        return fetch(url, {
+            headers: {
+                'Authorization': 'Bearer ' + auth.value.access_token
+            },
+            withCredentials: true,
+            credentials: 'include'
+        }).then(res => {
+            if (!res.ok) throw res
+            return res.json()
         }).catch(err => {
-            err.text().then(error_text => http_err.value = error_text)
+            err.text().then(err_text => http_err.value = err_text)
         })
-    }
-
-    function setPageFuture() {
-        bookings_pagination.value.past = false
-        loadBookings()
-    }
-
-    function setPagePast() {
-        bookings_pagination.value.past = true
-        loadBookings()
     }
 
     function isAdmin(auth) {
         return auth && auth.roles && (auth.roles.includes('admin') || auth.roles.includes('trainer'))
     }
 
+    function onFilterModified() {
+        loadStats().then(stats => stats_data.value = stats)
+    }
+
+    watch(filter, onFilterModified)
+
     createApp({
         setup() {
             return {
-                auth, http_err, onLogout,
-                bookings_list, cancelBooking,
-                bookings_pagination, setPageFuture, setPagePast,
-                displayDate, displayTime, isAdmin, encodeLoginReturnUrl
+                auth, http_err, session_types, filter, stats_data,
+                onLogout, isAdmin, encodeLoginReturnUrl
             }
         }
     }).mount('#app')
@@ -215,7 +213,17 @@
     let jwtRaw = localStorage.getItem("jwt")
     if (jwtRaw) {
         auth.value = JSON.parse(jwtRaw)
-        loadBookings()
+        loadSessionTypes().then(json => {
+            for (let session_type of json) {
+                session_types.push({
+                    id: session_type.id,
+                    name: session_type.name,
+                    enabled: true
+                })
+            }
+            watch(session_types, onFilterModified)
+            return loadStats()
+        }).then(stats => stats_data.value = stats)
     } else {
         auth.value = null
     }

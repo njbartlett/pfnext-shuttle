@@ -27,10 +27,11 @@
             -moz-appearance: textfield;
         }
         input[type="checkbox"].larger {
-            width: 1.5rem;
-            height: 1.5rem;
+            width: 1.75rem;
+            height: 1.75rem;
         }
     </style>
+    <script src="js/popper.min.js"></script>
     <script src="js/bootstrap.min.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/lodash.min.js"></script>
@@ -53,9 +54,14 @@
                     <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
-                    <div v-cloak v-if="isAdmin(auth)"> <!-- Admin only links -->
-                        <li class="nav-item"><a class="nav-link" href="members.html">Members</a></li>
-                    </div>
+                    <!-- Admin only links -->
+                    <li v-cloak v-if="isAdmin(auth)" class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="members.html">Member Directory</a></li>
+                            <li><a class="dropdown-item" href="stats.html">Attendance Stats</a></li>
+                        </ul>
+                    </li>
                     <li class="nav-item"><a class="nav-link" href="https://chat.whatsapp.com/CPjp84Qz6uM5t9Oq88Qb4Q" target="_blank"><i class="bi bi-question-circle"></i>&nbsp;Help</a></li>
                 </ul>
                 <div v-cloak v-if="auth">
@@ -75,7 +81,7 @@
         <!-- REST errors -->
         <div v-if="http_err" class="alert alert-danger my-2" role="alert">
             <div v-if="'authorization token expired' === http_err">
-                Your login session has expired, please <a href="login.html">login again</a>.
+                Your login session has expired, please <a :href="'login.html?return=' + encodeLoginReturnUrl()">login again</a>.
             </div>
             <div v-else>
                 {{http_err}}
@@ -86,7 +92,7 @@
         <div class="alert alert-danger my-2" role="alert" v-if="!auth">
             <div class="card-body text-danger">
                 <p class="card-text">
-                    You are not logged in. Please return to the <a href="login.html">login page</a>.
+                    You are not logged in. Please return to the <a :href="'login.html?return=' + encodeLoginReturnUrl()">login page</a>.
                 </p>
             </div>
         </div> <!-- End not logged in section -->
@@ -106,14 +112,14 @@
                     </thead>
                     <tbody>
                     <tr v-for="booking in bookings">
-                        <td>{{booking.person_name}} &lt;{{booking.person_email}}&gt;</td>
-                        <td><form><input type="checkbox" class="form-check larger" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
-                        <td><a href="#" class="link-danger" @click.prevent="removeMember(session.id, booking.person_id)">Cancel</a></td>
+                        <td>{{booking.person_name}}</td>
+                        <td><form><input type="checkbox" class="form-check larger align-middle" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
+                        <td><button type="button" class="btn btn-outline-danger btn-sm float-end" @click="removeMember(session.id, booking.person_id)"><i class="bi bi-trash"></i></button></td>
                     </tr>
 
                     <!-- Add Member Row -->
                     <tr>
-                        <td>
+                        <td colspan="3">
                             <form>
                                 <div class="input-group m-0 p-0">
                                     <input id="addMemberToSessionInput" type="search" class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="addMemberInput">
@@ -330,7 +336,7 @@
         setup() {
             return {
                 http_err, auth, session, bookings, adding_user, all_user_data,
-                isAdmin, onLogout, displayTime, displayDate, addMemberInput, addMember, removeMember, toggleAttendance
+                isAdmin, onLogout, displayTime, displayDate, addMemberInput, addMember, removeMember, toggleAttendance, encodeLoginReturnUrl
             }
         }
     }).mount('#app')

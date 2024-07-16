@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use rocket::form::FromForm;
 use rocket::futures::{Stream, StreamExt};
 use rocket::futures::stream::BoxStream;
 use rocket::http::Status;
@@ -228,4 +229,59 @@ pub async fn update_booking(state: &State<AppState>, claim: Claims, person_id: i
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::NotFound, format!("no booking found with person_id={} and session_id={}", person_id, session_id)))?;
     Ok(NoContent)
+}
+
+#[derive(Serialize, FromRow)]
+pub struct AttendanceStat {
+    person_id: i64,
+    name: String,
+    email: String,
+    attended_count: i64
+}
+
+#[get("/stats/attendance?<from>&<to>&<session_type>")]
+pub async fn get_attendance_stats(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>, session_type: Vec<i32>) -> Result<Json<Vec<AttendanceStat>>, Custom<String>> {
+    claim.assert_roles_contains("admin")?;
+    let mut qb = QueryBuilder::new("\
+        SELECT p.id AS person_id, p.name AS name, p.email AS email, ( \
+            SELECT COUNT(*) \
+            FROM booking \
+            JOIN session ON booking.session_id = session.id \
+            WHERE booking.person_id = p.id \
+            AND booking.attended = TRUE ");
+
+    if let Some(from) = parse_opt_date(from)? {
+        qb.push(" AND session.datetime >= ");
+        qb.push_bind(from);
+    }
+    if let Some(to) = parse_opt_date(to)? {
+        qb.push(" AND session.datetime <= ");
+        qb.push_bind(to);
+    }
+
+    if !session_type.is_empty() {
+        let session_types_str = session_type.into_iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        qb.push(" AND session.session_type IN (");
+        qb.push(session_types_str);
+        qb.push(")");
+    } else {
+        // Cannot write "IN ()" so we create a clause that is always false
+        qb.push(" AND FALSE");
+    }
+
+
+    qb.push(") AS attended_count \
+        FROM person AS p \
+        ORDER BY attended_count DESC, name");
+    info!("fetching: {}", qb.sql());
+
+    let stats = qb.build_query_as()
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+
+    Ok(Json(stats))
 }

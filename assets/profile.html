@@ -32,6 +32,7 @@
         }
 
     </style>
+    <script src="js/popper.min.js"></script>
     <script src="js/bootstrap.min.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/lodash.min.js"></script>
@@ -54,9 +55,14 @@
                     <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
-                    <div v-cloak v-if="isAdmin(auth)"> <!-- Admin only links -->
-                        <li class="nav-item"><a class="nav-link" href="members.html">Members</a></li>
-                    </div>
+                    <!-- Admin only links -->
+                    <li v-cloak v-if="isAdmin(auth)" class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="members.html">Member Directory</a></li>
+                            <li><a class="dropdown-item" href="stats.html">Attendance Stats</a></li>
+                        </ul>
+                    </li>
                     <li class="nav-item"><a class="nav-link" href="https://chat.whatsapp.com/CPjp84Qz6uM5t9Oq88Qb4Q" target="_blank"><i class="bi bi-question-circle"></i>&nbsp;Help</a></li>
                 </ul>
                 <div v-cloak v-if="auth">
@@ -72,7 +78,7 @@
         <!-- REST errors -->
         <div v-if="http_err" class="alert alert-danger my-2" role="alert">
             <div v-if="'authorization token expired' === http_err">
-                Your login session has expired, please <a href="login.html">login again</a>.
+                Your login session has expired, please <a :href="'login.html?return=' + encodeLoginReturnUrl()">login again</a>.
             </div>
             <div v-else>
                 {{http_err}}
@@ -83,7 +89,7 @@
         <div class="alert alert-danger my-2" role="alert" v-if="!auth">
             <div class="card-body text-danger">
                 <p class="card-text">
-                    You are not logged in. Please return to the <a href="login.html">login page</a>.
+                    You are not logged in. Please return to the <a :href="'login.html?return=' + encodeLoginReturnUrl()">login page</a>.
                 </p>
             </div>
         </div> <!-- End not logged in section -->
@@ -272,7 +278,7 @@
         setup() {
             return {
                 auth, http_err, reset_password_message, delete_profile, delete_profile_message,
-                onResetPassword, onLogout, onDeleteProfile, isAdmin
+                onResetPassword, onLogout, onDeleteProfile, isAdmin, encodeLoginReturnUrl
             }
         }
     }).mount('#app')

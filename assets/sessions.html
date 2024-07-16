@@ -53,9 +53,14 @@
                     <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link active" aria-current="page">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
-                    <div v-cloak v-if="isAdmin(auth)"> <!-- Admin only links -->
-                        <li class="nav-item"><a class="nav-link" href="members.html">Members</a></li>
-                    </div>
+                    <!-- Admin only links -->
+                    <li v-cloak v-if="isAdmin(auth)" class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="members.html">Member Directory</a></li>
+                            <li><a class="dropdown-item" href="stats.html">Attendance Stats</a></li>
+                        </ul>
+                    </li>
                     <li class="nav-item"><a class="nav-link" href="https://chat.whatsapp.com/CPjp84Qz6uM5t9Oq88Qb4Q" target="_blank"><i class="bi bi-question-circle"></i>&nbsp;Help</a></li>
                 </ul>
                 <div v-cloak v-if="auth">
@@ -94,26 +99,87 @@
         <!-- Logged in section -->
         <div id="loggedInSection" v-else>
             <h2 class="my-3">Sessions Available</h2>
-            <!-- Show sessions -->
-            <nav aria-label="Session Pagination" class="my-3">
-                <ul class="pagination justify-content-center">
-                    <li class="page-item">
-                        <a class="page-link" href="#" aria-label="Previous" @click.prevent="scrollPaginationBackwards()">
-                            <span aria-hidden="true">&laquo;</span>
-                        </a>
-                    </li>
-                    <li class="page-item" :class="{ active: session_pagination.week_offset === session_pagination.block }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block)">{{renderWeekOffset(session_pagination.block)}}</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 1)}"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+1)">{{renderWeekOffset(session_pagination.block+1)}}</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 2) }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+2)">{{renderWeekOffset(session_pagination.block+2)}}</a></li>
-                    <li class="page-item">
-                        <a class="page-link" href="#" aria-label="Next" @click.prevent="scrollPaginationForwards()">
-                            <span aria-hidden="true">&raquo;</span>
-                        </a>
-                    </li>
-                </ul>
-            </nav> <!-- end session table pagination -->
 
-            <table class="table table-borderless table-sm">
+            <!-- Weekly Pagination -->
+            <div class="d-flex">
+                <div class="flex-grow-1">
+                    <nav aria-label="Session Pagination">
+                        <ul class="pagination justify-content-center">
+                            <li class="page-item">
+                                <a class="page-link" href="#" aria-label="Previous" @click.prevent="scrollPaginationBackwards()">
+                                    <span aria-hidden="true">&laquo;</span>
+                                </a>
+                            </li>
+                            <li class="page-item" :class="{ active: session_pagination.week_offset === session_pagination.block }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block)">{{renderWeekOffset(session_pagination.block)}}</a></li>
+                            <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 1)}"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+1)">{{renderWeekOffset(session_pagination.block+1)}}</a></li>
+                            <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 2) }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+2)">{{renderWeekOffset(session_pagination.block+2)}}</a></li>
+                            <li class="page-item">
+                                <a class="page-link" href="#" aria-label="Next" @click.prevent="scrollPaginationForwards()">
+                                    <span aria-hidden="true">&raquo;</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </nav> <!-- end weekly pagination -->
+                </div>
+                <div>
+                    <button v-if="view_mode === 'cal'" type="button" class="btn btn-outline-primary" @click="view_mode = 'list'" title="View as list"><i class="bi bi-list-ul"></i></button>
+                    <button v-else type="button" class="btn btn-outline-primary" @click="view_mode = 'cal'" title="View as calendar"><i class="bi bi-calendar3"></i></button>
+                </div>
+            </div>
+
+            <!-- Calendar View Table -->
+            <table v-if="view_mode === 'cal'" class="table table-sm table-borderless">
+                <thead>
+                    <tr>
+                        <th scope="col" class="bg-primary border-start border-end"><span class="d-block d-sm-none">M</span><span class="d-none d-sm-block">Mon</span></th>
+                        <th scope="col" class="bg-primary border-end"><span class="d-block d-sm-none">T</span><span class="d-none d-sm-block">Tue</span></th>
+                        <th scope="col" class="bg-primary border-end"><span class="d-block d-sm-none">W</span><span class="d-none d-sm-block">Wed</span></th>
+                        <th scope="col" class="bg-primary border-end"><span class="d-block d-sm-none">T</span><span class="d-none d-sm-block">Thu</span></th>
+                        <th scope="col" class="bg-primary border-end"><span class="d-block d-sm-none">F</span><span class="d-none d-sm-block">Fri</span></th>
+                        <th scope="col" class="bg-primary border-end"><span class="d-block d-sm-none">S</span><span class="d-none d-sm-block">Sat</span></th>
+                        <th scope="col" class="bg-primary border-end"><span class="d-block d-sm-none">S</span><span class="d-none d-sm-block">Sun</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="time in sessions_by_time(session_data)">
+                        <td v-for="day in time.days" class="border-start border-end">
+                            <div v-for="session in day" class="border rounded p-1" :class="{'border-primary': !isPast(session.datetime), 'bg-primary-subtle': !isPast(session.datetime), 'bg-secondary-subtle': isPast(session.datetime)}">
+                                <strong>{{displayTime(session.datetime)}} {{session.session_type.name}}</strong><br>
+                                <div v-if="session.location"><i class="bi bi-geo-alt-fill"></i> {{session.location.name}}<br></div>
+                                <div v-if="session.trainer"><i class="bi bi-person-arms-up"></i> {{session.trainer.name}}</div>
+                                <div v-if="session.notes"><i class="bi bi-info-circle"></i> {{session.notes}}</div>
+                                <!-- Member Already Booked -->
+                                <div v-if="session.booked" class="btn-group me-1">
+                                    <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                        Booked!
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        <li><a class="dropdown-item link-danger" href="#" @click.prevent="cancelBooking(session)">Cancel</a></li>
+                                    </ul>
+                                </div>
+                                <!-- Member Not Booked -->
+                                <button v-else v-if="!isPast(session.datetime)" type="button" class="btn btn-primary btn-sm me-1" @click="bookSession(session)">Book</button>
+                                <!-- Admin Dropdown -->
+                                <div v-if="isAdmin(auth)" class="btn-group">
+                                    <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                        Admin
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        <li><a class="dropdown-item" :href="'attendance.html?id=' + session.id"><i class="bi bi-list-check"></i> Attendance</a></li>
+                                        <li><a :href="'edit_session.html?edit=' + session.id" class="dropdown-item"><i class="bi bi-pencil"></i> Edit</a></li>
+                                        <li><a :href="'edit_session.html?copy=' + session.id" class="dropdown-item"><i class="bi bi-copy"></i> Copy</a></li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li><button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#deleteConfirmDialog" @click="onClickDeleteSession(session)"><i class="bi bi-trash"></i> Delete</button></li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <!-- List View Table -->
+            <table v-else class="table table-borderless table-sm">
                 <thead>
                     <tr>
                         <th scope="col">When</th>
@@ -147,22 +213,22 @@
                         </td>
                         <!-- Member book/cancel -->
                         <td v-if="auth.roles.includes('member')">
-                            <span v-if="session.booked">
-                                <span>Booked!</span> <a v-if="!isPast(session.datetime)" href="#" class="link-danger" @click.prevent="cancelBooking(session)">Cancel</a>
-                            </span>
-                            <div v-else>
-                                <span v-if="session.max_booking_count && session.booking_count >= session.max_booking_count" class="text-secondary">
-                                    Fully booked
-                                </span>
-                                <span v-else>
-                                    <a  v-if="!isPast(session.datetime)" href="#" @click.prevent="bookSession(session)">Book</a>
-                                </span>
+                            <!-- Member Already Booked -->
+                            <div v-if="session.booked" class="btn-group me-1">
+                                <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                    Booked!
+                                </button>
+                                <ul class="dropdown-menu">
+                                    <li><a class="dropdown-item link-danger" href="#" @click.prevent="cancelBooking(session)">Cancel</a></li>
+                                </ul>
                             </div>
+                            <!-- Member Not Booked -->
+                            <button v-else v-if="!isPast(session.datetime)" type="button" class="btn btn-primary btn-sm me-1" @click="bookSession(session)">Book</button>
                         </td>
                         <!-- Admin actions -->
                         <td v-if="isAdmin(auth)">
                             <div class="dropdown">
-                                <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</button>
+                                <button class="btn btn-sm btn-outline-primary dropdown-toggle float-end" type="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</button>
                                 <ul class="dropdown-menu">
                                     <li><a class="dropdown-item" :href="'attendance.html?id=' + session.id"><i class="bi bi-list-check"></i> Attendance</a></li>
                                     <li><a :href="'edit_session.html?edit=' + session.id" class="dropdown-item"><i class="bi bi-pencil"></i> Edit</a></li>
@@ -178,8 +244,11 @@
                     </tr>
                 </tbody>
             </table>
+
             <p>Showing week commencing {{displayDateFull(session_pagination.start)}}. Found {{session_data.length}} session(s) for selected week.</p>
-            <a v-if="isAdmin(auth)" class="btn btn-outline-primary" href="edit_session.html"><i class="bi bi-plus-circle"></i> Add Session</a>
+            <div class="d-flex justify-content-end">
+                <a v-if="isAdmin(auth)" class="btn btn-outline-success" href="edit_session.html"><i class="bi bi-plus-circle"></i> Add Session</a>
+            </div>
 
             <!-- Deletion Confirm Dialog -->
             <div class="modal fade" id="deleteConfirmDialog" tabindex="-1" aria-labelledby="deleteConfirmModalLabel" aria-hidden="true">
@@ -249,6 +318,7 @@
         start: currentWeekStart,
         end: new Date(currentWeekStart.getTime() + MILLIS_IN_WEEK)
     })
+    const view_mode = ref('list')
 
     // ADMIN ONLY DATA
     const deleting_session = ref({
@@ -415,8 +485,30 @@
         return new Date() > new Date(datetime)
     }
 
-    function encodeLoginReturnUrl() {
-        return encodeURIComponent(window.location.pathname + window.location.hash)
+    function sessions_by_time(sessions) {
+        const times = ['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00']
+        const time_map = new Map()
+        for (let time of times) {
+            time_map.set(time, [[], [], [], [], [], [], []])
+        }
+
+        for (let session of sessions) {
+            let session_datetime = new Date(session.datetime)
+            let [hour, mins] = displayTime(session_datetime).split(':')
+            let session_time_floor_hour = hour + ":00"
+            let time_entry = time_map.get(session_time_floor_hour)
+            let session_day_of_week = (7 + session_datetime.getDay() - START_OF_WEEK) % 7 // Monday = 0
+            time_entry[session_day_of_week].push(session)
+        }
+
+        const result = []
+        for (let [time, days] of time_map.entries()) {
+            result.push({
+                time: time,
+                days: days
+            })
+        }
+        return result
     }
 
     createApp({
@@ -426,8 +518,9 @@
                 auth, http_err,
 
                 // Session/booking data and callbacks
-                session_data, session_pagination,
+                session_data, session_pagination, view_mode,
                 bookSession, cancelBooking, setSessionPage,
+                sessions_by_time,
 
                 // Misc callbacks and utility functions
                 deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, displayDate, displayTime, displayDateFull, isPast, isAdmin, encodeLoginReturnUrl
@@ -444,10 +537,12 @@
         }
     })
 
+    let hashStr = window.location.hash;
+    let urlParams = hashStr ? new URLSearchParams(hashStr.substring(1)) : new URLSearchParams()
+
     // Parse the current week from the URL fragment
     let currentWeek = startOfWeek(new Date())
-    let hashStr = window.location.hash;
-    let dateStr = hashStr ? new URLSearchParams(hashStr.substring(1)).get("week") : null
+    let dateStr = urlParams.get("week")
     if (dateStr) {
         let targetWeek = startOfWeek(new Date(dateStr))
         let offsetMillis = targetWeek.getTime() - currentWeek.getTime()
@@ -461,6 +556,14 @@
         urlParams.set("week", currentWeekStr)
         window.location.hash = urlParams.toString()
     }
+
+    let storage_view_mode = localStorage.getItem("view_mode")
+    if (storage_view_mode !== null) {
+        view_mode.value = storage_view_mode
+    }
+    watch(view_mode, (new_value) => {
+        localStorage.setItem("view_mode", new_value)
+    });
 
 </script>
 </html>

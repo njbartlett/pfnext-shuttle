@@ -27,6 +27,7 @@
             -moz-appearance: textfield;
         }
     </style>
+    <script src="js/popper.min.js"></script>
     <script src="js/bootstrap.min.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/lodash.min.js"></script>
@@ -49,9 +50,14 @@
                     <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
-                    <div v-cloak v-if="isAdmin(auth)"> <!-- Admin only links -->
-                        <li class="nav-item"><a class="nav-link" href="members.html">Members</a></li>
-                    </div>
+                    <!-- Admin only links -->
+                    <li v-cloak v-if="isAdmin(auth)" class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="members.html">Member Directory</a></li>
+                            <li><a class="dropdown-item" href="stats.html">Attendance Stats</a></li>
+                        </ul>
+                    </li>
                     <li class="nav-item"><a class="nav-link" href="https://chat.whatsapp.com/CPjp84Qz6uM5t9Oq88Qb4Q" target="_blank"><i class="bi bi-question-circle"></i>&nbsp;Help</a></li>
                 </ul>
                 <div v-cloak v-if="auth">
@@ -70,7 +76,7 @@
     <div class="container-fluid" v-cloak>
         <div v-if="alert" class="alert my-2" :class="{'alert-danger': alert.is_error, 'alert-success': !alert.is_error}" role="alert">
             <div v-if="'authorization token expired' === alert.message">
-                Your login session has expired, please <a href="login.html">login again</a>.
+                Your login session has expired, please <a :href="'login.html?return=' + encodeLoginReturnUrl()">login again</a>.
             </div>
             <div v-else>
                 {{alert.message}}
@@ -81,7 +87,7 @@
         <div class="alert alert-danger my-2" role="alert" v-if="!auth">
             <div class="card-body text-danger">
                 <p class="card-text">
-                    You are not logged in. Please return to the <a href="login.html">login page</a>.
+                    You are not logged in. Please return to the <a :href="'login.html?return=' + encodeLoginReturnUrl()">login page</a>.
                 </p>
             </div>
         </div> <!-- End not logged in section -->
@@ -227,6 +233,7 @@
     const suggested_session_times = ref([
         "06:00",
         "07:00",
+        "08:00",
         "09:00",
         "10:00",
         "11:00",
@@ -435,7 +442,7 @@
                 alert, auth,
                 session_data, session_data_validation,
                 admin_user_data, admin_trainer_list, admin_session_type_list, admin_location_list, suggested_session_times,
-                saveSession, isAdmin, onLogout
+                saveSession, isAdmin, onLogout, encodeLoginReturnUrl
             }
         }
     }).mount('#app')
