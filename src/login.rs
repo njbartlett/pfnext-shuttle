@@ -362,7 +362,7 @@ pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<Str
         return Err(Custom(Status::Forbidden, "admin only".to_string()));
     }
 
-    let mut users: Vec<User> = query_as("SELECT id, name, email, phone, roles FROM person")
+    let mut users: Vec<User> = query_as("SELECT id, name, email, phone, roles FROM person ORDER BY name")
         .fetch_all(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
