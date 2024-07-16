@@ -5,18 +5,22 @@ extern crate rocket;
 mod claims;
 mod sessions;
 mod persons;
+mod cors;
 
 use claims::Claims;
 
 use rocket::fs::NamedFile;
 use rocket::fs::{relative};
-use rocket::http::Status;
+use rocket::http::{Header, Method, Status};
 use rocket::response::status::Custom;
 use rocket::serde::json::Json;
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::path::{Path, PathBuf};
+use rocket::{Request, Response};
+use rocket::response::Responder;
+use shuttle_runtime::CustomError;
 
 struct AppState {
     pool: PgPool,
@@ -63,10 +67,10 @@ struct LoginResponse {
 }
 
 /// Tries to authenticate a user. Successful authentications get a JWT
-#[post("/login", data = "<login>")]
-fn login(login: Json<LoginRequest>) -> Result<Json<LoginResponse>, Custom<String>> {
+#[post("/authenticate", data = "<login>")]
+fn authenticate(login: Json<LoginRequest>) -> Result<Json<LoginResponse>, Custom<String>> {
     // This should be real user validation code, but is left simple for this example
-    if login.username != "username" || login.password != "password" {
+    if login.username != "username@a.com" || login.password != "password" {
         return Err(Custom(
             Status::Unauthorized,
             "account was not found".to_string(),
@@ -98,7 +102,8 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
 
     let rocket = rocket::build()
         .mount("/", routes![
-            login,
+            cors::cors_options,
+            authenticate,
             sessions::list_sessions,
             sessions::list_sessions_by_date,
             persons::list_persons,
