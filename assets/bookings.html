@@ -14,25 +14,31 @@
             display: none;
         }
     </style>
+    <script src="js/bootstrap.min.js"></script>
+    <script src="js/utils.js"></script>
 </head>
 
 <body>
 <div id="app">
     <!-- Navbar -->
-    <nav class="navbar navbar-expand navbar-dark bg-body-tertiary">
+    <nav class="navbar navbar-expand-lg bg-body-tertiary" role="navigation">
         <div class="container-fluid">
-            <a class="navbar-brand">
-                <img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24">
-                Another Level
-            </a>
-            <div class="collapse navbar-collapse">
+            <!-- Another Level brand -->
+            <a class="navbar-brand" href="index.html"><img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24" class="d-inline-block align-text-top"> Another Level</a>
+            <!-- Collapse state toggle button -->
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <!-- Navbar collapsible list -->
+            <div id="navbarContent" class="collapse navbar-collapse">
                 <ul class="navbar-nav me-auto">
-                    <li class="nav-item"><a class="nav-link" href="index.html">Main</a></li>
+                    <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
-                    <li class="nav-item"><a class="nav-link disabled" aria-disabled="true">Bookings</a></li>
+                    <li class="nav-item"><a class="nav-link active" aria-current="page">Bookings</a></li>
                 </ul>
                 <div v-cloak v-if="auth">
-                    <button id="logout" type="button" class="btn btn-outline-primary" @click="onLogout">Logout</button>
+                    <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
+                    <button id="logout" type="button" class="btn btn-outline-danger" @click="onLogout">Logout</button>
                 </div>
             </div>
         </div>
@@ -61,17 +67,10 @@
 
         <!-- Logged in section -->
         <div id="loggedInSection" v-if="auth">
-            <!-- Welcome Header -->
-            <div class="card my-3">
-                <h5 class="card-header">Welcome, {{auth.name}}!</h5>
-                <div class="card-body">
-                    <span v-for="role in auth.roles"><span class="badge rounded-pill text-bg-primary">{{role}}</span>&nbsp;</span>
-                </div>
-            </div>
 
             <!-- Show bookings -->
             <div class="card my-3">
-                <h5 class="card-header">My Bookings</h5>
+                <h5 class="card-header"><i class="bi bi-calendar-check"></i> My Bookings</h5>
                 <div class="card-body">
                     <!-- booking table pagination -->
                     <nav aria-label="Bookings Navigation">
@@ -82,7 +81,7 @@
                     </nav> <!-- end booking table pagination -->
 
                     <!-- bookings table -->
-                    <table class="table table-bordered">
+                    <table class="table">
                         <thead>
                             <tr>
                                 <th scope="col">Date & Time</th>
@@ -94,7 +93,7 @@
                             <tr v-for="booking in bookings_list">
                                 <td>{{displayDate(booking.session_datetime)}} at {{displayTime(booking.session_datetime)}}</td>
                                 <td><a :href="'http://www.google.com/maps/search/' + encodeURIComponent(booking.session_location.address)" target="_blank">{{booking.session_location.name}}</a></td>
-                                <td><button class="btn btn-outline-danger btn-sm" @click="cancelBooking(booking)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</button></td>
+                                <td><button class="btn btn-outline-danger btn-sm" :class="{'d-none': bookings_pagination.past}" @click="cancelBooking(booking)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</button></td>
                             </tr>
                         </tbody>
                     </table>
@@ -113,9 +112,8 @@
 </div>
 </body>
 
-<script src="js/utils.js"></script>
 <script type="module">
-    import { createApp, reactive, ref, watch } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js'
+    import { createApp, reactive, ref, watch } from './js/vue.esm-browser.js'
 
     // Current user information
     const auth = ref(null)

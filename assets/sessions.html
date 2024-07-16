@@ -14,25 +14,31 @@
             display: none;
         }
     </style>
+    <script src="js/bootstrap.min.js"></script>
+    <script src="js/utils.js"></script>
 </head>
 
 <body>
 <div id="app">
     <!-- Navbar -->
-    <nav class="navbar navbar-expand navbar-dark bg-body-tertiary">
+    <nav class="navbar navbar-expand-lg bg-body-tertiary" role="navigation">
         <div class="container-fluid">
-            <a class="navbar-brand">
-                <img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24">
-                Another Level
-            </a>
-            <div class="collapse navbar-collapse">
+            <!-- Another Level brand -->
+            <a class="navbar-brand" href="index.html"><img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24" class="d-inline-block align-text-top"> Another Level</a>
+            <!-- Collapse state toggle button -->
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <!-- Navbar collapsible list -->
+            <div id="navbarContent" class="collapse navbar-collapse">
                 <ul class="navbar-nav me-auto">
-                    <li class="nav-item"><a class="nav-link" href="index.html">Main</a></li>
-                    <li class="nav-item"><a class="nav-link disabled" aria-disabled="true">Sessions</a></li>
+                    <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
+                    <li class="nav-item"><a class="nav-link active" aria-current="page">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
                 </ul>
                 <div v-cloak v-if="auth">
-                    <button id="logout" type="button" class="btn btn-outline-primary" @click="onLogout">Logout</button>
+                    <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
+                    <button id="logout" type="button" class="btn btn-outline-danger" @click="onLogout">Logout</button>
                 </div>
             </div>
         </div>
@@ -41,12 +47,17 @@
     <!-- Main Content -->
     <div class="container-lg" v-cloak>
         <!-- REST errors -->
-        <div class="alert alert-danger my-3" role="alert" v-if="http_err">
-            {{http_err}}
+        <div v-if="http_err" class="alert alert-danger my-2" role="alert">
+            <div v-if="'authorization token expired' === http_err">
+                Your login session has expired, please <a href="login.html">login again</a>.
+            </div>
+            <div v-else>
+                {{http_err}}
+            </div>
         </div>
 
         <!-- Not logged in section -->
-        <div class="card border-danger my-3" v-if="!auth">
+        <div class="alert alert-danger my-2" role="alert" v-if="!auth">
             <div class="card-body text-danger">
                 <p class="card-text">
                     You are not logged in. Please return to the <a href="login.html">login page</a>.
@@ -56,13 +67,6 @@
 
         <!-- Logged in section -->
         <div id="loggedInSection" v-else>
-            <!-- Welcome Header -->
-            <div class="card my-3">
-                <h5 class="card-header">Welcome, {{auth.name}}!</h5>
-                <div class="card-body">
-                    <span v-for="role in auth.roles"><span class="badge rounded-pill text-bg-primary">{{role}}</span>&nbsp;</span>
-                </div>
-            </div>
 
             <!-- Show sessions -->
             <div class="card my-3">
@@ -77,7 +81,7 @@
                         </ul>
                     </nav> <!-- end session table pagination -->
 
-                    <table class="table table-bordered">
+                    <table class="table">
                         <thead>
                             <tr>
                                 <th scope="col">Date & Time</th>
@@ -298,7 +302,6 @@
 </div>
 </body>
 
-<script src="js/utils.js"></script>
 <script type="module">
     import { createApp, reactive, ref, watch } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js'
 
@@ -421,19 +424,7 @@
         .then(json => {
             session_data.value = json
         })
-        .catch(handleHttpErr)
-    }
-
-    function handleHttpErr(err) {
-        if (err.status === 401) {
-            auth.value = null
-            http_err.value = "Not logged in; please login again."
-        } else if (err.status === 403) {
-            auth.value = null
-            http_err.value = "Not authorized, your login may have expired."
-        } else {
-            err.text().then(err_text => http_err.value = err_text)
-        }
+        .catch(err => err.text().then(error_text => http_err.value = error_text))
     }
 
     async function loadAdminData() {
@@ -468,7 +459,8 @@
                 count: count,
                 name_email_to_user: name_email_to_user
             }
-        }).catch(handleHttpErr)
+        }).catch(err => err.text().then(error_text => http_err.value = error_text))
+
 
         // Fetch list of trainers
         doFetch("/users/list?role=trainer", trainers => admin_trainer_list.value = trainers)
@@ -487,7 +479,7 @@
         }).then(res => {
             if (!res.ok) throw res
             return res.json()
-        }).then(onjson).catch(handleHttpErr)
+        }).then(onjson).catch(err => err.text().then(error_text => http_err.value = error_text))
     }
 
     async function loadSessionAttendees(session) {
@@ -507,7 +499,7 @@
             .then(json => {
                 session_selection.value.bookings = json
             })
-            .catch(handleHttpErr)
+            .catch(err => err.text().then(error_text => http_err.value = error_text))
         }
     }
 

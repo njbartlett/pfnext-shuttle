@@ -9,36 +9,52 @@
 
     <link href="styles/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        [v-cloak] {
+            display: none;
+        }
+    </style>
+    <script src="js/bootstrap.min.js"></script>
+    <script src="js/utils.js"></script>
 </head>
 
 <body>
-<!-- Navbar -->
-<nav class="navbar navbar-expand navbar-dark bg-body-tertiary">
-    <div class="container-fluid">
-        <a class="navbar-brand">
-            <img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24">
-            Another Level
-        </a>
-        <div class="collapse navbar-collapse">
-            <ul class="navbar-nav me-auto">
-                <li class="nav-item"><a class="nav-link disabled" aria-disabled="true" href="index.html">Main</a></li>
-                <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
-                <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
-            </ul>
+<div id="app">
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg bg-body-tertiary" role="navigation">
+        <div class="container-fluid">
+            <!-- Another Level brand -->
+            <a class="navbar-brand"><img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24" class="d-inline-block align-text-top"> Another Level</a>
+            <!-- Collapse state toggle button -->
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <!-- Navbar collapsible list -->
+            <div id="navbarContent" class="collapse navbar-collapse">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link active" aria-current="page">Home</a></li>
+                    <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
+                    <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
+                </ul>
+                <div v-cloak v-if="auth">
+                    <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
+                    <button id="logout" type="button" class="btn btn-outline-danger" @click="onLogout">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Banner -->
+    <div class="container-fluid text-center my-5">
+        <h1 style="font-size: xxx-large">Another Level</h1>
+        <h3 style="font-variant: all-small-caps">Community Fitness</h3>
+        <div class="btn-group mt-3" role="group" aria-label="Basic outlined example" v-cloak>
+            <a id="btnLogin" class="btn btn-outline-primary mb-1" :class="{'disabled': auth}" href="login.html">Login/<wbr>Register</a>
+            <a id="btnSessions" class="btn btn-outline-primary mb-1" :class="{'disabled': !auth}" href="sessions.html">Book Sessions</a>
+            <a id="btnBookings" class="btn btn-outline-primary mb-1" :class="{'disabled': !auth}" href="bookings.html">View Bookings</a>
         </div>
     </div>
-</nav>
-
-<!-- Banner -->
-<div class="container-fluid text-center my-5">
-    <h1 style="font-size: xxx-large">Another Level</h1>
-    <h3 style="font-variant: all-small-caps">Community Fitness</h3>
-    <div class="btn-group mt-3" role="group" aria-label="Basic outlined example">
-        <a id="btnLogin" class="btn btn-outline-primary mb-1 disabled" href="login.html">Login/&#8203;Register</a>
-        <a id="btnSessions" class="btn btn-outline-primary mb-1 disabled" href="sessions.html">Book Sessions</a>
-        <a id="btnBookings" class="btn btn-outline-primary mb-1 disabled" href="bookings.html">View Bookings</a>
-    </div>
-</div>
+</div> <!-- end vue app -->
 
 <!-- Main Content -->
 <div class="container-lg">
@@ -137,26 +153,19 @@
 </div>
 
 </body>
-<script src="js/utils.js"></script>
-<script>
-    function setDisabledLinkButton(link, disabled) {
-        if (disabled) {
-            link.setAttribute("aria-disabled", "true")
-            link.setAttribute("class", link.getAttribute("class") + " disabled")
-        } else {
-            link.removeAttribute("aria-disabled")
-            let c = link.getAttribute("class")
-            let index = c.indexOf(" disabled")
-            if (index >= 0) {
-                link.setAttribute("class", c.substring(0, index))
-            }
-        }
-    }
+<script type="module">
+    import { createApp, ref } from './js/vue.esm-browser.js'
 
-    getValidatedAuthToken().then(auth => {
-        setDisabledLinkButton(document.getElementById("btnLogin"), auth)
-        setDisabledLinkButton(document.getElementById("btnSessions"), !auth)
-        setDisabledLinkButton(document.getElementById("btnBookings"), !auth)
+    // Current user information
+    const auth = ref(null)
+    createApp({
+        setup() {
+            return { auth, onLogout }
+        }
+    }).mount('#app')
+
+    getValidatedAuthToken().then(a => {
+        auth.value = a
     })
 </script>
 </html>

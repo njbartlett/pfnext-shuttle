@@ -14,20 +14,25 @@
             display: none;
         }
     </style>
+    <script src="js/bootstrap.min.js"></script>
+    <script src="js/utils.js"></script>
 </head>
 
 <body>
 <div id="app">
     <!-- Navbar -->
-    <nav class="navbar navbar-expand navbar-dark bg-body-tertiary">
+    <nav class="navbar navbar-expand-lg bg-body-tertiary" role="navigation">
         <div class="container-fluid">
-            <a class="navbar-brand">
-                <img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24">
-                Another Level
-            </a>
-            <div class="collapse navbar-collapse">
+            <!-- Another Level brand -->
+            <a class="navbar-brand" href="index.html"><img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24" class="d-inline-block align-text-top"> Another Level</a>
+            <!-- Collapse state toggle button -->
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <!-- Navbar collapsible list -->
+            <div id="navbarContent" class="collapse navbar-collapse">
                 <ul class="navbar-nav me-auto">
-                    <li class="nav-item"><a class="nav-link" href="index.html">Main</a></li>
+                    <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
                 </ul>
@@ -96,7 +101,6 @@
 </div>
 </body>
 
-<script src="js/utils.js"></script>
 <script type="module">
     import { createApp, reactive, ref, watch } from './js/vue.esm-browser.js'
 
