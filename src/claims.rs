@@ -1,13 +1,9 @@
 // claims.rs
-use chrono::{Duration, Utc};
-use jsonwebtoken::{
-    decode, encode, errors::ErrorKind, DecodingKey, EncodingKey, Header, Validation,
-};
-use rocket::{
-    http::Status,
-    request::{FromRequest, Outcome},
-    response::status::Custom,
-};
+use std::fmt::{Display, Formatter};
+use std::ops::Add;
+use chrono::{DateTime, Duration, Utc};
+use jsonwebtoken::{errors::ErrorKind, DecodingKey, EncodingKey, Header, Validation, Algorithm};
+use rocket::{http::Status, request::{FromRequest, Outcome}, response::status::Custom, State};
 use serde::{Deserialize, Serialize};
 use crate::AppState;
 
@@ -18,15 +14,23 @@ const AUTHORIZATION: &str = "Authorization";
 const SECRET_SIZE: usize = 1024;
 
 // Used when decoding a token to `Claims`
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) enum AuthenticationError {
     Missing,
     Decoding(String),
     Expired,
 }
 
-// Basic claim object. Only the `exp` claim (field) is required. Consult the `jsonwebtoken` documentation for other claims that can be validated.
-// The `name` is a custom claim for this API
+impl Display for AuthenticationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing => f.write_str("missing authorization header"),
+            Self::Decoding(msg) => write!(f, "failed to decode authorization header: {}", msg),
+            Self::Expired => f.write_str("authorization token expired")
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Claims {
     pub(crate) uid: i64,
@@ -44,21 +48,20 @@ impl<'r> FromRequest<'r> for Claims {
         let auth_header = request.headers().get_one(AUTHORIZATION);
         match auth_header {
             None => {
+                request.local_cache::<Option<AuthenticationError>, _>(|| Some(AuthenticationError::Missing));
                 Outcome::Error((Status::Forbidden, AuthenticationError::Missing))
             },
             Some(value) => {
                 // Get the secret encoding/decoding key from the Rocket state
-                let secrets: &shuttle_runtime::SecretStore;
-                match request.rocket().state::<AppState>() {
-                    Some(app_state) => {
-                        secrets = &app_state.secrets;
-                    },
-                    None => {
-                        return Outcome::Error((Status::Forbidden, AuthenticationError::Decoding("Missing app state".to_string())));
-                    }
+                let secret: Option<String> = request.rocket().state()
+                    .and_then(|s: &AppState| s.secrets.get("ACCESS_TOKEN_KEY"));
+                if secret.is_none() {
+                    return Outcome::Error((Status::InternalServerError, AuthenticationError::Decoding("Missing app state".to_string())));
                 }
-                match Claims::from_authorization(value, secrets) {
+
+                match Claims::from_authorization(value, &secret.unwrap()) {
                     Err(e) => {
+                        request.local_cache::<Option<AuthenticationError>, _>(|| Some(e.clone()));
                         Outcome::Error((Status::Forbidden, e))
                     },
                     Ok(claims) => {
@@ -72,56 +75,25 @@ impl<'r> FromRequest<'r> for Claims {
 
 impl Claims {
     pub(crate) fn create(uid: i64, email: &str, roles: &Vec<String>, duration: Duration) -> Self {
-        let expiration = Utc::now()
-            .checked_add_signed(duration)
-            .expect("failed to create an expiration time")
-            .timestamp();
+        let now = Utc::now();
+        let expiration = Utc::now().add(duration);
+        info!("now={}, expiration={}", now, expiration);
+        info!("Creating token with expiration {}", expiration);
         Self {
             uid,
             email: email.to_string(),
             roles: roles.to_owned(),
-            exp: expiration as usize,
+            exp: expiration.timestamp() as usize,
         }
-    }
-
-    /// Create a `Claims` from a 'Bearer <token>' value
-    fn from_authorization(value: &str, secrets: &shuttle_runtime::SecretStore) -> Result<Self, AuthenticationError> {
-        let token = value.strip_prefix(BEARER).map(str::trim);
-
-        if token.is_none() {
-            return Err(AuthenticationError::Missing);
-        }
-
-        // Safe to unwrap as we just confirmed it is not none
-        let token = token.unwrap();
-
-        // Use `jsonwebtoken` to get the claims from a JWT
-        // Consult the `jsonwebtoken` documentation for using other algorithms and validations (the default validation just checks the expiration claim)
-        let secret = secrets.get("TOKEN_KEY").ok_or(AuthenticationError::Decoding("missing decoding key".to_string()))?;
-        let token = decode::<Claims>(
-            token,
-            &DecodingKey::from_secret(secret.as_ref()),
-            &Validation::default(),
-        )
-        .map_err(|e| match e.kind() {
-            ErrorKind::ExpiredSignature => AuthenticationError::Expired,
-            _                           => AuthenticationError::Decoding(e.to_string()),
-        })?;
-
-        Ok(token.claims)
     }
 
     /// Converts this claims into a token string
-    pub(crate) fn into_token(self, secrets: &shuttle_runtime::SecretStore) -> Result<String, Custom<String>> {
-        let secret = secrets.get("TOKEN_KEY").ok_or(Custom(Status::Forbidden, "missing decoding key".to_string()))?;
-        let token = encode(
+    pub(crate) fn into_token(self, secret: &str) -> Result<String, Custom<String>> {
+        jsonwebtoken::encode(
             &Header::default(),
             &self,
             &EncodingKey::from_secret(secret.as_ref()),
-        )
-        .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
-
-        Ok(token)
+        ).map_err(|e| Custom(Status::InternalServerError, e.to_string()))
     }
 
     pub(crate) fn has_role(&self, required_role: &str) -> bool {
@@ -135,6 +107,22 @@ impl Claims {
         Ok(())
     }
 
+    /// Create a `Claims` from a 'Bearer <token>' value
+    fn from_authorization(value: &str, secret: &str) -> Result<Self, AuthenticationError> {
+        let token = value
+            .strip_prefix(BEARER)
+            .map(str::trim)
+            .ok_or(AuthenticationError::Missing)?;
+
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.leeway = 0;
+        let token = jsonwebtoken::decode::<Claims>(token, &DecodingKey::from_secret(secret.as_ref()), &validation)
+            .map_err(|e| match e.kind() {
+                ErrorKind::ExpiredSignature => AuthenticationError::Expired,
+                _                           => AuthenticationError::Decoding(e.to_string()),
+            })?;
+        Ok(token.claims)
+    }
 }
 
 #[cfg(test)]
@@ -149,10 +137,7 @@ mod tests {
 
     #[test]
     fn missing_bearer() {
-        let secrets = shuttle_runtime::SecretStore::new(BTreeMap::from([
-            ("TOKEN_KEY".to_owned(), "let me in".to_owned().into())
-        ]));
-        let claim_err = Claims::from_authorization("no-Bearer-prefix", &secrets).unwrap_err();
+        let claim_err = Claims::from_authorization("no-Bearer-prefix", "let me in").unwrap_err();
 
         assert_eq!(claim_err, AuthenticationError::Missing);
     }
@@ -160,13 +145,10 @@ mod tests {
     #[test]
     fn to_token_and_back() {
         let claim = Claims::create(1, "joe@example.com", &vec!("member".to_string()), Duration::minutes(1));
-        let secrets = shuttle_runtime::SecretStore::new(BTreeMap::from([
-            ("TOKEN_KEY".to_owned(), "let me in".to_owned().into())
-        ]));
-        let token = claim.into_token(&secrets).unwrap();
+        let token = claim.into_token("let me in").unwrap();
         let token = format!("Bearer {token}");
 
-        let claim = Claims::from_authorization(&token, &secrets).unwrap();
+        let claim = Claims::from_authorization(&token, "let me in").unwrap();
 
         assert_eq!(claim.email, "joe@example.com");
     }

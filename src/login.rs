@@ -50,7 +50,7 @@ pub struct LoginRequest {
 #[response(status = 200, content_type = "application/json")]
 pub struct LoginResponse {
     inner: Json<LoggedInUser>,
-    // cookie: Header<'static>
+    cookie: Header<'static>
 }
 
 #[derive(Serialize)]
@@ -70,25 +70,6 @@ struct UserLoginRecord {
     phone: Option<String>,
     pwd: Option<String>,
     roles: String
-}
-
-impl LoginResponse {
-    pub(crate) fn from_logged_in_user(
-        logged_in_user: LoggedInUser,
-        secrets: &shuttle_runtime::SecretStore
-    ) -> Result<Self, Custom<String>> {
-        // let refresh_token = Claims::create(
-        //     logged_in_user.id,
-        //     &logged_in_user.email,
-        //     &logged_in_user.roles,
-        //     REFRESH_TOKEN_EXIRATION
-        // ).into_token(secrets)?;
-        let cookie_expiry = Utc::now().add(REFRESH_TOKEN_EXIRATION);
-        Ok(Self {
-            inner: Json(logged_in_user),
-            // cookie: Header::new("Set-Cookie", format!("refresh_token={};HttpOnly;Expires={}", refresh_token, cookie_expiry.to_rfc2822()))
-        })
-    }
 }
 
 async fn verify_user(state: &State<AppState>, email: &str, password: &str) -> Result<UserLoginRecord, Custom<String>>{
@@ -413,12 +394,17 @@ fn build_login_response(
     login_record: UserLoginRecord,
     secrets: &shuttle_runtime::SecretStore
 ) -> Result<LoginResponse, Custom<String>> {
-    // Create access token
+    // Create access and refresh tokens
     let roles = parse_roles(&login_record.roles);
-    let access_token = Claims::create(login_record.id, &login_record.email, &roles, ACCESS_TOKEN_TTL).into_token(secrets)?;
+    let access_token_key = secrets.get("ACCESS_TOKEN_KEY")
+        .ok_or(Custom(Status::InternalServerError, String::from("missing secret ACCESS_TOKEN_KEY")))?;
+    let access_token = Claims::create(login_record.id, &login_record.email, &roles, ACCESS_TOKEN_TTL).into_token(&access_token_key)?;
+    let refresh_token_key = secrets.get("REFRESH_TOKEN_KEY")
+        .ok_or(Custom(Status::InternalServerError, String::from("missing secret REFRESH_TOKEN_KEY")))?;
+    let refresh_token: String = Claims::create(login_record.id, &login_record.email, &roles, REFRESH_TOKEN_EXIRATION).into_token(&refresh_token_key)?;
 
     // Build login response body
-    let body = LoggedInUser{
+    let body = LoggedInUser {
         id: login_record.id,
         name: login_record.name,
         email: login_record.email,
@@ -426,7 +412,12 @@ fn build_login_response(
         access_token
     };
 
-    LoginResponse::from_logged_in_user(body, secrets)
+    // Build overall response with refresh token as cookie
+    let cookie_expiry = Utc::now().add(REFRESH_TOKEN_EXIRATION);
+    Ok(LoginResponse {
+        inner: Json(body),
+        cookie: Header::new("Set-Cookie", format!("refresh_token={};HttpOnly;Expires={}", refresh_token, cookie_expiry.to_rfc2822()))
+    })
 }
 
 async fn load_user_record(state: &State<AppState>, user_email: &str) -> Result<Option<UserLoginRecord>, Custom<String>> {

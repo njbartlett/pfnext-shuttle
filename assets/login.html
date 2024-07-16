@@ -36,17 +36,13 @@
     </nav>
 
     <!-- Main Content -->
-    <div class="container-lg" v-cloak>
-        <div class="spinner-border my-2" role="status" v-if="!auth_ready">
-            <span class="visually-hidden">Loading...</span>
-        </div>
-
-        <div class="alert alert-danger my-2" v-if="http_err">
+    <div id="mainContent" class="container-lg" v-cloak>
+        <div id="errorReport" class="alert alert-danger my-2" v-if="http_err">
             {{http_err}}
         </div>
 
         <!-- Already logged in section -->
-        <div class="card border-success my-2" v-if="auth">
+        <div id="alreadyLoggedIn" class="card border-success my-2" v-if="auth">
             <div class="card-body text-success">
                 <p class="card-text">You are logged in as {{auth.name}}. Open the <a href="sessions.html">sessions page</a> or <a href="#" @click.prevent="onLogout">login as a different user</a>.</p>
             </div>
@@ -130,7 +126,6 @@
 
     const http_err = ref(null)
     const auth = ref(null)
-    const auth_ready = ref(false)
     const reset_password_result = ref(null)
 
     async function onLogin() {
@@ -209,7 +204,7 @@
         setup() {
             return {
                 // Data
-                auth_ready, auth, user_data, user_data_val, http_err, reset_password_result,
+                auth, user_data, user_data_val, http_err, reset_password_result,
                 // Callbacks
                 onLogin, onForgottenPassword, onUnforgottenPassword, onResetPassword, onLogout
             }
@@ -217,19 +212,6 @@
     })
     .mount('#app')
 
-    getValidatedAuthToken().then(a => {
-        auth.value = a
-        auth_ready.value = true
-    }).catch(err => {
-        auth.value = null
-        if (err.status === 401) {
-            http_err.value = "Not logged in; please login again."
-        } else if (err.status === 403) {
-            http_err.value = "Not authorized, your login may have expired."
-        } else {
-            err.text().then(err_text => http_err.value = err_text)
-        }
-        auth_ready.value = true
-    })
+    getValidatedAuthToken().then(a => auth.value = a)
 </script>
 </html>

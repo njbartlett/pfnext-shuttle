@@ -41,12 +41,17 @@
     <!-- Main Content -->
     <div class="container-lg" v-cloak>
         <!-- REST errors -->
-        <div class="alert alert-danger m-2 p-2" role="alert" v-if="http_err">
-            {{http_err}}
+        <div v-if="http_err" class="alert alert-danger my-2" role="alert">
+            <div v-if="'authorization token expired' === http_err">
+                Your login session has expired, please <a href="login.html">login again</a>.
+            </div>
+            <div v-else>
+                {{http_err}}
+            </div>
         </div>
 
         <!-- Not logged in section -->
-        <div class="card border-danger m-2 p-2" v-if="!auth">
+        <div class="alert alert-danger my-2" role="alert" v-if="!auth">
             <div class="card-body text-danger">
                 <p class="card-text">
                     You are not logged in. Please return to the <a href="login.html">login page</a>.
@@ -115,7 +120,7 @@
     // Current user information
     const auth = ref(null)
     const http_err = ref(null)
-    const bookings_list = ref(null)
+    const bookings_list = ref([])
     const bookings_pagination = ref({
         past: false
     })
@@ -189,6 +194,8 @@
     if (jwtRaw) {
         auth.value = JSON.parse(jwtRaw)
         loadBookings()
+    } else {
+        auth.value = null
     }
 
 </script>

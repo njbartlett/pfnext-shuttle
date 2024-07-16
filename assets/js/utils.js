@@ -49,7 +49,6 @@ async function getValidatedAuthToken() {
     if (!jwtJson || !jwtJson.access_token) {
         return null
     }
-
     return fetch(SERVER_URL + "/validate_login", {
         method: "GET",
         headers: {
@@ -60,5 +59,8 @@ async function getValidatedAuthToken() {
     }).then(res => {
         if (!res.ok) throw res
         return jwtJson
+    }).catch(err => {
+        localStorage.removeItem("jwt")
+        return null
     })
 }

@@ -8,10 +8,11 @@ use chrono::{DateTime, FixedOffset};
 use rand::Error;
 
 use rand::prelude::*;
-use rocket::config;
+use rocket::{config, Request};
 use rocket::fs::NamedFile;
 use rocket::fs::relative;
 use rocket::http::{Method, Status};
+use rocket::response::Responder;
 use rocket::response::status::Custom;
 use rocket::serde::Serialize;
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
@@ -20,6 +21,7 @@ use shuttle_runtime::CustomError;
 use shuttle_runtime::Error::StringInterpolation;
 use sqlx::{Executor, FromRow, PgPool};
 use sqlx::migrate::MigrationSource;
+use crate::claims::AuthenticationError;
 
 mod claims;
 mod sessions;
@@ -64,6 +66,16 @@ pub async fn static_files(mut path: PathBuf) -> Option<NamedFile> {
     NamedFile::open(path).await.ok()
 }
 
+#[catch(403)]
+pub fn forbidden(status: Status, request: &Request) -> Custom<String> {
+    let auth_error = request.local_cache::<Option<AuthenticationError>, _>(|| None);
+    let message = match auth_error {
+        Some(msg) => msg.to_string(),
+        None      => "NOT AUTH".to_string()
+    };
+    Custom(Status::Forbidden, message)
+}
+
 #[shuttle_runtime::main]
 async fn rocket(
     #[shuttle_shared_db::Postgres] pool: PgPool,
@@ -82,11 +94,12 @@ async fn rocket(
     info!("Loaded config: {:?}", config);
 
     // Configure CORS
-    let allow_domain = secrets.get("CORS_ALLOWED_DOMAIN").ok_or_else(|| CustomError::new(Error::new("Missing secret CORS_ALLOWED_DOMAIN")))?;
-    let allow_origin_regex = [
-        format!("^http(s)?://{}", &allow_domain),
-    ];
-    let allowed_origins = AllowedOrigins::some_regex(&allow_origin_regex);
+    // let allow_domain = secrets.get("CORS_ALLOWED_DOMAIN").ok_or_else(|| CustomError::new(Error::new("Missing secret CORS_ALLOWED_DOMAIN")))?;
+    // let allow_origin_regex = [
+    //     format!("^http(s)?://{}", &allow_domain),
+    // ];
+    // let allowed_origins = AllowedOrigins::some_regex(&allow_origin_regex);
+    let allowed_origins = AllowedOrigins::All;
     let cors = rocket_cors::CorsOptions {
         allowed_origins,
         allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete].into_iter().map(From::from).collect(),
@@ -99,6 +112,7 @@ async fn rocket(
     let state = AppState { pool, secrets, config };
     let rocket = rocket::build()
         .attach(cors)
+        .register("/", catchers![forbidden])
         .mount("/", routes![
             static_files,
             login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::list_users,
@@ -136,7 +150,6 @@ pub struct SessionLocation {
     name: String,
     address: String
 }
-
 
 fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, Custom<String>> {
     if str.is_none() {
