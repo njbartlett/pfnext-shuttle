@@ -46,6 +46,7 @@ impl ::std::default::Default for Config {
             email_sender_address: String::from("unknown@example.com"),
             email_replyto_name: String::from("Unknown"),
             email_replyto_address: String::from("unknown@example.com"),
+            cors_allowed: String::from("^http://localhost")
         }
     }
 }
@@ -91,11 +92,11 @@ async fn rocket(
     let mut config_path = env::current_dir()?;
     config_path.push("Config.properties");
     info!("Config path is {}", &config_path.display());
-    let config = confy::load_path(config_path).map_err(CustomError::new)?;
+    let config: Config = confy::load_path(config_path).map_err(CustomError::new)?;
     info!("Loaded config: {:?}", config);
 
     // Configure CORS
-    let allow_domain = [config.cors_allowed];
+    let allow_domain = [&config.cors_allowed];
     let allowed_origins = AllowedOrigins::some_regex(&allow_domain);
     let cors = rocket_cors::CorsOptions {
         allowed_origins,
