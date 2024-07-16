@@ -147,6 +147,11 @@ pub struct SessionLocation {
     address: String
 }
 
+#[derive(FromRow, Debug)]
+struct CountResult {
+    count: i64
+}
+
 fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, Custom<String>> {
     if str.is_none() {
         return Ok(None);

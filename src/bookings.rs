@@ -1,14 +1,17 @@
 use chrono::{DateTime, Utc};
+use rocket::futures::{Stream, StreamExt};
+use rocket::futures::stream::BoxStream;
 use rocket::http::Status;
-use rocket::response::status::Custom;
+use rocket::response::status::{Created, Custom};
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::State;
 use serde::Deserialize;
-use sqlx::{Error, FromRow, query_as, QueryBuilder, Row};
-use sqlx::postgres::PgRow;
+use sqlx::{Acquire, Error, Executor, FromRow, Postgres, query_as, QueryBuilder, raw_sql, Row};
+use sqlx::postgres::{PgArguments, PgQueryResult, PgRow};
+use sqlx::query::{Query, QueryAs};
 
-use crate::{AppState, parse_opt_date, SessionLocation, SessionType};
+use crate::{AppState, CountResult, parse_opt_date, SessionLocation, SessionType};
 use crate::claims::Claims;
 
 #[derive(Serialize, Deserialize, FromRow, Debug)]
@@ -100,20 +103,79 @@ pub async fn list_bookings(
     Ok(Json(bookings))
 }
 
+async fn take_result_from_stream<'a>(stream: &mut BoxStream<'a, Result<PgQueryResult, Error>>) -> Result<PgQueryResult, Custom<String>> {
+    stream.next()
+        .await
+        .ok_or(Custom(Status::InternalServerError, "no more results".to_string()))?
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+}
+
 #[post("/bookings", data="<booking>")]
-pub async fn create_booking(state: &State<AppState>, claim: Claims, booking: Json<SessionBooking>) -> Result<Json<Option<SessionBooking>>, Custom<String>> {
+pub async fn create_booking(state: &State<AppState>, claim: Claims, booking: Json<SessionBooking>) -> Result<Created<Json<SessionBooking>>, Custom<String>> {
     claim.assert_roles_contains("member")?;
     if booking.person_id != claim.uid && !claim.has_role("admin") {
         return Err(Custom(Status::Forbidden, "not allowed to create bookings for other users".to_string()));
     }
-    let booking_created = query_as("INSERT INTO booking (person_id, session_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING person_id, session_id")
-        .bind(booking.person_id)
-        .bind(booking.session_id)
+
+    // Read the max_booking_count for the session if present
+    let session_with_max_booking_count: SessionWithMaxBookingCount = query_as("SELECT id, max_booking_count FROM session WHERE id = $1")
+        .bind(&booking.session_id)
         .fetch_optional(&state.pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    info!("Created booking: {:?}", booking_created);
-    Ok(Json(booking_created))
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or(Custom(Status::NotFound, format!("no session with id {}", &booking.session_id)))?;
+    let result = match session_with_max_booking_count.max_booking_count {
+        Some(max_booking_count) => book_session_with_max_bookings(state, booking.person_id, booking.session_id, max_booking_count).await,
+        None => book_session_no_max_bookings(state, booking.person_id, booking.session_id).await
+    };
+
+    info!("Created booking: {:?}", &booking);
+    Ok(Created::new(format!("/bookings?sessionid={},person_id={}", booking.session_id, booking.person_id)))
+}
+
+async fn book_session_no_max_bookings(state: &State<AppState>, person_id: i64, session_id: i64) -> Result<(), Custom<String>> {
+    query_as("INSERT INTO booking (person_id, session_id) VALUES ($1, $2) RETURNING person_id, session_id")
+        .bind(person_id)
+        .bind(session_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+}
+
+#[derive(FromRow)]
+struct SessionWithMaxBookingCount {
+    id: i64,
+    max_booking_count: Option<i64>
+}
+
+
+async fn book_session_with_max_bookings(state: &State<AppState>, person_id: i64, session_id: i64, max_bookings: i64) -> Result<(), Custom<String>> {
+    // Atomically update the booking table to insert a new booking if and only if the count of
+    // bookings for the referenced session is less than the maximum. Adapted from this StackOverflow
+    // answer: https://dba.stackexchange.com/a/167283
+    // NB simple string interpolation without prepared statements is safe because the arguments all
+    // are numeric.
+    let sql = format!("BEGIN; \
+        SELECT id FROM session WHERE id = {} FOR NO KEY UPDATE; \
+        INSERT INTO booking (person_id, session_id) \
+        SELECT {}, {} FROM booking \
+        WHERE session_id = {} \
+        HAVING count(*) < {} \
+        RETURNING person_id, session_id; \
+        COMMIT;", session_id, person_id, session_id, session_id, max_bookings);
+    info!("Executing raw SQL: {}", &sql);
+    let mut result_stream = raw_sql(sql.as_str()).execute_many(&state.pool);
+
+    let _ = take_result_from_stream(&mut result_stream).await?; // result from BEGIN;
+    let _ = take_result_from_stream(&mut result_stream).await?; // result from SELECT..FOR UPDATE;
+    let insert_result = take_result_from_stream(&mut result_stream).await?; // result from INSERT..RETURNING;
+    let _ = take_result_from_stream(&mut result_stream).await?; // result from COMMIT;
+    info!("Insert result: {:?}", insert_result);
+
+    if insert_result.rows_affected() == 0 {
+        return Err(Custom(Status::Conflict, format!("session has reached it maximum number of bookings: {}", max_bookings)));
+    }
+    Ok(())
 }
 
 #[delete("/bookings?<session_id>&<person_id>")]

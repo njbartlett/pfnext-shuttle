@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS session (
     duration_mins integer NOT NULL,
     session_type integer NOT NULL REFERENCES session_type,
     location integer NOT NULL REFERENCES location,
-    trainer bigint NOT NULL REFERENCES person
+    trainer bigint NOT NULL REFERENCES person,
+    max_booking_count BIGINT
 );
 
 CREATE TABLE IF NOT EXISTS booking (

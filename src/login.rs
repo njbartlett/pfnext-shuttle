@@ -20,7 +20,7 @@ use sqlx::{Error, FromRow, PgPool, query_as, QueryBuilder, raw_sql, Row};
 use sqlx::postgres::PgRow;
 use urlencoding::encode;
 
-use crate::AppState;
+use crate::{AppState, CountResult};
 use crate::claims::Claims;
 
 const ACCESS_TOKEN_TTL: Duration = Duration::hours(2);
@@ -136,11 +136,6 @@ pub struct NewUserRequest {
 #[derive(Serialize, FromRow, Debug)]
 struct UserUpdated {
     id: i64
-}
-
-#[derive(FromRow, Debug)]
-struct CountResult {
-    count: i64
 }
 
 #[derive(Deserialize)]

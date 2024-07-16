@@ -24,7 +24,8 @@ pub struct SessionFullRecord {
     location: SessionLocation,
     trainer: SessionTrainer,
     booked: bool,
-    booking_count: i64
+    booking_count: i64,
+    max_booking_count: Option<i64>
 }
 
 impl FromRow<'_, PgRow> for SessionFullRecord {
@@ -48,7 +49,8 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
                 email: row.try_get("trainer_email")?,
             },
             booked: row.try_get("booked").ok().unwrap_or(false),
-            booking_count: row.try_get("booking_count")?
+            booking_count: row.try_get("booking_count")?,
+            max_booking_count: row.try_get("max_booking_count").ok()
         })
     }
 }
@@ -59,7 +61,8 @@ struct NewSession {
     duration_mins: i32,
     session_type_id: i32,
     location_id: i32,
-    trainer_id: i64
+    trainer_id: i64,
+    max_bookings: Option<i64>
 }
 
 #[get("/sessions?<from>&<to>")]
@@ -94,7 +97,7 @@ pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64
 
 fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>, to: Option<String>, qb: &'a mut QueryBuilder<Postgres>) -> Result<(), Custom<String>> {
     qb.push("SELECT s.id, s.datetime, s.duration_mins, t.id as session_type_id, t.name as session_type_name, loc.id as location_id, loc.name as location_name, loc.address as location_address, trainer.id as trainer_id, trainer.name as trainer_name, trainer.email as trainer_email, \
-        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count");
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count, s.max_booking_count as max_booking_count");
     if let Some(booking_person_id) = booking_person_id {
         qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
         qb.push_bind(booking_person_id);
@@ -132,12 +135,13 @@ pub async fn create_session(
         }
     }
 
-    let id_record: BigintRecord = query_as("INSERT INTO session (datetime, duration_mins, session_type, location, trainer) VALUES ($1, $2, $3, $4, $5) RETURNING id")
+    let id_record: BigintRecord = query_as("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id")
         .bind(&new_session.datetime)
         .bind(&new_session.duration_mins)
         .bind(&new_session.session_type_id)
         .bind(&new_session.location_id)
         .bind(&new_session.trainer_id)
+        .bind(&new_session.max_bookings)
         .fetch_optional(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
@@ -191,6 +195,9 @@ pub async fn update_session(
 
     qb.push(", trainer = ");
     qb.push_bind(new_session.trainer_id);
+
+    qb.push(", max_booking_count = ");
+    qb.push_bind(new_session.max_bookings);
 
     qb.push(" WHERE id = ");
     qb.push_bind(session_id);

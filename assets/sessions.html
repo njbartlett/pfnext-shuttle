@@ -18,6 +18,14 @@
         [v-cloak] {
             display: none;
         }
+        input[type="number"].no-spinner::-webkit-outer-spin-button,
+        input[type="number"].no-spinner::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"].no-spinner {
+            -moz-appearance: textfield;
+        }
     </style>
     <script src="js/bootstrap.min.js"></script>
     <script src="js/utils.js"></script>
@@ -54,7 +62,7 @@
     </nav>
 
     <!-- Main Content -->
-    <div class="container-lg" v-cloak>
+    <div class="container-fluid" v-cloak>
         <!-- REST errors -->
         <div v-if="http_err" class="alert alert-danger my-2" role="alert">
             <div v-if="'authorization token expired' === http_err">
@@ -96,22 +104,38 @@
                                 <th scope="col">Date & Time</th>
                                 <th scope="col">Trainer</th>
                                 <th scope="col">Type & Location</th>
+                                <th scope="col"></th>
                                 <th v-if="auth.roles.includes('member')" scope="col">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr v-for="session in session_data" @click="setSelectedSession(session)" :class="{'table-active': session_selection && (session.id === session_selection.id)}">
-                                <td>{{displayDate(session.datetime)}} at {{displayTime(session.datetime)}}&nbsp;<span class="badge rounded-pill text-bg-primary" title="Number of attendees registered">{{session.booking_count}}</span></td>
+                                <td>{{displayDate(session.datetime)}} {{displayTime(session.datetime)}}</td>
                                 <td>{{session.trainer.name}}</td>
                                 <td>{{session.session_type.name}}, <a :href="'http://www.google.com/maps/search/' + encodeURIComponent(session.location.address)" target="_blank">{{session.location.name}}</a></td>
+                                <td>
+                                    <span v-if="session.max_booking_count" class="badge rounded-pill"
+                                          :class="{'text-bg-danger': session.booking_count >= session.max_booking_count, 'text-bg-primary': session.booking_count < session.max_booking_count}"
+                                          :title="session.booking_count + ' member(s) booked of maximum ' + session.max_booking_count">
+                                        {{session.booking_count}}/{{session.max_booking_count}}
+                                    </span>
+                                    <span v-else class="badge rounded-pill text-bg-primary" :title="session.booking_count + ' member(s) booked'">
+                                        {{session.booking_count}}
+                                    </span>
+                                </td>
                                 <!-- Member book/cancel -->
                                 <td v-if="auth.roles.includes('member')">
                                     <span v-if="session.booked">
                                         <span>Booked!</span> <a href="#" class="link-danger" @click.prevent="userCancelBooking(session)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a>
                                     </span>
-                                    <span v-else>
-                                        <a href="#" @click.prevent="userBookSession(session)"><i class="bi bi-plus-circle"></i>&nbsp;Book</a>
-                                    </span>
+                                    <div v-else>
+                                        <span v-if="session.max_booking_count && session.booking_count >= session.max_booking_count" class="text-secondary">
+                                            Fully booked
+                                        </span>
+                                        <span v-else>
+                                            <a href="#" @click.prevent="userBookSession(session)"><i class="bi bi-plus-circle"></i>&nbsp;Book</a>
+                                        </span>
+                                    </div>
                                 </td>
                             </tr>
                         </tbody>
@@ -128,13 +152,15 @@
                     <h5 class="card-header border-warning-subtle bg-warning-subtle"><i class="bi bi-gear" title="Admin/Trainer Only Section"></i> Create Session</h5>
                     <div class="card-body border-warning-subtle">
                         <form class="row g-3">
-                            <div class="col-md-2">
+                            <div class="col-md-2 px-1">
+                                <label for="newSessionDate" class="form-label">Date:</label>
                                 <input id="newSessionDate" class="form-control" :class="{'is-invalid': admin_new_session_validation.date}" type="date" v-model="admin_new_session_data.date" required>
                                 <div class="invalid-feedback">
                                     {{admin_new_session_validation.date}}
                                 </div>
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-md-2 px-1">
+                                <label for="newSessionTime" class="form-label">Time:</label>
                                 <input id="newSessionTime" class="form-control" :class="{'is-invalid': admin_new_session_validation.time}" type="time" list="newSessionTimeList" v-model="admin_new_session_data.time" required>
                                 <datalist id="newSessionTimeList">
                                     <option v-for="time in suggested_session_times" :value="time"></option>
@@ -143,40 +169,53 @@
                                     {{admin_new_session_validation.time}}
                                 </div>
                             </div>
-                            <div class="col-md-2">
-                                <div class="input-group m-0 p-0">
-                                    <input id="newSessionDuration" class="form-control" :class="{'is-invalid': admin_new_session_validation.duration_mins}" type="number" v-model="admin_new_session_data.duration_mins" required>
-                                    <span class="input-group-text">mins</span>
-                                    <div class="invalid-feedback">
-                                        {{admin_new_session_validation.duration_mins}}
-                                    </div>
+                            <div class="col-md-1 px-1">
+                                <label for="newSessionDuration" class="form-label">Length:</label>
+                                <input id="newSessionDuration" class="form-control no-spinner" :class="{'is-invalid': admin_new_session_validation.duration_mins}" type="number" v-model="admin_new_session_data.duration_mins" title="Duration in mins" required>
+                                <div class="invalid-feedback">
+                                    {{admin_new_session_validation.duration_mins}}
                                 </div>
                             </div>
-                            <div class="col-md-2">
-                                <select id="newSessiomType" class="form-control" :class="{'is-invalid': admin_new_session_validation.session_type_id}" v-model="admin_new_session_data.session_type_id" required>
-                                    <option disabled value="">Select session type&hellip;</option>
+                            <div class="col-md-1 px-1">
+                                <label for="newSessionType" class="form-label">Type:</label>
+                                <select id="newSessionType" class="form-control" :class="{'is-invalid': admin_new_session_validation.session_type_id}" v-model="admin_new_session_data.session_type_id" required>
+                                    <option disabled value="">Type&hellip;</option>
                                     <option v-for="session_type in admin_session_type_list" :value="session_type.id">{{session_type.name}}</option>
                                 </select>
                                 <div class="invalid-feedback">
                                     {{admin_new_session_validation.session_type_id}}
                                 </div>
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-md-2 px-1">
+                                <label for="newSessionTrainer" class="form-label">Trainer:</label>
                                 <select id="newSessionTrainer" class="form-control" :class="{'is-invalid': admin_new_session_validation.trainer_id}" v-model="admin_new_session_data.trainer_id" required>
-                                    <option disabled value="">Select trainer&hellip;</option>
+                                    <option disabled value="">Trainer&hellip;</option>
                                     <option v-for="trainer in admin_trainer_list" :value="trainer.id">{{trainer.name}}</option>
                                 </select>
                                 <div class="invalid-feedback">
                                     {{admin_new_session_validation.trainer_id}}
                                 </div>
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-md-2 px-1">
+                                <label for="newSessionLocation" class="form-label">Location:</label>
                                 <select id="newSessionLocation" class="form-control" :class="{'is-invalid': admin_new_session_validation.location_id}" v-model="admin_new_session_data.location_id" required>
-                                    <option disabled value="">Select location&hellip;</option>
+                                    <option disabled value="">Location&hellip;</option>
                                     <option v-for="location in admin_location_list" :value="location.id">{{location.name}}</option>
                                 </select>
                                 <div class="invalid-feedback">
                                     {{admin_new_session_validation.location_id}}
+                                </div>
+                            </div>
+                            <div class="col-md-2 px-1">
+                                <label for="newSessionBookingLimit" class="form-label">Limit:</label>
+                                <div class="input-group">
+                                    <div class="input-group-text">
+                                        <input class="form-check-input mt-0" type="checkbox" aria-label="Enable max booking limit" title="Enable max bookings limit" v-model="admin_new_session_data.max_bookings_enabled">
+                                    </div>
+                                    <input id="newSessionBookingLimit" type="number" class="form-control no-spinner" v-model="admin_new_session_data.max_bookings" title="Max bookings limit" :class="{'is-invalid': admin_new_session_validation.max_bookings}" :disabled="!admin_new_session_data.max_bookings_enabled" aria-label="Max bookings limit">
+                                </div>
+                                <div class="invalid-feedback">
+                                    {{admin_new_session_validation.max_bookings}}
                                 </div>
                             </div>
                             <div class="col-12">
@@ -223,13 +262,13 @@
                             <li class="list-group-item border-warning-subtle">
                                 <h6>Edit Session</h6>
                                 <form class="row g-3">
-                                    <div class="col-md-2">
+                                    <div class="col-md-2 px-1">
                                         <input id="editSessionDate" class="form-control" :class="{'is-invalid': admin_edit_session_validation.datetime}" type="date" v-model="admin_edit_session_data.date" required>
                                         <div class="invalid-feedback">
                                             {{admin_edit_session_validation.date}}
                                         </div>
                                     </div>
-                                    <div class="col-md-2">
+                                    <div class="col-md-2 px-1">
                                         <input id="editSessionTime" class="form-control" :class="{'is-invalid': admin_edit_session_validation.datetime}" type="time" list="editSessionTimeList" v-model="admin_edit_session_data.time" required>
                                         <datalist id="editSessionTimeList">
                                             <option v-for="time in suggested_session_times" :value="time"></option>
@@ -238,25 +277,22 @@
                                             {{admin_edit_session_validation.time}}
                                         </div>
                                     </div>
-                                    <div class="col-md-2">
-                                        <div class="input-group m-0 p-0">
-                                            <input id="editSessionDuration" class="form-control" :class="{'is-invalid': admin_edit_session_validation.duration_mins}" type="number" v-model="admin_edit_session_data.duration_mins" required>
-                                            <span class="input-group-text">mins</span>
-                                        </div>
+                                    <div class="col-md-1 px-1">
+                                        <input id="editSessionDuration" class="form-control no-spinner" :class="{'is-invalid': admin_edit_session_validation.duration_mins}" type="number" v-model="admin_edit_session_data.duration_mins" required>
                                         <div class="invalid-feedback">
                                             {{admin_edit_session_validation.duration_mins}}
                                         </div>
                                     </div>
-                                    <div class="col-md-2">
+                                    <div class="col-md-1 px-1">
                                         <select id="editSessiomType" class="form-control" :class="{'is-invalid': admin_edit_session_validation.session_type_id}" v-model="admin_edit_session_data.session_type_id" required>
-                                            <option disabled value="">Select session type&hellip;</option>
+                                            <option disabled value="">Type&hellip;</option>
                                             <option v-for="session_type in admin_session_type_list" :value="session_type.id">{{session_type.name}}</option>
                                         </select>
                                         <div class="invalid-feedback">
                                             {{admin_edit_session_validation.session_type}}
                                         </div>
                                     </div>
-                                    <div class="col-md-2">
+                                    <div class="col-md-2 px-1">
                                         <select id="editSessionTrainer" class="form-control" :class="{'is-invalid': admin_edit_session_validation.trainer_id}" v-model="admin_edit_session_data.trainer_id" required>
                                             <option disabled value="">Select trainer&hellip;</option>
                                             <option v-for="trainer in admin_trainer_list" :value="trainer.id">{{trainer.name}}</option>
@@ -265,13 +301,24 @@
                                             {{admin_edit_session_validation.trainer}}
                                         </div>
                                     </div>
-                                    <div class="col-md-2">
+                                    <div class="col-md-2 px-1">
                                         <select id="editSessionLocation" class="form-control" :class="{'is-invalid': admin_edit_session_validation.location_id}" v-model="admin_edit_session_data.location_id" required>
                                             <option disabled value="">Select location&hellip;</option>
                                             <option v-for="location in admin_location_list" :value="location.id">{{location.name}}</option>
                                         </select>
                                         <div class="invalid-feedback">
                                             {{admin_edit_session_validation.location}}
+                                        </div>
+                                    </div>
+                                    <div class="col-md-2 px-1">
+                                        <div class="input-group">
+                                            <div class="input-group-text">
+                                                <input class="form-check-input mt-0" type="checkbox" aria-label="Enable max booking limit" title="Enable max bookings limit" v-model="admin_edit_session_data.max_bookings_enabled">
+                                            </div>
+                                            <input id="editSessionBookingLimit" type="number" class="form-control no-spinner" v-model="admin_edit_session_data.max_bookings" title="Max bookings limit" :class="{'is-invalid': admin_edit_session_validation.max_bookings}" :disabled="!admin_edit_session_data.max_bookings_enabled" aria-label="Max bookings limit">
+                                        </div>
+                                        <div class="invalid-feedback">
+                                            {{admin_edit_session_validation.max_bookings}}
                                         </div>
                                     </div>
                                     <div class="col-12">
@@ -351,6 +398,8 @@
         session_type_id: "",
         location_id: "",
         trainer_id: "",
+        max_bookings_enabled: false,
+        max_bookings: 30
     })
     const admin_new_session_validation = ref({
         ready: false,
@@ -359,7 +408,8 @@
         duration_mins: null,
         session_type_id: null,
         location_id: null,
-        trainer_id: null
+        trainer_id: null,
+        max_bookings: null
     })
     const admin_edit_session_data = reactive({
         date: null,
@@ -367,7 +417,9 @@
         duration_mins: null,
         session_type_id: null,
         location_id: null,
-        trainer_id: null
+        trainer_id: null,
+        max_bookings_enabled: null,
+        max_bookings: null
     })
     const admin_edit_session_validation = ref({
         date: null,
@@ -375,7 +427,8 @@
         duration_mins: null,
         session_type_id: null,
         location_id: null,
-        trainer_id: null
+        trainer_id: null,
+        max_bookings: null
     })
     const suggested_session_times = ref([
         "06:00",
@@ -539,17 +592,16 @@
         })
         .then(res => {
             if (!res.ok) throw res
-            return res.json()
-        })
-        .then(new_booking => {
-            if (new_booking) {
-                session.booking_count ++
-                if (new_booking.person_id === auth.value.id) {
-                    session.booked = true
-                }
+            session.booking_count ++
+            if (person_id === auth.value.id) {
+                session.booked = true
             }
         })
-        .catch(error => error.text().then(error_text => http_err.value = error_text))
+        .catch(error => {
+            error.text().then(error_text => {
+                http_err.value = error_text
+            })
+        })
         .then(_ => {
             loadSessionAttendees(session)
         })
@@ -611,10 +663,12 @@
         let dt = new Date(session.datetime)
         admin_edit_session_data.date = String(dt.getFullYear()).padStart(4, '0') + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0')
         admin_edit_session_data.time = String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0')
-        admin_edit_session_data.duration_mins = session.duration_mins;
-        admin_edit_session_data.session_type_id = session.session_type.id;
-        admin_edit_session_data.trainer_id = session.trainer.id;
-        admin_edit_session_data.location_id = session.location.id;
+        admin_edit_session_data.duration_mins = session.duration_mins
+        admin_edit_session_data.session_type_id = session.session_type.id
+        admin_edit_session_data.trainer_id = session.trainer.id
+        admin_edit_session_data.location_id = session.location.id
+        admin_edit_session_data.max_bookings_enabled = session.max_booking_count !== null
+        admin_edit_session_data.max_bookings = session.max_booking_count
     }
     function onAdminAddMemberBookingInput(e) {
         let name_email = e.target.value
@@ -636,7 +690,8 @@
             duration_mins: new_session.duration_mins,
             session_type_id: new_session.session_type_id,
             location_id: new_session.location_id,
-            trainer_id: new_session.trainer_id
+            trainer_id: new_session.trainer_id,
+            max_bookings: new_session.max_bookings_enabled ? new_session.max_bookings : null
         }
         http_err.value = null
         fetch(SERVER_URL + url, {
@@ -654,7 +709,7 @@
             // Clear the date and time so we can quickly add another
             admin_new_session_data.date = null
             admin_new_session_data.time = null
-        })
+        }).catch(err => err.text().then(err_text => http_err.value = err_text))
     }
 
     async function deleteSelectedSession() {
@@ -681,13 +736,15 @@
         val.duration_mins = new_data.duration_mins > 0 ? null : "Duration must be positive"
         val.trainer_id = new_data.trainer_id ? null : "Trainer must be selected"
         val.location_id = new_data.location_id ? null : "Location must be selected"
+        val.max_bookings = (!new_data.max_bookings_enabled || new_data.max_bookings > 0) ? null : "Max bookings must be positive if enabled"
 
         val.ready = val.date === null &&
             val.time === null &&
             val.session_type_id === null &&
             val.duration_mins === null &&
             val.trainer_id === null &&
-            val.location_id === null
+            val.location_id === null &&
+            val.max_bookings === null
     }
     watch(admin_new_session_data, async (new_data, old_data) => {
         validateEditSession(new_data, admin_new_session_validation.value)
