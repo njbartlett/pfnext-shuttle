@@ -1,3 +1,4 @@
 /target
 .shuttle-storage
+.idea/
 Secrets*.toml
