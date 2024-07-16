@@ -1,15 +1,23 @@
 use std::cmp::Ordering;
-use crate::AppState;
-use chrono::{DateTime, Utc};
+
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 
 use itertools::Itertools;
 
-use rocket::State;
+use rocket::form::{FromForm, FromFormField, ValueField};
+use rocket::form::prelude::ErrorKind::Custom;
+use rocket::http::Status;
 use rocket::response::status::BadRequest;
 use rocket::serde::json::Json;
+use rocket::State;
+use rocket::time::format_description::parse;
 
 use serde::Serialize;
-use sqlx::FromRow;
+use shuttle_runtime::CustomError;
+use sqlx::{FromRow, query, QueryBuilder};
+use sqlx::query::Query;
+
+use crate::AppState;
 
 #[derive(Serialize, FromRow, Clone, Debug)]
 struct Session {
@@ -20,19 +28,38 @@ struct Session {
     location: String
 }
 
-async fn fetch_sessions(state: &State<AppState>) -> Result<Vec<Session>, BadRequest<String>> {
-    let sessions = sqlx::query_as("SELECT s.id, s.datetime, s.duration_mins, t.name as session_type, l.name as location \
-            FROM session as s, session_type as t, location as l \
-            WHERE s.session_type = t.id AND s.location = l.id")
+fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, BadRequest<String>> {
+    if str.is_none() {
+        return Ok(None);
+    }
+    let parsed = DateTime::parse_from_rfc3339(str.as_ref().unwrap());
+    println!("Parsed input {:?} to {:?}", &str, parsed);
+        //.map_err(|e| BadRequest(e.to_string()))?;
+    Ok(Some(parsed.map_err(|e| BadRequest(e.to_string()))?))
+}
+
+async fn fetch_sessions(state: &State<AppState>, from_str: Option<String>, to_str: Option<String>) -> Result<Vec<Session>, BadRequest<String>> {
+    let mut query = QueryBuilder::new("SELECT s.id, s.datetime, s.duration_mins, t.name as session_type, l.name as location \
+        FROM session as s, session_type as t, location as l \
+        WHERE s.session_type = t.id AND s.location = l.id");
+    if let Some(from) = parse_opt_date(from_str)? {
+        query.push(" AND s.datetime >= ");
+        query.push_bind(from);
+    }
+    if let Some(to) = parse_opt_date(to_str)? {
+        query.push(" AND s.datetime <= ");
+        query.push_bind(to);
+    }
+    let sessions = query.build_query_as()
         .fetch_all(&state.pool)
         .await
         .map_err(|e| BadRequest(e.to_string()))?;
     Ok(sessions)
 }
 
-#[get("/sessions")]
-pub async fn list_sessions(state: &State<AppState>) -> Result<Json<Vec<Session>>, BadRequest<String>> {
-    let sessions = fetch_sessions(state).await?;
+#[get("/sessions?<from>&<to>")]
+pub async fn list_sessions(state: &State<AppState>, from: Option<String>, to: Option<String>) -> Result<Json<Vec<Session>>, BadRequest<String>> {
+    let sessions = fetch_sessions(state, from, to).await?;
     Ok(Json(sessions))
 }
 
@@ -54,9 +81,7 @@ impl PartialOrd for SessionDate {
     }
 }
 
-impl Eq for SessionDate {
-
-}
+impl Eq for SessionDate {}
 
 impl Ord for SessionDate {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -64,9 +89,9 @@ impl Ord for SessionDate {
     }
 }
 
-#[get("/sessions_by_date")]
-pub async fn list_sessions_by_date(state: &State<AppState>) -> Result<Json<Vec<SessionDate>>, BadRequest<String>> {
-    let session_dates: Vec<SessionDate> = fetch_sessions(state).await?
+#[get("/sessions_by_date?<from>&<to>")]
+pub async fn list_sessions_by_date(state: &State<AppState>, from: Option<String>, to: Option<String>) -> Result<Json<Vec<SessionDate>>, BadRequest<String>> {
+    let session_dates: Vec<SessionDate> = fetch_sessions(state, from, to).await?
         .into_iter()
         .into_group_map_by(|s| s.datetime.naive_local().date())
         .into_iter()
