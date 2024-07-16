@@ -60,7 +60,3 @@ async function getValidatedAuthToken() {
         return null
     })
 }
-
-function encodeLoginReturnUrl() {
-    return encodeURIComponent(window.location.pathname + window.location.hash)
-}

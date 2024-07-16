@@ -143,13 +143,21 @@
                 <tbody>
                     <tr v-for="time in sessions_by_time(session_data)">
                         <td v-for="day in time.days" class="border-start border-end">
-                            <div v-for="session in day" class="border rounded p-1" :class="{'border-primary': !isPast(session.datetime), 'bg-primary-subtle': !isPast(session.datetime), 'bg-secondary-subtle': isPast(session.datetime)}">
+                            <div v-for="session in day" class="border rounded p-1 position-relative" :class="{'border-primary': !isPast(session.datetime), 'bg-primary-subtle': !isPast(session.datetime), 'bg-secondary-subtle': isPast(session.datetime)}">
+                                <span v-if="session.max_booking_count" class="position-absolute top-0 start-100 translate-middle badge rounded-pill"
+                                      :class="{'text-bg-danger': session.booking_count >= session.max_booking_count, 'text-bg-primary': session.booking_count < session.max_booking_count}"
+                                      :title="session.booking_count + ' member(s) booked of maximum ' + session.max_booking_count">
+                                    {{session.booking_count}}/{{session.max_booking_count}}
+                                </span>
+                                <span v-else class="position-absolute top-0 start-100 translate-middle badge rounded-pill text-bg-primary" :title="session.booking_count + ' member(s) booked'">{{session.booking_count}}</span>
                                 <strong>{{displayTime(session.datetime)}} {{session.session_type.name}}</strong><br>
+<!--                                    <span v-else class="badge rounded-pill text-bg-primary ms-auto" :title="session.booking_count + ' member(s) booked'">{{session.booking_count}}</span>-->
                                 <div v-if="session.location"><i class="bi bi-geo-alt-fill"></i> {{session.location.name}}<br></div>
                                 <div v-if="session.trainer"><i class="bi bi-person-arms-up"></i> {{session.trainer.name}}</div>
                                 <div v-if="session.notes"><i class="bi bi-info-circle"></i> {{session.notes}}</div>
                                 <!-- Member Already Booked -->
-                                <div v-if="session.booked" class="btn-group me-1">
+                                <button v-if="session.booked && isPast(session.datetime)" class="btn btn-outline-success btn-sm disabled me-1 mb-1§">Booked!</button>
+                                <div v-if="session.booked && !isPast(session.datetime)" class="btn-group me-1">
                                     <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
                                         Booked!
                                     </button>
@@ -214,7 +222,8 @@
                         <!-- Member book/cancel -->
                         <td v-if="auth.roles.includes('member')">
                             <!-- Member Already Booked -->
-                            <div v-if="session.booked" class="btn-group me-1">
+                            <button v-if="session.booked && isPast(session.datetime)" class="btn btn-outline-success btn-sm disabled me-1">Booked!</button>
+                            <div v-if="session.booked && !isPast(session.datetime)" class="btn-group me-1">
                                 <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
                                     Booked!
                                 </button>
@@ -428,6 +437,9 @@
 
     function isAdmin(auth) {
         return auth && auth.roles && (auth.roles.includes('admin') || auth.roles.includes('trainer'))
+    }
+    function encodeLoginReturnUrl() {
+        return encodeURIComponent(window.location.pathname + window.location.hash)
     }
 
     function onClickDeleteSession(session) {

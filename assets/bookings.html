@@ -201,6 +201,10 @@
         return auth && auth.roles && (auth.roles.includes('admin') || auth.roles.includes('trainer'))
     }
 
+    function encodeLoginReturnUrl() {
+        return encodeURIComponent(window.location.pathname + window.location.hash)
+    }
+
     createApp({
         setup() {
             return {

@@ -148,7 +148,7 @@
                 email: user_data.email,
                 phone: user_data.phone,
                 website_url: document.location.host,
-                reset_url: SERVER_URL + "/passwordreset.html"
+                reset_url: new URL("/passwordreset.html", document.location).href
             })
         }).then(res => {
             if (!res.ok) throw res

@@ -101,7 +101,7 @@
         <div id="loggedInSection" v-else>
             <div v-if="session">
                 <h2 class="my-3">Session Attendance</h2>
-                <p>Showing attendance for session at {{displayTime(session.datetime)}} on {{displayDate(session.datetime)}}, at {{session.location.name}}.</p>
+                <p>Showing attendance for {{session.session_type.name}} session at {{displayTime(session.datetime)}} on {{displayDate(session.datetime)}}, at {{session.location.name}}.</p>
                 <table class="table table-hover table-sm">
                     <thead>
                         <tr>
@@ -317,6 +317,9 @@
 
     function isAdmin(auth) {
         return auth && (auth.roles.includes('admin') || auth.roles.includes('trainer'))
+    }
+    function encodeLoginReturnUrl() {
+        return encodeURIComponent(window.location.pathname + window.location.hash)
     }
 
     let jwtRaw = localStorage.getItem("jwt")
