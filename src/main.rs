@@ -15,7 +15,7 @@ use rocket::http::{Method, Status};
 use rocket::response::Responder;
 use rocket::response::status::Custom;
 use rocket::serde::Serialize;
-use rocket_cors::{AllowedHeaders, AllowedOrigins};
+use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins};
 use serde::Deserialize;
 use shuttle_runtime::CustomError;
 use shuttle_runtime::Error::StringInterpolation;
@@ -102,7 +102,7 @@ async fn rocket(
     let allowed_origins = AllowedOrigins::All;
     let cors = rocket_cors::CorsOptions {
         allowed_origins,
-        allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete].into_iter().map(From::from).collect(),
+        allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete, Method::Put].into_iter().map(From::from).collect(),
         allowed_headers: AllowedHeaders::All,
         allow_credentials: true,
         ..Default::default()
