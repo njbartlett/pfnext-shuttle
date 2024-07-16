@@ -1,0 +1,4 @@
+The password for {} <{}> on {} has just been changed.
+
+If you did NOT request a password change, please get in touch with us urgently! You can do
+so by replying to this email or by asking on the WhatsApp group."

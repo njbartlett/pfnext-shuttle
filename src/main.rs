@@ -2,27 +2,54 @@
 #[macro_use]
 extern crate rocket;
 
+use std::env;
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, FixedOffset};
+use rand::Error;
 
 use rand::prelude::*;
+use rocket::config;
 use rocket::fs::NamedFile;
 use rocket::fs::relative;
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
 use rocket::serde::Serialize;
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
+use serde::Deserialize;
 use shuttle_runtime::CustomError;
+use shuttle_runtime::Error::StringInterpolation;
 use sqlx::{Executor, FromRow, PgPool};
+use sqlx::migrate::MigrationSource;
 
 mod claims;
 mod sessions;
 mod login;
 mod bookings;
 
+#[derive(Serialize, Deserialize, Debug)]
+struct Config {
+    branding: String,
+    email_sender_name: String,
+    email_sender_address: String,
+    email_replyto_name: String,
+    email_replyto_address: String,
+}
+impl ::std::default::Default for Config {
+    fn default() -> Self {
+        Self {
+            branding: String::from("unbranded"),
+            email_sender_name: String::from("Unknown"),
+            email_sender_address: String::from("unknown@example.com"),
+            email_replyto_name: String::from("Unknown"),
+            email_replyto_address: String::from("unknown@example.com"),
+        }
+    }
+}
+
 struct AppState {
     pool: PgPool,
-    secrets: shuttle_runtime::SecretStore
+    secrets: shuttle_runtime::SecretStore,
+    config: Config
 }
 
 #[rocket::get("/<path..>")]
@@ -46,8 +73,19 @@ async fn rocket(
         .await
         .map_err(CustomError::new)?;
 
+    // Load config
+    let mut config_path = env::current_dir()?;
+    config_path.push("Config.properties");
+    info!("Config path is {}", &config_path.display());
+    let config = confy::load_path(config_path).map_err(CustomError::new)?;
+    info!("Loaded config: {:?}", config);
+
     // Configure CORS
-    let allowed_origins = AllowedOrigins::all();
+    let allow_domain = secrets.get("CORS_ALLOWED_DOMAIN").ok_or_else(|| CustomError::new(Error::new("Missing secret CORS_ALLOWED_DOMAIN")))?;
+    let allow_origin_regex = [
+        format!("^http(s)?://{}", &allow_domain),
+    ];
+    let allowed_origins = AllowedOrigins::some_regex(&allow_origin_regex);
     let cors = rocket_cors::CorsOptions {
         allowed_origins,
         allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete].into_iter().map(From::from).collect(),
@@ -57,10 +95,11 @@ async fn rocket(
     }.to_cors().map_err(CustomError::new)?;
 
     // Configure Rocket
-    let state = AppState { pool, secrets };
+    let state = AppState { pool, secrets, config };
     let rocket = rocket::build()
         .attach(cors)
         .mount("/", routes![
+            static_files,
             login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::list_users,
             sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session,
             sessions::list_locations, sessions::list_session_types, sessions::update_session,

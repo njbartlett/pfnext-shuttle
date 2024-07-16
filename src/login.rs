@@ -6,7 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use mail_send::mail_builder::headers::address::{Address, EmailAddress};
 use mail_send::mail_builder::MessageBuilder;
 use mail_send::smtp::message::{IntoMessage, Message};
-use mail_send::SmtpClientBuilder;
+use mail_send::{Credentials, SmtpClientBuilder};
 use password_auth::{generate_hash, verify_password};
 use passwords::PasswordGenerator;
 use rocket::http::{Header, Status};
@@ -39,10 +39,6 @@ const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
 const INVALID_LOGIN_MESSAGE: &str = "incorrect username or password";
 const TEMP_PASSWORD_MINIMUM_RESEND_WAIT: Duration = Duration::minutes(-2);
 const TEMP_PASSWORD_EXPIRY: Duration = Duration::minutes(10);
-const EMAIL_SENDER_NAME: &str = "FitNext Admin";
-const EMAIL_SENDER_ADDRESS: &str = "admin@fitnext.uk";
-const EMAIL_REPLYTO_NAME: &str = "FitNext Admin";
-const EMAIL_REPLYTO_ADDRESS: &str = "admin@fitnext.uk";
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -152,6 +148,7 @@ pub struct NewUserRequest {
     name: String,
     email: String,
     phone: Option<String>,
+    website_url: String,
     reset_url: String
 }
 
@@ -168,6 +165,7 @@ struct CountResult {
 #[derive(Deserialize)]
 pub struct PasswordResetRequest {
     email: String,
+    website_url: String,
     reset_url: String
 }
 
@@ -195,24 +193,13 @@ pub async fn request_pwd_reset(
     // Create temp password and send
     let temp_password = create_temp_password(&state.pool, user_record.id).await?;
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &reset_request.reset_url, encode(&user_record.email), encode(&temp_password));
-    let text = format!(
-        "You are receiving this email because you requested a password reset at fitnext.uk. To reset\n\
-        your password, use the following temporary password on the password reset page:\n\
-        \n\
-            {}\n\
-        \n\
-        Alternatively click the following link or copy it into your web browser's address bar: \n\
-        \n\
-        {}\n\
-        \n\
-        This password and link will expire in {} minutes.\n\
-        \n\
-        If you did not request a password reset, you can safely ignore this email.", temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
+    let text = format!(include_str!("reset_email.txt"), &reset_request.website_url, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
+    let sender = Address::new_address(Some(&state.config.email_sender_name), &state.config.email_sender_address);
     let message = MessageBuilder::new()
-        .from((EMAIL_SENDER_NAME, EMAIL_SENDER_ADDRESS))
-        .reply_to((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
+        .from(sender.clone())
+        .reply_to(sender)
         .to(Address::new_address(Some(&user_record.name), &user_record.email))
-        .subject("💪 FitNext Password Reset")
+        .subject(format!("Password Reset for {}", &state.config.branding))
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
@@ -245,35 +232,13 @@ pub async fn register_user(
     // Create temp password and send to email
     let temp_password = create_temp_password(&state.pool, user_updated.id).await?;
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &new_user.reset_url, encode(&new_user.email), encode(&temp_password));
-    let text = format!(
-        "You are receiving this email because you registered a new account on fitnext.uk.\n\
-        To enable your account, please use the following temporary password on the password reset\n\
-        page:\n\
-        \n\
-        {}\n\
-        \n\
-        Alternatively click the following link or copy it into your web browser's address bar: \n\
-        \n\
-        {}\n\
-        \n\
-        This password and link will expire in {} minutes. If you did not request a new account, you\n\
-        can safely ignore this email.\n\
-        \n\
-        When clicking the above link or using the provided temporary password to complete your\n\
-        registration, you acknowledge that you have read and agreed to the following waiver:\n\
-        \n\
-        By attending classes and using the park or venue or facilities and equipment, you hereby\n\
-        acknowledge and agree on behalf of yourself that you have voluntarily chosen to participate\n\
-        in intense physical exercise. We rely on you carrying out your own health self-assessment\n\
-        prior to taking part in any class. You agree to assume full responsibility for any and all\n\
-        injuries or damage to your person or property, which are sustained or aggravated by you in\n\
-        relation to the use of equipment and/or park or venue facilities.", temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
+    let text = format!(include_str!("register_email.txt"), &new_user.website_url, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
+    let sender = Address::new_address(Some(&state.config.email_sender_name), &state.config.email_sender_address);
     let message = MessageBuilder::new()
-        .from((EMAIL_SENDER_NAME, EMAIL_SENDER_ADDRESS))
-        .reply_to((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
+        .from(sender.clone())
+        .reply_to(sender)
         .to(Address::new_address(Some(&new_user.name), &new_user.email))
-        .bcc((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
-        .subject("💪 FitNext User Registration")
+        .subject(format!("New User Registration for {}", &state.config.branding))
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
@@ -322,7 +287,8 @@ async fn create_temp_password(pool: &PgPool, user_id: i64) -> Result<String, Cus
 pub struct UserPasswordReset {
     email: String,
     temp_password: String,
-    new_password: String
+    new_password: String,
+    website_url: String
 }
 
 #[derive(FromRow)]
@@ -371,17 +337,13 @@ pub async fn reset_pwd(
         .inspect_err(|e| error!("Failed to delete temporary password for user {}: {}", &user_record.email, e));
 
     // Send acknowledgement email
-    let text = format!(
-        "The password for {} <{}> on fitnext.uk has just been changed.\n\
-        \n\
-        If you did NOT request a password change, please get in touch with us urgently! You can do\n\
-        so by replying to this email or by asking on the WhatsApp group.", &user_record.name, &user_record.email);
+    let text = format!(include_str!("post_reset_email.txt"), &user_record.name, &user_record.email, &user_pwd_reset.website_url);
+    let sender = Address::new_address(Some(&state.config.email_sender_name), &state.config.email_sender_address);
     let message = MessageBuilder::new()
-        .from((EMAIL_SENDER_NAME, EMAIL_SENDER_ADDRESS))
-        .reply_to((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
+        .from(sender.clone())
+        .reply_to(sender)
         .to(Address::new_address(Some(&user_record.name), &user_record.email))
-        .bcc((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
-        .subject("💪 FitNext Password Changed")
+        .subject(format!("Password Changed for {}", &state.config.branding))
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
@@ -484,12 +446,18 @@ async fn send_email<'x>(
         .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
     let smtp_password = secrets.get("SMTP_PASSWORD")
         .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
+    let smtp_host = secrets.get("SMTP_HOST")
+        .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
+    let smtp_port: u16 = secrets.get("SMTP_HOST_PORT")
+        .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?
+        .parse::<u16>()
+        .map_err(|e| Custom(Status::InternalServerError, format!("Failed to read SMTP port: {}", e.to_string())))?;
 
     // Open the client
     info!("Connecting to SMTP server...");
-    let mut client = SmtpClientBuilder::new("smtp.fastmail.com", 465)
+    let mut client = SmtpClientBuilder::new(smtp_host, smtp_port)
         .implicit_tls(true)
-        .credentials((smtp_username.as_str(), smtp_password.as_str()))
+        .credentials(Credentials::new(smtp_username, smtp_password))
         .connect()
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;

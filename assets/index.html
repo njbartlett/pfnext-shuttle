@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>FitNext</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💪</text></svg>">
+    <title>Another Level</title>
+    <link rel="icon" href="img/favicon.png">
 
     <link href="styles/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
@@ -13,9 +13,12 @@
 
 <body>
 <!-- Navbar -->
-<nav class="navbar navbar-expand navbar-dark bg-dark">
+<nav class="navbar navbar-expand navbar-dark bg-body-tertiary">
     <div class="container-fluid">
-        <a class="navbar-brand" href="#">💪 FitNext</a>
+        <a class="navbar-brand">
+            <img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24">
+            Another Level
+        </a>
         <div class="collapse navbar-collapse">
             <ul class="navbar-nav me-auto">
                 <li class="nav-item"><a class="nav-link disabled" aria-disabled="true" href="index.html">Main</a></li>
@@ -26,23 +29,25 @@
     </div>
 </nav>
 
+<!-- Banner -->
+<div class="container-fluid text-center my-5">
+    <h1 style="font-size: xxx-large">Another Level</h1>
+    <h3 style="font-variant: all-small-caps">Community Fitness</h3>
+    <div class="btn-group mt-3" role="group" aria-label="Basic outlined example">
+        <a id="btnLogin" class="btn btn-outline-primary mb-1 disabled" href="login.html">Login/Register</a>
+        <a id="btnSessions" class="btn btn-outline-primary mb-1 disabled" href="sessions.html">Book Sessions</a>
+        <a id="btnBookings" class="btn btn-outline-primary mb-1 disabled" href="bookings.html">View Bookings</a>
+    </div>
+</div>
+
 <!-- Main Content -->
 <div class="container-lg">
-
-    <div class="card border-primary my-3">
-        <h5 class="card-header border-primary bg-primary-subtle">Welcome to FitNext</h5>
-        <div class="card-body text-success">
-            <a id="btnLogin" class="btn btn-primary mb-1 disabled" href="login.html">Login/Register</a>
-            <a id="btnSessions" class="btn btn-primary mb-1 disabled" href="sessions.html">Book Sessions</a>
-            <a id="btnBookings" class="btn btn-primary mb-1 disabled" href="bookings.html">View Bookings</a>
-        </div>
-    </div>
 
     <div class="card my-3">
         <h5 class="card-header"><i class="bi bi-question-circle"></i>&nbsp;How It Works</h5>
         <div class="card-body">
             <p>
-                We are still working on our membership model. In the interim, we are using a pay-as-you-go system:
+                We are still working on our membership model. In the interim we are using a pay-as-you-go system:
             </p>
             <ol>
                 <li><a href="login.html">Create an account or login to your existing account</a>.</li>
@@ -127,7 +132,7 @@
 
 <div class="sticky-bottom bg-body">
     <div class="container-lg my-3 px-3">
-        <p>&copy; 2024 Neil Bartlett all rights reserved. FitNext v202.</p>
+        <p>&copy; 2024 Neil Bartlett all rights reserved. ALCFv001.</p>
     </div>
 </div>
 
@@ -136,11 +141,15 @@
 <script>
     function setDisabledLinkButton(link, disabled) {
         if (disabled) {
-            link.setAttribute("class", "btn btn-primary mb-1 disabled")
             link.setAttribute("aria-disabled", "true")
+            link.setAttribute("class", link.getAttribute("class") + " disabled")
         } else {
-            link.setAttribute("class", "btn mb-1 btn-primary")
             link.removeAttribute("aria-disabled")
+            let c = link.getAttribute("class")
+            let index = c.indexOf(" disabled")
+            if (index >= 0) {
+                link.setAttribute("class", c.substring(0, index))
+            }
         }
     }
 
