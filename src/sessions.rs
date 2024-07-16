@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use crate::AppState;
 use chrono::{DateTime, Utc};
 
@@ -22,8 +23,7 @@ struct Session {
 async fn fetch_sessions(state: &State<AppState>) -> Result<Vec<Session>, BadRequest<String>> {
     let sessions = sqlx::query_as("SELECT s.id, s.datetime, s.duration_mins, t.name as session_type, l.name as location \
             FROM session as s, session_type as t, location as l \
-            WHERE s.session_type = t.id AND s.location = l.id \
-            ORDER BY s.datetime")
+            WHERE s.session_type = t.id AND s.location = l.id")
         .fetch_all(&state.pool)
         .await
         .map_err(|e| BadRequest(e.to_string()))?;
@@ -42,6 +42,28 @@ struct SessionDate {
     sessions: Vec<Session>
 }
 
+impl PartialEq<Self> for SessionDate {
+    fn eq(&self, other: &Self) -> bool {
+        return false;
+    }
+}
+
+impl PartialOrd for SessionDate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        return Some(self.date.cmp(&other.date));
+    }
+}
+
+impl Eq for SessionDate {
+
+}
+
+impl Ord for SessionDate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        return self.date.cmp(&other.date);
+    }
+}
+
 #[get("/sessions_by_date")]
 pub async fn list_sessions_by_date(state: &State<AppState>) -> Result<Json<Vec<SessionDate>>, BadRequest<String>> {
     let session_dates: Vec<SessionDate> = fetch_sessions(state).await?
@@ -49,6 +71,7 @@ pub async fn list_sessions_by_date(state: &State<AppState>) -> Result<Json<Vec<S
         .into_group_map_by(|s| s.datetime.naive_local().date())
         .into_iter()
         .map(|(k, v)| SessionDate { date: k, sessions: v })
+        .sorted()
         .collect();
     Ok(Json(session_dates))
 }
