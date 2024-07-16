@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-<!--    <meta name="viewport" content="width=device-width, initial-scale=1">-->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <title>FitNext</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💪</text></svg>">
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
-    <!--<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">-->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
         [v-cloak] {
             display: none;
@@ -19,20 +19,29 @@
 <body>
 <div id="app">
     <!-- Navbar -->
-<!--    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">-->
-<!--        <div class="container"></div>-->
-<!--    </nav>-->
+    <nav class="navbar navbar-expand navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">💪 FitNext</a>
+            <div class="collapse navbar-collapse">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" aria-current="page" href="sessions.html">Sessions</a>
+                    </li>
+                </ul>
+                <div v-cloak v-if="auth">
+                    <button id="logout" type="button" class="btn btn-outline-primary" @click="onLogout">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
 
     <!-- Main Content -->
     <div class="container-lg">
 
-        <!-- User Welcome or Login Form -->
-        <div id="user" class="bg-light border rounded m-2 p-2" v-cloak>
-            <div v-if="auth.access_token">
-                <h5>Welcome, {{auth.name}}!</h5>
-                Roles: <span v-for="role in auth.roles"><span class="badge rounded-pill text-bg-secondary">{{role}}</span>&nbsp;</span> <button id="logoutSubmit" type="button" class="btn btn-outline-danger btn-sm" @click="onLogout">Logout</button>
-            </div>
-            <div v-else>
+        <!-- Not logged in section -->
+        <div v-cloak v-if="!auth">
+            <!-- Login Section -->
+            <div  class="bg-light border rounded m-2 p-2">
                 <h5>Welcome! Please login...</h5>
                 <form @submit.prevent="onLogin">
                     <div class="mb-3">
@@ -44,65 +53,158 @@
                         <input type="password" class="form-control" id="inputPassword" v-model="login_data.password">
                     </div>
                     <button id="loginSubmit" type="submit" class="btn btn-primary">Submit</button>
-                    <div class="text-danger" v-if="auth.error">{{auth.error}}</div>
+                    <div class="text-danger" v-if="auth_err">{{auth_err}}</div>
                 </form>
-            </div>
-        </div> <!-- end user welcome/login -->
+            </div> <!-- end login section -->
 
-        <!-- Session List -->
-        <div id="sessions" class="bg-light border rounded m-2 p-2" v-cloak v-if="auth.access_token && auth.roles.includes('member')">
-            <h5>Session List</h5>
-            <nav aria-label="Session Navigation">
-                <ul class="pagination justify-content-center">
-                    <li class="page-item" :class="{ active: session_pagination.page === 0 }"><a class="page-link" @click.stop="set_session_page(0)">This Week</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.page === 1 }"><a class="page-link" @click.stop="set_session_page(1)">Next Week</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.page === 2 }"><a class="page-link" @click.stop="set_session_page(2)">+2 Weeks</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.page === 3 }"><a class="page-link" @click.stop="set_session_page(3)">+3 Weeks</a></li>
-                </ul>
-            </nav>
-            <table class="table table-hover table-bordered">
-                <thead>
-                    <tr>
-                        <th scope="col">Date</th>
-                        <th scope="col">Time</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Trainer</th>
-                        <th scope="col">Location</th>
-                        <th scope="col"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="session in session_data">
-                        <td>{{display_date(session.datetime)}}</td>
-                        <td>{{display_time(session.datetime)}} ({{session.duration_mins}} mins.)&nbsp;<span class="badge rounded-pill text-bg-primary" title="Number of attendees registered">{{session.booking_count}}</span></td>
-                        <td>{{session.session_type}}</td>
-                        <td>{{session.trainer}}</td>
-                        <td>{{session.location}}</td>
-                        <td>
-                            <div v-if="session.booked">
-                                <span>Booked!</span> <button class="btn btn-outline-danger btn-sm" @click="cancelSession(session)">Cancel</button>
-                            </div>
-                            <div v-else><button class="btn btn-primary btn-sm" @click="bookSession(session)">Book</button></div>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+            <!-- Change Password section -->
+            <div v-if="login_data.change_password" class="bg-light border rounded m-2 p-2" v-cloak>
+                <h5>Please Enter a new Password</h5>
+
+                <form @submit.prevent="onChangePasswordSubmit">
+                    <div class="mb-3">
+                        <label for="inputNewPassword" class="form-label">New Password</label>
+                        <input type="password" class="form-control" id="inputNewPassword" v-model="change_password_data.new_password" @input="onChangePasswordInput()">
+                    </div>
+                    <div class="mb-3">
+                        <label for="inputNewPasswordRepeat" class="form-label">New Password (Repeat)</label>
+                        <input type="password" class="form-control" id="inputNewPasswordRepeat" v-model="change_password_data.new_password_repeat" @input="onChangePasswordInput()">
+                    </div>
+                    <ul>
+                        <li v-for="err in change_password_data.validation_errs" class="text-danger">{{err}}</li>
+                    </ul>
+                    <button id="changePasswordSubmit" type="submit" class="btn btn-danger" :disabled="!change_password_data.validation_ok">Change Password</button>
+                </form>
+            </div> <!-- End change password section -->
+        </div> <!-- End not logged in section -->
+
+        <!-- Logged in section -->
+        <div v-cloak v-if="auth">
+            <!-- Welcome Header -->
+            <div class="bg-light border rounded m-2 p-2">
+                <h5>Welcome, {{auth.name}}!</h5>
+                <span v-for="role in auth.roles"><span class="badge rounded-pill text-bg-dark">{{role}}</span>&nbsp;</span>
+            </div>
+
+            <!-- Show sessions -->
+            <div v-if="session_err" class="m-2 p-2">
+                <div class="alert alert-danger">
+                    {{session_err}}
+                </div>
+            </div>
+            <div v-else class="bg-light border rounded m-2 p-2">
+                <h5>Sessions Available to Book</h5>
+                <nav aria-label="Session Navigation">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item" :class="{ active: session_pagination.page === 0 }"><a class="page-link" @click.stop="setSessionPage(0)">This Week</a></li>
+                        <li class="page-item" :class="{ active: session_pagination.page === 1 }"><a class="page-link" @click.stop="setSessionPage(1)">Next Week</a></li>
+                        <li class="page-item" :class="{ active: session_pagination.page === 2 }"><a class="page-link" @click.stop="setSessionPage(2)">+2 Weeks</a></li>
+                        <li class="page-item" :class="{ active: session_pagination.page === 3 }"><a class="page-link" @click.stop="setSessionPage(3)">+3 Weeks</a></li>
+                    </ul>
+                </nav>
+                <!-- Loading spinner -->
+                <div v-if="session_data === null" class="d-flex justify-content-center">
+                    <div class="spinner-border text-secondary" role="status">
+                        <span class="visually-hidden">Loading&hellip;</span>
+                    </div>
+                </div>
+                <table v-else class="table table-hover table-bordered">
+                    <thead>
+                        <tr>
+                            <th scope="col">Date</th>
+                            <th scope="col">Time</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Trainer</th>
+                            <th scope="col">Location</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="session in session_data" @click="setSelectedSession(session)">
+                            <td>{{displayDate(session.datetime)}}</td>
+                            <td>{{displayTime(session.datetime)}} ({{session.duration_mins}} mins.)&nbsp;<span class="badge rounded-pill text-bg-primary" title="Number of attendees registered">{{session.booking_count}}</span></td>
+                            <td>{{session.session_type}}</td>
+                            <td>{{session.trainer}}</td>
+                            <td>{{session.location}}</td>
+                            <!-- Member book/cancel -->
+                            <td>
+                                <span v-if="session.booked">
+                                    <span>Booked!</span> <button class="btn btn-outline-danger btn-sm" @click="cancelBookingCurrentUser(session)"><i class="bi bi-x-circle"></i> Cancel</button>
+                                </span>
+                                <span v-else>
+                                    <button class="btn btn-primary btn-sm" @click="bookSession(session)">Book</button>
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p>Showing {{session_data.length}} session(s) for selected week.</p>
+            </div>
+
+            <!-- Session Admin Section-->
+            <div v-if="auth.roles.includes('admin') || auth.roles.includes('trainer')" class="bg-danger-subtle border rounded m-2 p-2">
+                <h5>Session Attendees (Admin/Trainer Only)</h5>
+                <div v-if="session_selection && session_selection.bookings">
+                    <p>Showing session at {{displayTime(session_selection.datetime)}} on {{displayDate(session_selection.datetime)}} at {{session_selection.location}}</p>
+                    <table class="table table-bordered table-danger">
+                        <thead>
+                            <tr>
+                                <th scope="col">Member Name</th>
+                                <th scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="booking in session_selection.bookings">
+                                <td>{{booking.person_name}}</td>
+                                <td><button class="btn btn-outline-danger btn-sm" @click="cancelBooking(booking.person_id, session_selection)"><i class="bi bi-x-circle"></i> Cancel</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div v-else>
+                    <p>Select a session above.</p>
+                </div>
+            </div> <!-- End session admin section -->
+        </div> <!-- End logged in section -->
+
+        <!-- Debugging section -->
+        <div v-cloak class="bg-warning-subtle border rounded m-2 p-2">
+            <h5>Debug Info</h5>
+            auth: <pre>{{auth}}</pre>
+            login_data: <pre>{{login_data}}</pre>
+            auth_err: <pre>{{auth_err}}</pre>
+        </div> <!-- end debugging -->
     </div> <!-- end main content -->
 
-    <hr>
-    <p>Raw auth:</p>
-    <pre>{{auth}}</pre>
-    <p>Raw session_data</p>
-    <pre>{{session_data}}</pre>
-    <p>Raw session_err</p>
-    <pre>{{session_err}}</pre>
-
-</div>
+</div> <!-- End App -->
 </body>
 
 <script type="module">
     import { createApp, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js'
+
+    const MILLIS_IN_WEEK = 1000 * 60 * 60 * 24 * 7
+    const SERVER_URL = "http://localhost:8000"
+
+    const auth = ref(null)
+    const login_data = ref({
+        username: "",
+        password: "",
+        change_password: false
+    })
+    const auth_err = ref(null)
+    const change_password_data = ref({
+        new_password: "",
+        new_password_repeat: "",
+        validation_errs: [],
+        validation_ok: false
+    })
+
+    const session_data = ref([])
+    const session_pagination = ref({
+        page: 0
+    })
+    const session_selection = ref(null)
+    const session_err = ref(null)
 
     function current_week_start() {
         let start = new Date()
@@ -110,19 +212,10 @@
         start.setHours(0, 0, 0, 0)
         return start
     }
-    const auth = ref({})
-    const login_data = ref({
-        username: "njbartlett@gmail.com",
-        password: "password"
-    })
-    const session_pagination = ref({
-        page: 0
-    })
-    const session_data = ref({})
-    const session_err = ref({})
 
     async function onLogin() {
-        fetch("http://localhost:8000/login", {
+        auth_err.value = null
+        fetch(SERVER_URL + "/login", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify(login_data.value)
@@ -131,18 +224,72 @@
             return res.json()
         }).then(json => {
             auth.value = json
-            loadSessions()
+            localStorage.setItem("jwt", JSON.stringify(json))
+            window.location.href = "sessions.html"
         }).catch(error => {
-            error.text().then(error_text => auth.value = {error: error_text})
+            error.text().then(error_text => {
+                auth.value = null
+                if ("must change password" === error_text) {
+                    login_data.value.change_password = true
+                } else {
+                    auth_err.value = error_text
+                }
+            })
         })
     }
-    function onLogout() {
-        auth.value = {}
+
+    function onChangePasswordInput() {
+        var errs = []
+        if (change_password_data.value.new_password === login_data.value.password) {
+            errs.push("New password cannot be the same as the old password")
+        }
+        if (change_password_data.value.new_password.length < 8) {
+            errs.push("Password must be at least 8 characters long")
+        }
+        if (change_password_data.value.new_password !== change_password_data.value.new_password_repeat) {
+            errs.push("Passwords do not match")
+        }
+        change_password_data.value.validation_errs = errs
+        change_password_data.value.validation_ok = errs.length === 0
     }
 
-    const MILLIS_IN_WEEK = 1000 * 60 * 60 * 24 * 7
+    async function onChangePasswordSubmit() {
+        auth_err.value = null
+        fetch(SERVER_URL + "/change_password", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                username: login_data.value.username,
+                current_password: login_data.value.password,
+                new_password: change_password_data.value.new_password
+            })
+        }).then(res => {
+            if (!res.ok) throw res
+            return res.json()
+        }).then(json => {
+            auth.value = json
+            localStorage.setItem("jwt", JSON.stringify(json))
+            window.location.href = "sessions.html"
+        }).catch(error => {
+            error.text().then(error_text => {
+                auth.value = null
+                auth_err.value = error_text
+            })
+        })
+    }
+
+    function onLogout() {
+        localStorage.removeItem("jwt")
+        auth.value = null
+        auth_err.value = null
+    }
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
 
     async function loadSessions() {
+        session_selection.value = null
         const now = new Date()
         const currentWeekStart = current_week_start();
         let pageStart = new Date(currentWeekStart.getTime() + session_pagination.value.page * MILLIS_IN_WEEK)
@@ -151,7 +298,13 @@
             pageStart = now
         }
 
-        fetch("/sessions/list?from=" + pageStart.toISOString() + "&to=" + pageEnd.toISOString(), {
+        if (auth.value === null) {
+            session_data.value = []
+            return
+        }
+
+        session_data.value = null
+        fetch(SERVER_URL + "/sessions/list?from=" + pageStart.toISOString() + "&to=" + pageEnd.toISOString(), {
             headers: {
                 'Authorization': 'Bearer ' + auth.value.access_token
             },
@@ -166,21 +319,50 @@
             session_data.value = json
         })
         .catch(err => {
-            err.text().then(err_text => {
-                session_data.value = {
-                    error: err_text
-                }
-            });
+            session_data.value = []
+            if (err.status === 401) {
+                auth.value = null
+                session_err.value = null
+            } else if (err.status === 403) {
+                auth.value = null
+                session_err.value = "you are not authorized for this operation, your login may have expired"
+            } else {
+                err.text().then(err_text => session_err.value = err_text)
+            }
         })
     }
 
+    async function loadSessionAttendees(session) {
+        if (auth && auth.value.roles.includes('admin')) {
+            fetch(SERVER_URL + "/bookings?session_id=" + session.id, {
+                headers: {
+                    'Authorization': 'Bearer ' + auth.value.access_token
+                },
+                withCredentials: true,
+                credentials: 'include'
+            })
+            .then(res => {
+                if (!res.ok) throw res
+                return res.json()
+            })
+            .then(json => {
+                session_selection.value.bookings = json
+            })
+            .catch(err => {
+                err.text().then(err_text => session_err.value = err_text)
+            })
+        }
+    }
+
     async function bookSession(session) {
-        fetch("/bookings", {
+        session_selection.value = session
+        fetch(SERVER_URL + "/bookings", {
             method: "POST",
             headers: {
                 'Authorization': 'Bearer ' + auth.value.access_token
             },
             body: JSON.stringify({
+                person_id: auth.value.id,
                 session_id: session.id
             }),
             withCredentials: true,
@@ -194,15 +376,24 @@
         .catch(error => error.text().then(text => {
             console.log("Error: ", text)
         }))
+        .then(_ => {
+            loadSessionAttendees(session)
+        })
     }
 
-    async function cancelSession(session) {
-        fetch("/bookings", {
+    async function cancelBookingCurrentUser(session) {
+        return cancelBooking(auth.value.id, session)
+    }
+
+    async function cancelBooking(person_id, session) {
+        session_selection.value = session
+        fetch(SERVER_URL + "/bookings", {
             method: "DELETE",
             headers: {
                 'Authorization': 'Bearer ' + auth.value.access_token
             },
             body: JSON.stringify({
+                person_id: person_id,
                 session_id: session.id
             }),
             withCredentials: true,
@@ -216,9 +407,12 @@
         .catch(error => error.text().then(text => {
             console.log("Error: ", text)
         }))
+        .then(_ => {
+            loadSessionAttendees(session)
+        })
     }
 
-    function display_date(datestr) {
+    function displayDate(datestr) {
         return new Date(datestr).toLocaleDateString("en-GB", {
             // dateStyle: "medium",
             weekday: "short",
@@ -227,7 +421,7 @@
         });
     }
 
-    function display_time(datetimestr) {
+    function displayTime(datetimestr) {
         const datetime = new Date(datetimestr);
         return datetime.toLocaleTimeString("en-GB", {
             timeStyle: "short",
@@ -235,7 +429,7 @@
         });
     }
 
-    function set_session_page(page) {
+    function setSessionPage(page) {
         let current = session_pagination.value.page
         session_pagination.value.page = page
         if (current !== page) {
@@ -243,18 +437,30 @@
         }
     }
 
+    function setSelectedSession(session) {
+        session_selection.value = session
+        loadSessionAttendees(session)
+    }
+
     createApp({
         setup() {
             return {
-                // Data
-                auth, login_data, session_pagination, session_data, session_err,
-                // Callback functions
-                onLogin, onLogout, bookSession, cancelSession,
+                // Login data and callback functions
+                auth, login_data, auth_err, change_password_data,
+                onLogin, onLogout, onChangePasswordInput, onChangePasswordSubmit,
+
+                // Session/booking data and callbacks
+                session_data, session_pagination, session_selection, session_err,
+                bookSession, cancelBookingCurrentUser, cancelBooking, setSelectedSession, setSessionPage,
+
                 // Utility functions
-                display_date, display_time, set_session_page
+                displayDate, displayTime
             }
         }
     })
     .mount('#app')
+
+    auth.value = JSON.parse(localStorage.getItem("jwt"))
+    loadSessions()
 </script>
 </html>

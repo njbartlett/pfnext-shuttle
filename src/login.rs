@@ -1,21 +1,22 @@
 use std::ops::Add;
-use chrono::{DateTime, Duration, Utc};
-use itertools::Itertools;
+
+use chrono::{Duration, Utc};
 use password_auth::{generate_hash, verify_password};
 use rocket::http::{Header, Status};
 use rocket::response::status::Custom;
 use rocket::serde::{Deserialize, Serialize};
-use rocket::serde::json::{Json, to_string};
+use rocket::serde::json::Json;
 use rocket::State;
 use sqlx::{FromRow, query_as};
+
 use crate::AppState;
 use crate::claims::Claims;
 
-const ACCESS_TOKEN_TTL: Duration = Duration::minutes(1);
+const ACCESS_TOKEN_TTL: Duration = Duration::minutes(10);
 const REFRESH_TOKEN_EXIRATION: Duration = Duration::days(1);
 
 #[derive(Deserialize)]
-struct LoginRequest {
+pub struct LoginRequest {
     username: String,
     password: String,
 }
@@ -26,11 +27,12 @@ struct UserLoginRecord {
     name: String,
     email: String,
     pwd: String,
+    must_change_pwd: bool,
     roles: String
 }
 
 #[derive(Serialize)]
-struct LoggedInUser {
+pub struct LoggedInUser {
     id: i64,
     name: String,
     email: String,
@@ -42,7 +44,7 @@ const INVALID_LOGIN_MESSAGE: &str = "incorrect username or password";
 
 #[derive(Responder)]
 #[response(status = 200, content_type = "application/json")]
-struct LoginResponse {
+pub struct LoginResponse {
     inner: Json<LoggedInUser>,
     cookie: Header<'static>
 }
@@ -56,19 +58,9 @@ impl LoginResponse {
             cookie: Header::new("Set-Cookie", format!("refresh_token={};HttpOnly;Expires={}", refresh_token, cookie_expiry.to_rfc2822()))
         })
     }
-
 }
 
-#[post("/login", data = "<login>")]
-pub async fn login(state: &State<AppState>, login: Json<LoginRequest>) -> Result<LoginResponse, Custom<String>> {
-    // Find user and verify password
-    let login_record: UserLoginRecord = query_as("SELECT id, name, email, pwd, roles FROM person WHERE email = $1")
-        .bind(&login.username)
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|e| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
-    verify_password(&login.password, &login_record.pwd)
-        .map_err(|e| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
+fn build_login_response(login_record: UserLoginRecord) -> Result<LoginResponse, Custom<String>> {
     let roles = login_record.roles.split(",").map(|s| s.to_string()).collect::<Vec<_>>();
 
     // Create access token
@@ -85,8 +77,62 @@ pub async fn login(state: &State<AppState>, login: Json<LoginRequest>) -> Result
     LoginResponse::from_logged_in_user(body)
 }
 
+async fn verify_user(state: &State<AppState>, username: &str, password: &str) -> Result<UserLoginRecord, Custom<String>>{
+    let login_record: UserLoginRecord = query_as("SELECT id, name, email, pwd, must_change_pwd, roles FROM person WHERE email = $1")
+        .bind(username)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|_| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
+
+    verify_password(password, &login_record.pwd)
+        .map_err(|_| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
+
+    Ok(login_record)
+}
+
+#[post("/login", data = "<login>")]
+pub async fn login(state: &State<AppState>, login: Json<LoginRequest>) -> Result<LoginResponse, Custom<String>> {
+    let login_record = verify_user(state, &login.username, &login.password).await?;
+    if login_record.must_change_pwd {
+        return Err(Custom(Status::Forbidden, "must change password".to_string()));
+    }
+    build_login_response(login_record)
+}
+
+#[derive(Deserialize)]
+pub struct UpdatePasswordRequest {
+    username: String,
+    current_password: String,
+    new_password: String
+}
+
+#[post("/change_password", data = "<password_update>")]
+pub async fn change_password(state: &State<AppState>, password_update: Json<UpdatePasswordRequest>) -> Result<LoginResponse, Custom<String>> {
+    let login_record = verify_user(state, &password_update.username, &password_update.current_password).await?;
+
+    // Check suitability of new password
+    if password_update.new_password.eq(&password_update.current_password) {
+        return Err(Custom(Status::Forbidden, "new password cannot be the same as old password".to_string()));
+    }
+    if password_update.new_password.chars().count() < 8 {
+        return Err(Custom(Status::Forbidden, "new password must be at least 8 characters in length".to_string()));
+    }
+
+    // Update to new password and set must_change_pwd to false
+    let pwd_hash = generate_hash(&password_update.new_password);
+    query_as("UPDATE person SET pwd = $1, must_change_pwd = FALSE WHERE email = $2")
+        .bind(pwd_hash)
+        .bind(&password_update.username)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|_| Custom(Status::Unauthorized, "Failed to update password".to_string()))?
+        .ok_or(Custom(Status::NotFound, "No user updated".to_string()))?;
+
+    build_login_response(login_record)
+}
+
 #[derive(Deserialize, Debug)]
-struct NewUser {
+pub struct NewUser {
     name: String,
     email: String,
     pwd: String,
@@ -95,22 +141,20 @@ struct NewUser {
 }
 
 #[derive(Serialize, FromRow, Debug)]
-struct NewUserResponse {
+pub struct NewUserResponse {
     id: i64
 }
 
-#[derive(Responder)]
-#[response(status = 500)]
-struct MyInternalError {
-    text: String
-}
-
 #[post("/create_user", data="<user>")]
-pub async fn create_user(state: &State<AppState>, user: Json<NewUser>) -> Result<Json<NewUserResponse>, MyInternalError> {
+pub async fn create_user(state: &State<AppState>, claims: Claims, user: Json<NewUser>) -> Result<Json<NewUserResponse>, Custom<String>> {
+    if !claims.roles.contains(&"admin".to_string()) {
+        return Err(Custom(Status::Forbidden, "only admins can create users".to_string()))
+    }
+
     let pwd_hash = generate_hash(&user.pwd);
     let roles_str = user.roles.join(",");
-    let new_user_response: NewUserResponse = query_as("INSERT INTO person (name, email, phone, pwd, roles) \
-            VALUES ($1, $2, $3, $4, $5)\
+    let new_user_response: NewUserResponse = query_as("INSERT INTO person (name, email, phone, pwd, roles, must_change_pwd) \
+            VALUES ($1, $2, $3, $4, $5, TRUE) \
             RETURNING id")
         .bind(&user.name)
         .bind(&user.email)
@@ -119,8 +163,6 @@ pub async fn create_user(state: &State<AppState>, user: Json<NewUser>) -> Result
         .bind(roles_str)
         .fetch_one(&state.pool)
         .await
-        .map_err(|e| MyInternalError{
-            text: e.to_string()
-        })?;
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     Ok(Json(new_user_response))
 }

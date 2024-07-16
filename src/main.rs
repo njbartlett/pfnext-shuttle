@@ -2,47 +2,21 @@
 #[macro_use]
 extern crate rocket;
 
-mod claims;
-mod sessions;
-mod persons;
-mod login;
-
-use claims::Claims;
+use std::path::{Path, PathBuf};
 
 use rocket::fs::NamedFile;
-use rocket::fs::{relative};
-use rocket::http::{Header, Method, Status};
-use rocket::response::status::{BadRequest, Custom};
-use rocket::serde::json::Json;
-use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins};
-
-use serde::{Deserialize, Serialize};
-use sqlx::{Executor, FromRow, PgPool, query_as, QueryBuilder};
-use std::path::{Path, PathBuf};
-use itertools::Itertools;
-use password_auth::{generate_hash, verify_password};
-use rocket::{Request, Response, State};
-use rocket::http::StatusClass::ServerError;
-use rocket::response::Responder;
+use rocket::fs::relative;
+use rocket::http::Method;
+use rocket_cors::{AllowedHeaders, AllowedOrigins};
 use shuttle_runtime::CustomError;
-use sqlx::postgres::PgQueryResult;
+use sqlx::{Executor, PgPool};
+
+mod claims;
+mod sessions;
+mod login;
 
 struct AppState {
     pool: PgPool,
-}
-
-#[derive(Serialize)]
-struct PrivateResponse {
-    message: String,
-    user: String,
-}
-
-#[get("/private")]
-fn private(user: Claims) -> Json<PrivateResponse> {
-    Json(PrivateResponse {
-        message: "The `Claims` request guard ensures only valid JWTs can access this endpoint".to_string(),
-        user: user.email,
-    })
 }
 
 #[rocket::get("/<path..>")]
@@ -78,12 +52,9 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
     let rocket = rocket::build()
         .attach(cors)
         .mount("/", routes![
-            static_files,
-            login::login,
-            login::create_user,
-            private,
+            login::login, login::change_password, login::create_user,
             sessions::list_sessions, sessions::list_sessions_by_date,
-            sessions::book_session, sessions::cancel_booking
+            sessions::list_bookings, sessions::book_session, sessions::cancel_booking
         ])
         .manage(state);
 

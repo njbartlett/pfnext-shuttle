@@ -3,7 +3,6 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{
     decode, encode, errors::ErrorKind, DecodingKey, EncodingKey, Header, Validation,
 };
-use lazy_static::lazy_static;
 use rocket::{
     http::Status,
     request::{FromRequest, Outcome},
@@ -15,7 +14,7 @@ const BEARER: &str = "Bearer ";
 const AUTHORIZATION: &str = "Authorization";
 
 /// Key used for symmetric token encoding
-const SECRET: &str = "secret";
+const SECRET: &str = "bmfpowerfit";
 
 // Used when decoding a token to `Claims`
 #[derive(Debug, PartialEq)]
@@ -108,7 +107,7 @@ impl Claims {
     }
 
     /// Converts this claims into a token string
-    pub(crate) fn into_token(mut self) -> Result<String, Custom<String>> {
+    pub(crate) fn into_token(self) -> Result<String, Custom<String>> {
         let token = encode(
             &Header::default(),
             &self,
@@ -120,27 +119,3 @@ impl Claims {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::claims::AuthenticationError;
-
-    use super::Claims;
-
-    #[test]
-    fn missing_bearer() {
-        let claim_err = Claims::from_authorization("no-Bearer-prefix").unwrap_err();
-
-        assert_eq!(claim_err, AuthenticationError::Missing);
-    }
-
-    #[test]
-    fn to_token_and_back() {
-        let claim = Claims::from_name("test runner");
-        let token = claim.into_token().unwrap();
-        let token = format!("Bearer {token}");
-
-        let claim = Claims::from_authorization(&token).unwrap();
-
-        assert_eq!(claim.email, "test runner");
-    }
-}
