@@ -64,7 +64,7 @@ pub async fn list_bookings(
     to: Option<String>
 ) -> Result<Json<Vec<SessionBookingFull>>, Custom<String>> {
     let mut qb = QueryBuilder::new("SELECT b.person_id, p.name as person_name, p.email as person_email, b.session_id, \
-                s.datetime as session_datetime, s.duration_mins as session_duration_mins, s.location as session_location_id, l.name as session_location_name, l.address as session_location_address,\
+                s.datetime as session_datetime, s.duration_mins as session_duration_mins, s.location as session_location_id, l.name as session_location_name, l.address as session_location_address, \
                 s.session_type as session_type_id, t.name as session_type_name \
             FROM booking as b, person as p, session as s, location as l, session_type as t \
             WHERE b.person_id = p.id \
@@ -95,7 +95,7 @@ pub async fn list_bookings(
         qb.push_bind(to);
     }
 
-    qb.push(" ORDER BY session_datetime");
+    qb.push(" ORDER BY session_datetime, person_name");
     let bookings = qb.build_query_as()
         .fetch_all(&state.pool)
         .await
@@ -161,8 +161,9 @@ async fn book_session_with_max_bookings(state: &State<AppState>, person_id: i64,
         SELECT {}, {} FROM booking \
         WHERE session_id = {} \
         HAVING count(*) < {} \
+        ON CONFLICT DO NOTHING \
         RETURNING person_id, session_id; \
-        COMMIT;", session_id, person_id, session_id, session_id, max_bookings);
+        END;", session_id, person_id, session_id, session_id, max_bookings);
     info!("Executing raw SQL: {}", &sql);
     let mut result_stream = raw_sql(sql.as_str()).execute_many(&state.pool);
 
