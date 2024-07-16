@@ -36,6 +36,7 @@ struct Config {
     email_sender_address: String,
     email_replyto_name: String,
     email_replyto_address: String,
+    cors_allowed: String
 }
 impl ::std::default::Default for Config {
     fn default() -> Self {
@@ -94,7 +95,7 @@ async fn rocket(
     info!("Loaded config: {:?}", config);
 
     // Configure CORS
-    let allow_domain = [secrets.get("CORS_ALLOWED").ok_or_else(|| CustomError::new(Error::new("Missing secret CORS_ALLOWED")))?];
+    let allow_domain = [config.cors_allowed];
     let allowed_origins = AllowedOrigins::some_regex(&allow_domain);
     let cors = rocket_cors::CorsOptions {
         allowed_origins,
