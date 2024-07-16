@@ -53,6 +53,9 @@
                     <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
+                    <div v-cloak v-if="auth && isAdmin(auth)"> <!-- Admin only links -->
+                        <li class="nav-item"><a class="nav-link" href="members.html">Members</a></li>
+                    </div>
                 </ul>
                 <div v-cloak v-if="auth">
                     <span class="navbar-text"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</span>&nbsp;
@@ -100,6 +103,9 @@
                                 <td>Email</td><td>{{auth.email}}</td>
                             </tr>
                             <tr>
+                                <td>Phone</td><td>{{auth.phone}}</td>
+                            </tr>
+                            <tr>
                                 <td>Roles</td>
                                 <td>
                                     <span v-for="role in auth.roles">
@@ -121,7 +127,7 @@
             </div> <!-- end show profile card -->
 
             <!-- Delete profile card -->
-            <div class="card border-danger">
+            <div class="card border-danger my-3">
                 <div class="card-header bg-danger-subtle">
                     <div class="row">
                         <div class="col-10 fs-5">
@@ -251,7 +257,7 @@
         setup() {
             return {
                 auth, http_err, reset_password_message, delete_profile, delete_profile_message,
-                onResetPassword, onLogout, onDeleteProfile
+                onResetPassword, onLogout, onDeleteProfile, isAdmin
             }
         }
     }).mount('#app')

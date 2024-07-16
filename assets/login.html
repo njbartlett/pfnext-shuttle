@@ -40,6 +40,9 @@
                     <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
+                    <div v-cloak v-if="auth && isAdmin(auth)"> <!-- Admin only links -->
+                        <li class="nav-item"><a class="nav-link" href="members.html">Members</a></li>
+                    </div>
                 </ul>
             </div>
         </div>
@@ -215,7 +218,7 @@
                 // Data
                 auth, user_data, user_data_val, http_err, reset_password_result,
                 // Callbacks
-                onLogin, onForgottenPassword, onUnforgottenPassword, onResetPassword, onLogout
+                onLogin, onForgottenPassword, onUnforgottenPassword, onResetPassword, onLogout, isAdmin
             }
         }
     })

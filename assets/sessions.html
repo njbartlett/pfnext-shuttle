@@ -48,6 +48,9 @@
                     <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link active" aria-current="page">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
+                    <div v-cloak v-if="auth && isAdmin(auth)"> <!-- Admin only links -->
+                        <li class="nav-item"><a class="nav-link" href="members.html">Members</a></li>
+                    </div>
                 </ul>
                 <div v-cloak v-if="auth">
                     <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
@@ -247,7 +250,7 @@
                                         <td><form>
                                             <div class="input-group m-0 p-0">
                                                 <span class="input-group-text">+</span>
-                                                <input class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="onAdminAddMemberBookingInput">
+                                                <input type="search" class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="onAdminAddMemberBookingInput">
                                             </div>
                                             <datalist id="addMemberToSessionOptions">
                                                 <option v-for="user_name_email in admin_user_data.name_email_to_user.keys()" :value="user_name_email">
@@ -495,7 +498,7 @@
             count: 0,
             name_email_to_user: null
         }
-        if (!isAuthorizedSessionAdmin(auth.value)) {
+        if (!isAdmin(auth.value)) {
             return
         }
 
@@ -655,7 +658,7 @@
     }
 
     function setSelectedSession(session) {
-        if (!isAuthorizedSessionAdmin(auth.value)) {
+        if (!isAdmin(auth.value)) {
             return
         }
         session_selection.value = session
@@ -769,7 +772,7 @@
                 admin_edit_session_data, admin_edit_session_validation, suggested_session_times,
 
                 // Misc callbacks and utility functions
-                onLogout, displayDate, displayTime
+                onLogout, displayDate, displayTime, isAdmin
             }
         }
     })

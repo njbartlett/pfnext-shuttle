@@ -58,6 +58,7 @@ pub struct LoggedInUser {
     id: i64,
     name: String,
     email: String,
+    phone: Option<String>,
     roles: Vec<String>,
     access_token: String
 }
@@ -421,6 +422,34 @@ pub async fn delete_user(state: &State<AppState>, claims: Claims, user_id: i64, 
     Ok(NoContent)
 }
 
+#[derive(Deserialize)]
+pub struct UserUpdate {
+    name: String,
+    email: String,
+    phone: Option<String>,
+    roles: Vec<String>
+}
+
+#[put("/users/<user_id>", data="<update>")]
+pub async fn update_user(state: &State<AppState>, claims: Claims, user_id: i64, update: Json<UserUpdate>) -> Result<Accepted<String>, Custom<String>> {
+    if !claims.uid == user_id {
+        let _ = claims.assert_roles_contains("admin")?;
+    }
+
+    let roles_str = &update.roles.join(",");
+    let _: UserLoginRecord = query_as("UPDATE person SET name = $1, email = $2, phone = $3, roles = $4 WHERE id = $5 RETURNING id, name, email, phone, pwd, roles")
+        .bind(&update.name)
+        .bind(&update.email)
+        .bind(&update.phone)
+        .bind(roles_str)
+        .bind(user_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+
+    Ok(Accepted(String::from("user updated")))
+}
+
 fn verify_suitable_password(new_password: &str, current_password: &str) -> Result<(), Custom<String>> {
     // Check suitability of new password
     if new_password.eq(current_password) {
@@ -444,16 +473,17 @@ fn build_login_response(
     let roles = parse_roles(&login_record.roles);
     let access_token_key = secrets.get("ACCESS_TOKEN_KEY")
         .ok_or(Custom(Status::InternalServerError, String::from("missing secret ACCESS_TOKEN_KEY")))?;
-    let access_token = Claims::create(login_record.id, &login_record.email, &roles, ACCESS_TOKEN_TTL).into_token(&access_token_key)?;
+    let access_token = Claims::create(login_record.id, &login_record.email, &login_record.phone, &roles, ACCESS_TOKEN_TTL).into_token(&access_token_key)?;
     let refresh_token_key = secrets.get("REFRESH_TOKEN_KEY")
         .ok_or(Custom(Status::InternalServerError, String::from("missing secret REFRESH_TOKEN_KEY")))?;
-    let refresh_token: String = Claims::create(login_record.id, &login_record.email, &roles, REFRESH_TOKEN_EXIRATION).into_token(&refresh_token_key)?;
+    let refresh_token: String = Claims::create(login_record.id, &login_record.email, &login_record.phone, &roles, REFRESH_TOKEN_EXIRATION).into_token(&refresh_token_key)?;
 
     // Build login response body
     let body = LoggedInUser {
         id: login_record.id,
         name: login_record.name,
         email: login_record.email,
+        phone: login_record.phone,
         roles,
         access_token
     };

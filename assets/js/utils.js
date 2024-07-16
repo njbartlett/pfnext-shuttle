@@ -36,7 +36,7 @@ function onLogout() {
     window.location.href = 'login.html'
 }
 
-function isAuthorizedSessionAdmin(auth) {
+function isAdmin(auth) {
     return auth && (auth.roles.includes('admin') || auth.roles.includes('trainer'))
 }
 

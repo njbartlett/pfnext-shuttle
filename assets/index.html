@@ -40,6 +40,9 @@
                     <li class="nav-item"><a class="nav-link active" aria-current="page">Home</a></li>
                     <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
+                    <div v-cloak v-if="auth && isAdmin(auth)"> <!-- Admin only links -->
+                        <li class="nav-item"><a class="nav-link" href="members.html">Members</a></li>
+                    </div>
                 </ul>
                 <div v-cloak v-if="auth">
                     <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
@@ -204,7 +207,9 @@
 
     createApp({
         setup() {
-            return { auth, onLogoutNoNavigate }
+            return {
+                auth, onLogoutNoNavigate, isAdmin
+            }
         }
     }).mount('#app')
 

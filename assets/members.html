@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>Another Level &dash; Member Admin</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <meta name="msapplication-TileColor" content="#da532c">
+    <meta name="theme-color" content="#333333">
+
+    <link href="styles/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        [v-cloak] {
+            display: none;
+        }
+    </style>
+    <script src="js/bootstrap.min.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/lodash.min.js"></script>
+</head>
+
+<body>
+<div id="app">
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg bg-body-tertiary" role="navigation">
+        <div class="container-fluid">
+            <!-- Another Level brand -->
+            <a class="navbar-brand" href="index.html"><img src="img/alcf_logo_white.png" alt="Another Level Logo" width="30" height="24" class="d-inline-block align-text-top"> Another Level</a>
+            <!-- Collapse state toggle button -->
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <!-- Navbar collapsible list -->
+            <div id="navbarContent" class="collapse navbar-collapse">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
+                    <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
+                    <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
+                    <div v-cloak v-if="auth && isAdmin(auth)"> <!-- Admin only links -->
+                        <li class="nav-item"><a class="nav-link active" aria-current="page">Members</a></li>
+                    </div>
+                </ul>
+                <div v-cloak v-if="auth">
+                    <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
+                    <button id="logout" type="button" class="btn btn-outline-danger" @click="onLogout">Logout</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container-lg" v-cloak>
+        <!-- REST errors -->
+        <div v-if="http_err" class="alert alert-danger my-2" role="alert">
+            <div v-if="'authorization token expired' === http_err">
+                Your login session has expired, please <a href="login.html">login again</a>.
+            </div>
+            <div v-else>
+                {{http_err}}
+            </div>
+        </div>
+
+        <!-- Not logged in section -->
+        <div class="alert alert-danger my-2" role="alert" v-if="!auth">
+            <div class="card-body text-danger">
+                <p class="card-text">
+                    You are not logged in. Please return to the <a href="login.html">login page</a>.
+                </p>
+            </div>
+        </div> <!-- End not logged in section -->
+
+        <!-- Logged in section -->
+        <div id="loggedInSection" v-if="auth">
+            <div class="my-2">
+                <form>
+                    <label for="selectMemberDataList">Select member:</label>
+                    <input type="search" class="form-control" id="selectMemberDataList" placeholder="Type member name to search&hellip;" list="selectMemberOptions" @input.prevent="onSelectedMember">
+                    <datalist id="selectMemberOptions">
+                        <option v-if="admin_all_user_data.name_email_to_user" v-for="user_name_email in admin_all_user_data.name_email_to_user.keys()" :value="user_name_email">
+                    </datalist>
+                </form>
+            </div>
+            <div v-if="admin_selected_user.id" class="card my-3">
+                <h5 class="card-header">Member Details</h5>
+                <div class="card-body">
+                    <form @submit.prevent="">
+                        <table class="table table-borderless">
+                            <tbody>
+                            <tr>
+                                <td>Name</td>
+                                <td><input type="text" class="form-control" v-model="admin_selected_user.name"></td>
+                            </tr>
+                            <tr>
+                                <td>Email</td>
+                                <td><input type="text" class="form-control" v-model="admin_selected_user.email"></td>
+                            </tr>
+                            <tr>
+                                <td>Phone</td>
+                                <td><input type="text" class="form-control" v-model="admin_selected_user.phone"></td>
+                            </tr>
+                            <tr>
+                                <td>Roles</td>
+                                <td>
+                                    <span v-for="role in admin_selected_user.roles">
+                                        <span class="badge rounded-pill text-bg-primary">{{role}}&nbsp;<a href="" class="link-light" @click.prevent="deleteRole(role, admin_selected_user)"><i class="bi bi-x-circle"></i></a></span>&nbsp;
+                                    </span>&nbsp;
+                                    <div class="input-group my-2 p-0">
+                                        <span class="input-group-text">+</span>
+                                        <br>
+                                        <input class="form-control" type="text" placeholder="New role name" v-model="new_role.name" :class="{'is-invalid': new_role_validation.name}">
+                                        <button type="button" class="btn btn-outline-primary" @click.prevent="addRole(new_role.name, admin_selected_user)" :disabled="!new_role_validation.ready">Add Role</button>
+                                        <div class="invalid-feedback">{{new_role_validation.name}}</div>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td></td>
+                                <td>
+                                    <button type="button" class="btn btn-outline-primary" :disabled="!edit_user_changed" @click.prevent="onSave(admin_selected_user)">Save</button>&nbsp;<button type="button" class="btn btn-outline-secondary" :disabled="!edit_user_changed" @click.prevent="onReset">Reset</button>
+                                </td>
+                            </tr>
+                            </tbody>
+                        </table>
+                    </form>
+                </div>
+            </div>
+        </div> <!-- End logged in section -->
+    </div> <!-- end main content -->
+</div> <!-- end Vue app -->
+
+<div class="sticky-bottom bg-body">
+    <div class="container-lg my-3 px-3">
+        <p>&copy; 2024 Neil Bartlett all rights reserved. ALCFv001.</p>
+    </div>
+</div>
+</body>
+
+<script type="module">
+    import { createApp, reactive, ref, watch } from './js/vue.esm-browser.js'
+
+    const auth = ref(null)
+    const http_err = ref(null)
+
+    // All users
+    const admin_all_user_data = ref({
+        count: 0,
+        name_email_to_user: null
+    })
+    const admin_selected_user_orig = ref(null)
+    const admin_selected_user = reactive({
+        id: null, name: null, email: null, phone: null, roles: []
+    })
+    const edit_user_changed = ref(false)
+    const new_role = reactive({
+        name: null
+    })
+    const new_role_validation = ref({
+        name: null,
+        ready: false
+    })
+
+    async function loadAllUsersTables() {
+        admin_all_user_data.value = {
+            count: 0,
+            name_email_to_user: null
+        }
+        if (!isAdmin(auth.value)) {
+            return
+        }
+
+        // Fetch all users and load into the admin_user_data map
+        http_err.value = null
+        fetch(SERVER_URL + "/users/list", {
+            headers: {
+                'Authorization': 'Bearer ' + auth.value.access_token
+            },
+            withCredentials: true,
+            credentials: 'include'
+        }).then(res => {
+            if (!res.ok) throw res
+            return res.json()
+        }).then(users => {
+            let count = 0
+            let name_email_to_user = new Map()
+            for (let user of users) {
+                let name_email = user.name + ' <' + user.email + '>'
+                name_email_to_user.set(name_email, user)
+                count++
+            }
+            admin_all_user_data.value = {
+                count: count,
+                name_email_to_user: name_email_to_user
+            }
+            console.log("Loaded user list")
+        }).catch(err => err.text().then(error_text => {
+            http_err.value = error_text
+        }))
+    }
+
+    function onSelectedMember(e) {
+        let name_email = e.target.value
+        let user = admin_all_user_data.value.name_email_to_user.get(name_email)
+        admin_selected_user_orig.value = user
+        setSelectedMember(user)
+    }
+
+    function setSelectedMember(user) {
+        admin_selected_user.id = user ? user.id : null
+        admin_selected_user.name = user ? user.name : null
+        admin_selected_user.email = user ? user.email : null
+        admin_selected_user.phone = user ? user.phone : null
+        admin_selected_user.roles = user ? user.roles.slice()  : null // clone
+    }
+
+    async function deleteRole(role, user) {
+        let i = user.roles.indexOf(role)
+        if (i > -1) {
+            user.roles.splice(i, 1)
+        }
+        validateEditUser(user)
+    }
+
+    async function addRole(role, user) {
+        let i = user.roles.indexOf(role)
+        if (i < 0) {
+            user.roles.push(role)
+        }
+        validateEditUser(user)
+        new_role.name = null
+    }
+
+    async function onSave(user) {
+        http_err.value = null
+        fetch(SERVER_URL + "/users/" + user.id, {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + auth.value.access_token
+            },
+            body: JSON.stringify(admin_selected_user)
+        }).then(res => {
+            if (!res.ok) throw res
+            loadAllUsersTables()
+        }).catch(err => {
+            err.text().then(err_text => {
+                http_err.value = err_text
+            })
+        })
+    }
+
+    function onReset() {
+        setSelectedMember(admin_selected_user_orig.value)
+    }
+
+    function validateEditUser(new_data) {
+        edit_user_changed.value = !_.isEqual(new_data, admin_selected_user_orig.value)
+    }
+
+    createApp({
+        setup() {
+            return {
+                auth, http_err, admin_all_user_data, admin_selected_user_orig, admin_selected_user, edit_user_changed,
+                new_role, new_role_validation,
+                onSelectedMember, addRole, deleteRole, onSave, onReset, onLogout, isAdmin
+            }
+        }
+    }).mount('#app')
+
+    let jwtRaw = localStorage.getItem("jwt")
+    if (jwtRaw) {
+        auth.value = JSON.parse(jwtRaw)
+        loadAllUsersTables()
+    } else {
+        auth.value = null
+    }
+
+    watch(admin_selected_user, validateEditUser)
+    watch(new_role, new_data => {
+        let val = new_role_validation.value
+        if (!new_data.name || new_data.name.length === 0) {
+            val.name = null
+            val.ready = false
+        } else if (new_data.name.match(/^[a-z0-9-]+$/)) {
+            val.name = null
+            val.ready = true
+        } else {
+            val.name = "Lowercase letters, digits, or hyphen only"
+            val.ready = false
+        }
+    })
+
+</script>
