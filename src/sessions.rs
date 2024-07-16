@@ -291,7 +291,7 @@ pub async fn list_locations(state: &State<AppState>) -> Result<Json<Vec<SessionL
 
 #[get("/session_types")]
 pub async fn list_session_types(state: &State<AppState>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
-    query_as("SELECT id, name, requires_trainer FROM session_type")
+    query_as("SELECT id, name, requires_trainer FROM session_type ORDER BY requires_trainer DESC, name")
         .fetch_all(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
