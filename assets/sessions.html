@@ -102,30 +102,20 @@
                         <li class="page-item" :class="{ active: session_pagination.page === 3 }"><a class="page-link" @click.stop="setSessionPage(3)">+3 Weeks</a></li>
                     </ul>
                 </nav>
-                <!-- Loading spinner -->
-                <div v-if="session_data === null" class="d-flex justify-content-center">
-                    <div class="spinner-border text-secondary" role="status">
-                        <span class="visually-hidden">Loading&hellip;</span>
-                    </div>
-                </div>
-                <table v-else class="table table-hover table-bordered">
+                <table class="table table-hover table-bordered">
                     <thead>
                         <tr>
-                            <th scope="col">Date</th>
-                            <th scope="col">Time</th>
-                            <th scope="col">Type</th>
+                            <th scope="col">Date & Time</th>
                             <th scope="col">Trainer</th>
-                            <th scope="col">Location</th>
+                            <th scope="col">Type & Location</th>
                             <th scope="col">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr v-for="session in session_data" @click="setSelectedSession(session)">
-                            <td>{{displayDate(session.datetime)}}</td>
-                            <td>{{displayTime(session.datetime)}} ({{session.duration_mins}} mins.)&nbsp;<span class="badge rounded-pill text-bg-primary" title="Number of attendees registered">{{session.booking_count}}</span></td>
-                            <td>{{session.session_type}}</td>
+                            <td>{{displayDate(session.datetime)}} at {{displayTime(session.datetime)}}&nbsp;<span class="badge rounded-pill text-bg-primary" title="Number of attendees registered">{{session.booking_count}}</span></td>
                             <td>{{session.trainer}}</td>
-                            <td>{{session.location}}</td>
+                            <td>{{session.session_type}}, {{session.location}}</td>
                             <!-- Member book/cancel -->
                             <td>
                                 <span v-if="session.booked">
@@ -142,11 +132,11 @@
             </div>
 
             <!-- Session Admin Section-->
-            <div v-if="auth.roles.includes('admin') || auth.roles.includes('trainer')" class="bg-danger-subtle border rounded m-2 p-2">
+            <div v-if="auth.roles.includes('admin') || auth.roles.includes('trainer')" class="bg-warning-subtle border rounded m-2 p-2">
                 <h5>Session Attendees (Admin/Trainer Only)</h5>
                 <div v-if="session_selection && session_selection.bookings">
                     <p>Showing session at {{displayTime(session_selection.datetime)}} on {{displayDate(session_selection.datetime)}} at {{session_selection.location}}</p>
-                    <table class="table table-bordered table-danger">
+                    <table class="table table-bordered table-warning">
                         <thead>
                             <tr>
                                 <th scope="col">Member Name</th>
@@ -167,13 +157,13 @@
             </div> <!-- End session admin section -->
         </div> <!-- End logged in section -->
 
-        <!-- Debugging section -->
-        <div v-cloak class="bg-warning-subtle border rounded m-2 p-2">
+        <!-- Debugging section
+        <div v-cloak class="bg-danger-subtle border rounded m-2 p-2">
             <h5>Debug Info</h5>
             auth: <pre>{{auth}}</pre>
-            login_data: <pre>{{login_data}}</pre>
             auth_err: <pre>{{auth_err}}</pre>
-        </div> <!-- end debugging -->
+            session_data: <pre>{{session_data}}</pre>
+        </div>--> <!-- end debugging -->
     </div> <!-- end main content -->
 
 </div> <!-- End App -->
@@ -183,6 +173,7 @@
     import { createApp, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js'
 
     const MILLIS_IN_WEEK = 1000 * 60 * 60 * 24 * 7
+    //const SERVER_URL = "https://pfnext.shuttleapp.rs"
     const SERVER_URL = "http://localhost:8000"
 
     const auth = ref(null)
@@ -303,7 +294,6 @@
             return
         }
 
-        session_data.value = null
         fetch(SERVER_URL + "/sessions/list?from=" + pageStart.toISOString() + "&to=" + pageEnd.toISOString(), {
             headers: {
                 'Authorization': 'Bearer ' + auth.value.access_token
@@ -333,7 +323,7 @@
     }
 
     async function loadSessionAttendees(session) {
-        if (auth && auth.value.roles.includes('admin')) {
+        if (auth && (auth.value.roles.includes('admin') || auth.value.roles.includes('trainer'))) {
             fetch(SERVER_URL + "/bookings?session_id=" + session.id, {
                 headers: {
                     'Authorization': 'Bearer ' + auth.value.access_token

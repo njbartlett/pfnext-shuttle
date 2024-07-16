@@ -120,7 +120,7 @@ pub async fn change_password(state: &State<AppState>, password_update: Json<Upda
 
     // Update to new password and set must_change_pwd to false
     let pwd_hash = generate_hash(&password_update.new_password);
-    query_as("UPDATE person SET pwd = $1, must_change_pwd = FALSE WHERE email = $2")
+    query_as("UPDATE person SET pwd = $1, must_change_pwd = FALSE WHERE email = $2 RETURNING id")
         .bind(pwd_hash)
         .bind(&password_update.username)
         .fetch_optional(&state.pool)

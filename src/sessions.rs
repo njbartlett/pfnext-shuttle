@@ -1,7 +1,4 @@
-use std::cmp::Ordering;
-
 use chrono::{DateTime, FixedOffset, Utc};
-use itertools::Itertools;
 use rocket::http::Status;
 use rocket::response::status::Custom;
 use rocket::serde::Deserialize;
@@ -35,7 +32,8 @@ fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, 
     Ok(Some(parsed.map_err(|e| Custom(Status::UnprocessableEntity, e.to_string()))?))
 }
 
-async fn fetch_sessions(state: &State<AppState>, claim: Claims, from_str: Option<String>, to_str: Option<String>) -> Result<Vec<Session>, Custom<String>> {
+#[get("/sessions/list?<from>&<to>")]
+pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>) -> Result<Json<Vec<Session>>, Custom<String>> {
     let mut qb = QueryBuilder::new("SELECT s.id, s.datetime, s.duration_mins, t.name as session_type, loc.name as location, trainer.name as trainer, \
         CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
     qb.push_bind(claim.uid);
@@ -44,24 +42,19 @@ async fn fetch_sessions(state: &State<AppState>, claim: Claims, from_str: Option
         FROM session as s, session_type as t, location as loc, person as trainer \
         WHERE s.session_type = t.id AND s.location = loc.id AND s.trainer = trainer.id");
 
-    if let Some(from) = parse_opt_date(from_str)? {
+    if let Some(from) = parse_opt_date(from)? {
         qb.push(" AND s.datetime >= ");
         qb.push_bind(from);
     }
-    if let Some(to) = parse_opt_date(to_str)? {
+    if let Some(to) = parse_opt_date(to)? {
         qb.push(" AND s.datetime <= ");
         qb.push_bind(to);
     }
+    qb.push(" ORDER BY s.datetime ASC");
     let sessions = qb.build_query_as()
         .fetch_all(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    Ok(sessions)
-}
-
-#[get("/sessions/list?<from>&<to>")]
-pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>) -> Result<Json<Vec<Session>>, Custom<String>> {
-    let sessions = fetch_sessions(state, claim, from, to).await?;
     Ok(Json(sessions))
 }
 
@@ -69,38 +62,6 @@ pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<
 pub struct SessionDate {
     date: chrono::NaiveDate,
     sessions: Vec<Session>
-}
-
-impl PartialEq<Self> for SessionDate {
-    fn eq(&self, _other: &Self) -> bool {
-        return false;
-    }
-}
-
-impl PartialOrd for SessionDate {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        return Some(self.date.cmp(&other.date));
-    }
-}
-
-impl Eq for SessionDate {}
-
-impl Ord for SessionDate {
-    fn cmp(&self, other: &Self) -> Ordering {
-        return self.date.cmp(&other.date);
-    }
-}
-
-#[get("/sessions/list_by_date?<from>&<to>")]
-pub async fn list_sessions_by_date(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>) -> Result<Json<Vec<SessionDate>>, Custom<String>> {
-    let session_dates: Vec<SessionDate> = fetch_sessions(state, claim, from, to).await?
-        .into_iter()
-        .into_group_map_by(|s| s.datetime.naive_local().date())
-        .into_iter()
-        .map(|(k, v)| SessionDate { date: k, sessions: v })
-        .sorted()
-        .collect();
-    Ok(Json(session_dates))
 }
 
 #[derive(Serialize, Deserialize, FromRow, Debug)]

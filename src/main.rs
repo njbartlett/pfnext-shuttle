@@ -52,9 +52,9 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
     let rocket = rocket::build()
         .attach(cors)
         .mount("/", routes![
+            static_files,
             login::login, login::change_password, login::create_user,
-            sessions::list_sessions, sessions::list_sessions_by_date,
-            sessions::list_bookings, sessions::book_session, sessions::cancel_booking
+            sessions::list_sessions, sessions::list_bookings, sessions::book_session, sessions::cancel_booking
         ])
         .manage(state);
 

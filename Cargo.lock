@@ -1500,7 +1500,6 @@ name = "pfnext"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "itertools",
  "jsonwebtoken",
  "lazy_static",
  "password-auth",
