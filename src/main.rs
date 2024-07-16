@@ -5,7 +5,6 @@ extern crate rocket;
 mod claims;
 mod sessions;
 mod persons;
-mod cors;
 
 use claims::Claims;
 
@@ -14,6 +13,7 @@ use rocket::fs::{relative};
 use rocket::http::{Header, Method, Status};
 use rocket::response::status::Custom;
 use rocket::serde::json::Json;
+use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins};
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -98,11 +98,20 @@ pub async fn static_files(mut path: PathBuf) -> Option<NamedFile> {
 
 #[shuttle_runtime::main]
 async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::ShuttleRocket {
+    let allowed_origins = AllowedOrigins::all();
+    let cors = rocket_cors::CorsOptions {
+        allowed_origins,
+        allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete].into_iter().map(From::from).collect(),
+        allowed_headers: AllowedHeaders::All,
+        allow_credentials: true,
+        ..Default::default()
+    }.to_cors().map_err(CustomError::new)?;
+
     let state = AppState { pool };
 
     let rocket = rocket::build()
+        .attach(cors)
         .mount("/", routes![
-            cors::cors_options,
             authenticate,
             sessions::list_sessions,
             sessions::list_sessions_by_date,
