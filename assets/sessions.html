@@ -102,10 +102,10 @@
                                 <!-- Member book/cancel -->
                                 <td v-if="auth.roles.includes('member')">
                                     <span v-if="session.booked">
-                                        <span>Booked!</span> <button class="btn btn-outline-danger btn-sm" @click="userCancelBooking(session)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</button>
+                                        <span>Booked!</span> <a href="#" class="link-danger" @click.prevent="userCancelBooking(session)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a>
                                     </span>
                                     <span v-else>
-                                        <button class="btn btn-primary btn-sm" @click="userBookSession(session)"><i class="bi bi-plus-circle"></i>&nbsp;Book</button>
+                                        <a href="#" @click.prevent="userBookSession(session)"><i class="bi bi-plus-circle"></i>&nbsp;Book</a>
                                     </span>
                                 </td>
                             </tr>
@@ -119,9 +119,9 @@
             <div v-if="auth && (auth.roles.includes('admin') || auth.roles.includes('trainer'))" id="adminSection">
 
                 <!-- Create New Session Card -->
-                <div class="card border-warning my-2" id="createSessionSection">
-                    <h5 class="card-header border-warning bg-warning-subtle"><i class="bi bi-gear" title="Admin/Trainer Only Section"></i> Create Session</h5>
-                    <div class="card-body border-warning">
+                <div class="card border-warning my-3" id="createSessionSection">
+                    <h5 class="card-header border-warning-subtle bg-warning-subtle"><i class="bi bi-gear" title="Admin/Trainer Only Section"></i> Create Session</h5>
+                    <div class="card-body border-warning-subtle">
                         <form class="row g-3">
                             <div class="col-md-2">
                                 <input id="newSessionDate" class="form-control" :class="{'is-invalid': admin_new_session_validation.date}" type="date" v-model="admin_new_session_data.date" required>
@@ -182,22 +182,22 @@
                 </div> <!-- End create new session card -->
 
                 <!-- Selected Session Details Card -->
-                <div id="sessionDetails" class="card border-warning my-2">
-                    <h5 class="card-header border-warning bg-warning-subtle"><i class="bi bi-gear" title="Admin/Trainer Only Section"></i> Selected Session Details</h5>
+                <div id="sessionDetails" class="card border-warning my-3">
+                    <h5 class="card-header bg-warning-subtle border-warning-subtle"><i class="bi bi-gear" title="Admin/Trainer Only Section"></i> Selected Session Details</h5>
                     <!-- Session is Selected -->
                     <div v-if="session_selection && session_selection.bookings">
-                        <div class="card-body border-warning">
+                        <div class="card-body">
                             <p>{{session_selection.bookings.length}} {{session_selection.bookings.length === 1 ? 'member is' : 'members are'}} booked for {{displayTime(session_selection.datetime)}} on {{displayDate(session_selection.datetime)}} at {{session_selection.location.name}}</p>
                         </div>
-                        <ul class="list-group list-group-flush border-warning">
+                        <ul class="list-group list-group-flush border-warning-subtle">
                             <!-- Selected session attendee table -->
-                            <li class="list-group-item border-warning">
+                            <li class="list-group-item border-warning-subtle">
                                 <h6>Attendance List</h6>
                                 <table class="table">
                                     <tbody>
                                     <tr v-for="booking in session_selection.bookings">
                                         <td>{{booking.person_name}} &lt;{{booking.person_email}}&gt;</td>
-                                        <td><button class="btn btn-outline-danger btn-sm" @click="adminCancelBooking(session_selection, booking.person_id)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</button></td>
+                                        <td><a href="#" class="link-danger" @click.prevent="adminCancelBooking(session_selection, booking.person_id)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a></td>
                                     </tr>
                                     <tr>
                                         <td><form>
@@ -215,7 +215,7 @@
                                 </table>
                             </li>
                             <!-- Edit selected session -->
-                            <li class="list-group-item border-warning">
+                            <li class="list-group-item border-warning-subtle">
                                 <h6>Edit Session</h6>
                                 <form class="row g-3">
                                     <div class="col-md-2">
@@ -275,14 +275,15 @@
                                 </form>
                             </li>
                             <!-- Delete selected session -->
-                            <li class="list-group-item border-warning">
+                            <li class="list-group-item bg-danger-subtle border-warning-subtle">
                                 <h6>Delete Session</h6>
                                 <form>
                                     <div class="form-check mb-2">
                                         <input id="deleteSessionUnlock" type="checkbox" class="form-check-input" v-model="session_selection.delete_unlocked">
-                                        <label for="deleteSessionUnlock" class="form-check-label">Unlock&hellip;</label>
+                                        <label for="deleteSessionUnlock" class="form-check-label text-danger">Unlock:</label>&nbsp;
+                                        <button class="btn btn-outline-danger btn-sm" type="button" :disabled="!session_selection.delete_unlocked" @click.prevent="deleteSelectedSession"><i class="bi bi-trash"></i>&nbsp;Delete</button>&nbsp;
+                                        <span class="text-danger">Deletes the session permanently, along with all associated bookings.</span>
                                     </div>
-                                    <button class="btn btn-danger" type="button" :disabled="!session_selection.delete_unlocked" @click.prevent="deleteSelectedSession"><i class="bi bi-trash"></i>&nbsp;Delete</button>
                                 </form>
                             </li>
                         </ul>

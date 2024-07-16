@@ -38,7 +38,7 @@
                 </ul>
                 <div v-cloak v-if="auth">
                     <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
-                    <button id="logout" type="button" class="btn btn-outline-danger" @click="onLogout">Logout</button>
+                    <button id="logout" type="button" class="btn btn-outline-danger" @click="onLogoutNoNavigate">Logout</button>
                 </div>
                 <div v-else class="btn-group" role="group">
                     <a id="navbarLogin" class="btn btn-primary" href="login.html">Login</a>
@@ -191,9 +191,15 @@
 
     // Current user information
     const auth = ref(null)
+
+    function onLogoutNoNavigate() {
+        localStorage.removeItem("jwt")
+        auth.value = null
+    }
+
     createApp({
         setup() {
-            return { auth, onLogout }
+            return { auth, onLogoutNoNavigate }
         }
     }).mount('#app')
 

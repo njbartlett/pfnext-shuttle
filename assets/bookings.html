@@ -97,7 +97,7 @@
                             <tr v-for="booking in bookings_list">
                                 <td>{{displayDate(booking.session_datetime)}} at {{displayTime(booking.session_datetime)}}</td>
                                 <td><a :href="'http://www.google.com/maps/search/' + encodeURIComponent(booking.session_location.address)" target="_blank">{{booking.session_location.name}}</a></td>
-                                <td><button class="btn btn-outline-danger btn-sm" :class="{'d-none': bookings_pagination.past}" @click="cancelBooking(booking)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</button></td>
+                                <td><a href="#" class="link-danger" :class="{'d-none': bookings_pagination.past}" @click.prevent="cancelBooking(booking)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a></td>
                             </tr>
                         </tbody>
                     </table>
