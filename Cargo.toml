@@ -8,7 +8,9 @@ actix-files = "0.6.5"
 actix-web = "4.5.1"
 shuttle-actix-web = "0.43.0"
 shuttle-runtime = "0.43.0"
-serde = "1.0.148"
+serde = "1.0.198"
 shuttle-shared-db = { version = "0.43.0", features = ["postgres", "sqlx"] }
-sqlx = "0.7.1"
+sqlx = { version = "0.7.4", features = ["chrono", "postgres"] }
+chrono = { version = "0.4.38", features = ["serde"]}
 tokio = "1.26.0"
+itertools = "0.12.1"

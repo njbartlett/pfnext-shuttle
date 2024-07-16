@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Members</title>
+    <title>Sessions</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/purecss@3.0.0/build/pure-min.css" integrity="sha384-X38yfunGUhNzHpBaEBsWLO+A0HDYOQi8ufWDkZ0k9e0eXz/tH3II7uKZ9msv++Ls" crossorigin="anonymous">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
@@ -11,22 +11,19 @@
 <div id="app">
     <table class="pure-table pure-table-horizontal">
         <thead>
-            <td>#</td>
-            <th>Name</th>
-            <th>Email</th>
+            <th>Date</th>
+            <th>Sessions</th>
         </thead>
-        <tr v-for="item in data">
-            <td>{{item.id}}</td>
-            <td>{{item.name}}</td>
-            <td><a href="mailto:{{item.email}}">{{item.email}}</a></td>
-        </tr>
-
-        <tr>
-            <td><button type="submit" class="pure-button pure-button-primary">Add</button></td>
-            <td><input name="name" placeholder="name"/></td>
-            <td><input name="email" placeholder="email"/></td>
+        <tr v-for="date_entry in data">
+            <td>{{date_entry.date}}</td>
+            <td>
+                <ul>
+                    <li v-for="session in date_entry.sessions">{{session.datetime}} {{session.location}} ({{session.duration_mins}} minutes) <button class="pure-button pure-button-primary">Book</button></li>
+                </ul>
+            </td>
         </tr>
     </table>
+    <pre>{{data}}</pre>
 </div>
 
 </body>
@@ -38,7 +35,7 @@
             const data = ref(null);
             const error = ref(null);
 
-            fetch("/person")
+            fetch("/sessions_by_date")
                 .then((res) => res.json())
                 .then((json) => (data.value = json))
                 .catch((err) => (error.value = err));
