@@ -112,13 +112,13 @@
                     <div class="card-body border-warning">
                         <form class="row g-3">
                             <div class="col-md-2">
-                                <input id="newSessionDate" class="form-control" :class="{'is-invalid': admin_new_session_validation.datetime}" type="date" v-model="admin_new_session_data.date" required>
+                                <input id="newSessionDate" class="form-control" :class="{'is-invalid': admin_new_session_validation.date}" type="date" v-model="admin_new_session_data.date" required>
                                 <div class="invalid-feedback">
                                     {{admin_new_session_validation.date}}
                                 </div>
                             </div>
                             <div class="col-md-2">
-                                <input id="newSessionTime" class="form-control" :class="{'is-invalid': admin_new_session_validation.datetime}" type="time" list="newSessionTimeList" v-model="admin_new_session_data.time" required>
+                                <input id="newSessionTime" class="form-control" :class="{'is-invalid': admin_new_session_validation.time}" type="time" list="newSessionTimeList" v-model="admin_new_session_data.time" required>
                                 <datalist id="newSessionTimeList">
                                     <option v-for="time in suggested_session_times" :value="time"></option>
                                 </datalist>
@@ -130,9 +130,9 @@
                                 <div class="input-group m-0 p-0">
                                     <input id="newSessionDuration" class="form-control" :class="{'is-invalid': admin_new_session_validation.duration_mins}" type="number" v-model="admin_new_session_data.duration_mins" required>
                                     <span class="input-group-text">mins</span>
-                                </div>
-                                <div class="invalid-feedback">
-                                    {{admin_new_session_validation.duration_mins}}
+                                    <div class="invalid-feedback">
+                                        {{admin_new_session_validation.duration_mins}}
+                                    </div>
                                 </div>
                             </div>
                             <div class="col-md-2">
@@ -141,7 +141,7 @@
                                     <option v-for="session_type in admin_session_type_list" :value="session_type.id">{{session_type.name}}</option>
                                 </select>
                                 <div class="invalid-feedback">
-                                    {{admin_new_session_validation.session_type}}
+                                    {{admin_new_session_validation.session_type_id}}
                                 </div>
                             </div>
                             <div class="col-md-2">
@@ -150,7 +150,7 @@
                                     <option v-for="trainer in admin_trainer_list" :value="trainer.id">{{trainer.name}}</option>
                                 </select>
                                 <div class="invalid-feedback">
-                                    {{admin_new_session_validation.trainer}}
+                                    {{admin_new_session_validation.trainer_id}}
                                 </div>
                             </div>
                             <div class="col-md-2">
@@ -159,7 +159,7 @@
                                     <option v-for="location in admin_location_list" :value="location.id">{{location.name}}</option>
                                 </select>
                                 <div class="invalid-feedback">
-                                    {{admin_new_session_validation.location}}
+                                    {{admin_new_session_validation.location_id}}
                                 </div>
                             </div>
                             <div class="col-12">
@@ -329,9 +329,9 @@
         date: null,
         time: null,
         duration_mins: 60,
-        session_type_id: null,
-        location_id: null,
-        trainer_id: null,
+        session_type_id: "",
+        location_id: "",
+        trainer_id: "",
     })
     const admin_new_session_validation = ref({
         ready: false,
