@@ -4,13 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-actix-files = "0.6.5"
-actix-web = "4.5.1"
-shuttle-actix-web = "0.43.0"
-shuttle-runtime = "0.43.0"
-serde = "1.0.198"
-shuttle-shared-db = { version = "0.43.0", features = ["postgres", "sqlx"] }
-sqlx = { version = "0.7.4", features = ["chrono", "postgres"] }
 chrono = { version = "0.4.38", features = ["serde"]}
-tokio = "1.26.0"
+jsonwebtoken = { version = "9.3.0", default-features = false }
+lazy_static = "1.4.0"
+rocket = {  version = "0.5.0", features = ["json"] }
+serde = { version = "1.0.198", features = ["derive"] }
+shuttle-rocket = "0.44.0"
+shuttle-runtime = "0.44.0"
+
+shuttle-shared-db = { version = "0.44.0", features = ["postgres", "sqlx"] }
+sqlx = { version = "0.7.4", features = ["chrono", "postgres"] }
+
+tokio = "1.37.0"
 itertools = "0.12.1"

@@ -1,41 +1,110 @@
-mod persons;
+// main.rs
+#[macro_use]
+extern crate rocket;
+
+mod claims;
 mod sessions;
+mod persons;
 
-use actix_files::Files;
-// use actix_web::middleware::Logger;
-use actix_web::{web::{self, ServiceConfig}};
-use shuttle_actix_web::ShuttleActixWeb;
-use shuttle_runtime::CustomError;
-use sqlx::{Executor, PgPool};
+use claims::Claims;
 
-#[derive(Clone)]
+use rocket::fs::NamedFile;
+use rocket::fs::{relative};
+use rocket::http::Status;
+use rocket::response::status::Custom;
+use rocket::serde::json::Json;
+
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use std::path::{Path, PathBuf};
+
 struct AppState {
     pool: PgPool,
 }
 
-#[shuttle_runtime::main]
-async fn actix_web(
-    #[shuttle_shared_db::Postgres] pool: PgPool,
-) -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
-    pool.execute(include_str!("../schema.sql"))
-        .await
-        .map_err(CustomError::new)?;
-    let state = web::Data::new(AppState { pool });
+#[derive(Serialize)]
+struct PublicResponse {
+    message: String,
+}
 
-    let config = move |cfg: &mut ServiceConfig| {
-        //cfg.service(
-        //     web:://scope("/")
-                //.wrap(Logger::default())
-        cfg
-            .service(persons::get_person)
-            .service(persons::list_persons)
-            .service(persons::add_person)
-            .service(sessions::list_sessions)
-            .service(sessions::list_session_by_date)
-            .service(Files::new("/", "assets").index_file("index.html"))
-            .app_data(state);
-        //);
+#[get("/public")]
+fn public() -> Json<PublicResponse> {
+    Json(PublicResponse {
+        message: "This endpoint is open to anyone".to_string(),
+    })
+}
+
+#[derive(Serialize)]
+struct PrivateResponse {
+    message: String,
+    user: String,
+}
+
+// More details on Rocket request guards can be found here
+// https://rocket.rs/v0.5-rc/guide/requests/#request-guards
+#[get("/private")]
+fn private(user: Claims) -> Json<PrivateResponse> {
+    Json(PrivateResponse {
+        message: "The `Claims` request guard ensures only valid JWTs can access this endpoint"
+            .to_string(),
+        user: user.name,
+    })
+}
+
+#[derive(Deserialize)]
+struct LoginRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Serialize)]
+struct LoginResponse {
+    token: String,
+}
+
+/// Tries to authenticate a user. Successful authentications get a JWT
+#[post("/login", data = "<login>")]
+fn login(login: Json<LoginRequest>) -> Result<Json<LoginResponse>, Custom<String>> {
+    // This should be real user validation code, but is left simple for this example
+    if login.username != "username" || login.password != "password" {
+        return Err(Custom(
+            Status::Unauthorized,
+            "account was not found".to_string(),
+        ));
+    }
+
+    let claim = Claims::from_name(&login.username);
+    let response = LoginResponse {
+        token: claim.into_token()?,
     };
 
-    Ok(config.into())
+    Ok(Json(response))
+}
+
+#[rocket::get("/<path..>")]
+pub async fn static_files(mut path: PathBuf) -> Option<NamedFile> {
+    path.set_extension("html");
+    let mut path = Path::new(relative!("assets")).join(path);
+    if path.is_dir() {
+        path.push("index.html");
+    }
+
+    NamedFile::open(path).await.ok()
+}
+
+#[shuttle_runtime::main]
+async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::ShuttleRocket {
+    let state = AppState { pool };
+
+    let rocket = rocket::build()
+        .mount("/", routes![
+            login,
+            sessions::list_sessions,
+            sessions::list_sessions_by_date,
+            persons::list_persons,
+            static_files
+        ])
+        .manage(state);
+
+    Ok(rocket.into())
 }
