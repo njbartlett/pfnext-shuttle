@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -38,12 +38,12 @@
             <span class="visually-hidden">Loading...</span>
         </div>
 
-        <div class="alert alert-danger shadow my-2" v-if="http_err">
+        <div class="alert alert-danger my-2" v-if="http_err">
             {{http_err}}
         </div>
 
         <!-- Already logged in section -->
-        <div class="card border-success shadow my-2" v-if="auth">
+        <div class="card border-success my-2" v-if="auth">
             <div class="card-body text-success">
                 <p class="card-text">You are logged in as {{auth.name}}. Open the <a href="sessions.html">sessions page</a> or <a href="#" @click.prevent="onLogout">login as a different user</a>.</p>
             </div>
@@ -53,7 +53,7 @@
             <!-- Existing User Login col -->
             <div class="col-8 p-0">
                 <!-- Login form -->
-                <div class="card shadow me-2">
+                <div class="card me-2">
                     <h5 class="card-header">
                         Existing User Login
                     </h5>
@@ -78,7 +78,7 @@
                     </form>
 
                     <div v-if="user_data.show_forgotten">
-                        <p class="text-danger">If you have forgotten your password, enter your email address above and click &ldquo;Reset&rdquo;. If an account exists with that address, then an email will be sent containing reset instructions.</p>
+                        <p class="card-text">If you have forgotten your password, enter your email address above and click &ldquo;Reset&rdquo;. If an account exists with that address, then an email will be sent containing reset instructions.</p>
                         <button id="forgottenPasswordSubmit" type="button" class="btn btn-danger" :disabled="!user_data_val.ready" @click.prevent="onResetPassword">Reset</button> <button type="button" class="btn btn-outline-secondary" @click.prevent="onUnforgottenPassword">Cancel</button>
                         <div v-if="reset_password_result">
                             <div :class="{'text-danger': reset_password_result.is_error}">{{reset_password_result.message}}</div>
@@ -90,7 +90,7 @@
 
             <!-- New User Col -->
             <div class="col-4 p-0">
-                <div class="card shadow ms-2">
+                <div class="card ms-2">
                     <h5 class="card-header">
                         New Users
                     </h5>

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -38,12 +38,12 @@
     <!-- Main Content -->
     <div class="container-lg" v-cloak>
         <!-- REST errors -->
-        <div class="alert alert-danger shadow my-3" role="alert" v-if="http_err">
+        <div class="alert alert-danger my-3" role="alert" v-if="http_err">
             {{http_err}}
         </div>
 
         <!-- Not logged in section -->
-        <div class="card border-danger shadow my-3" v-if="!auth">
+        <div class="card border-danger my-3" v-if="!auth">
             <div class="card-body text-danger">
                 <p class="card-text">
                     You are not logged in. Please return to the <a href="login.html">login page</a>.
@@ -54,7 +54,7 @@
         <!-- Logged in section -->
         <div id="loggedInSection" v-else>
             <!-- Welcome Header -->
-            <div class="card shadow my-3">
+            <div class="card my-3">
                 <h5 class="card-header">Welcome, {{auth.name}}!</h5>
                 <div class="card-body">
                     <span v-for="role in auth.roles"><span class="badge rounded-pill text-bg-primary">{{role}}</span>&nbsp;</span>
@@ -62,7 +62,7 @@
             </div>
 
             <!-- Show sessions -->
-            <div class="card shadow my-3">
+            <div class="card my-3">
                 <h5 class="card-header"><i class="bi bi-list-check"></i> Sessions Available to Book</h5>
                 <div class="card-body">
                     <nav aria-label="Session Pagination">
@@ -108,7 +108,7 @@
             <div v-if="auth && (auth.roles.includes('admin') || auth.roles.includes('trainer'))" id="adminSection">
 
                 <!-- Create New Session Card -->
-                <div class="card border-warning shadow my-2" id="createSessionSection">
+                <div class="card border-warning my-2" id="createSessionSection">
                     <h5 class="card-header border-warning bg-warning-subtle"><i class="bi bi-gear" title="Admin/Trainer Only Section"></i> Create Session</h5>
                     <div class="card-body border-warning">
                         <form class="row g-3">
@@ -171,7 +171,7 @@
                 </div> <!-- End create new session card -->
 
                 <!-- Selected Session Details Card -->
-                <div id="sessionDetails" class="card border-warning shadow my-2">
+                <div id="sessionDetails" class="card border-warning my-2">
                     <h5 class="card-header border-warning bg-warning-subtle"><i class="bi bi-gear" title="Admin/Trainer Only Section"></i> Selected Session Details</h5>
                     <!-- Session is Selected -->
                     <div v-if="session_selection && session_selection.bookings">
