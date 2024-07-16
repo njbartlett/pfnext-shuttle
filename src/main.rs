@@ -25,6 +25,7 @@ mod claims;
 mod sessions;
 mod login;
 mod bookings;
+mod backup;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Config {
@@ -103,7 +104,8 @@ async fn rocket(
             login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::list_users,
             sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session,
             sessions::list_locations, sessions::list_session_types, sessions::update_session,
-            bookings::list_bookings, bookings::create_booking, bookings::delete_booking
+            bookings::list_bookings, bookings::create_booking, bookings::delete_booking,
+            backup::backup_all
         ])
         .manage(state);
 
