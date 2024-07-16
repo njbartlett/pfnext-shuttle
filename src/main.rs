@@ -61,7 +61,6 @@ async fn rocket(
     let rocket = rocket::build()
         .attach(cors)
         .mount("/", routes![
-            static_files,
             login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::list_users,
             sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session,
             sessions::list_locations, sessions::list_session_types, sessions::update_session,
