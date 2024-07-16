@@ -16,11 +16,12 @@ use rocket::serde::json::Json;
 use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins};
 
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{Executor, PgPool};
 use std::path::{Path, PathBuf};
 use rocket::{Request, Response};
 use rocket::response::Responder;
 use shuttle_runtime::CustomError;
+use sqlx::postgres::PgQueryResult;
 
 struct AppState {
     pool: PgPool,
@@ -98,6 +99,12 @@ pub async fn static_files(mut path: PathBuf) -> Option<NamedFile> {
 
 #[shuttle_runtime::main]
 async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::ShuttleRocket {
+    // Initiate tables
+    pool.execute(include_str!("../schema.sql"))
+        .await
+        .map_err(CustomError::new)?;
+
+    // Configure CORS
     let allowed_origins = AllowedOrigins::all();
     let cors = rocket_cors::CorsOptions {
         allowed_origins,
@@ -107,16 +114,13 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
         ..Default::default()
     }.to_cors().map_err(CustomError::new)?;
 
+    // Configure Rocket
     let state = AppState { pool };
-
     let rocket = rocket::build()
         .attach(cors)
         .mount("/", routes![
-            authenticate,
             sessions::list_sessions,
-            sessions::list_sessions_by_date,
-            persons::list_persons,
-            static_files
+            sessions::list_sessions_by_date
         ])
         .manage(state);
 
