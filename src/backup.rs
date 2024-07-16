@@ -39,16 +39,16 @@ pub struct SessionRow {
     datetime: DateTime<Utc>,
     duration_mins: i32,
     session_type_name: String,
-    location_name: String,
-    trainer_email: String,
+    location_name: Option<String>,
+    trainer_email: Option<String>,
 }
 
 #[derive(FromRow, Serialize)]
 pub struct BookingRow {
     person_email: String,
     session_datetime: DateTime<Utc>,
-    session_location_name: String,
-    session_trainer_email: String
+    session_location_name: Option<String>,
+    session_trainer_email: Option<String>
 }
 
 #[derive(Serialize)]
