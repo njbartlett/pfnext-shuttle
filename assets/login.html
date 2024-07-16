@@ -206,6 +206,10 @@
         user_data.show_forgotten = false
     }
 
+    function isAdmin(auth) {
+        return auth && (auth.roles.includes('admin') || auth.roles.includes('trainer'))
+    }
+
     watch(user_data, async (new_data, old_data) => {
         let val = user_data_val.value
         val.email = validateEmail(new_data.email) ? null : "Enter a valid email address"

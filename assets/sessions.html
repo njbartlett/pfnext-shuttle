@@ -48,7 +48,7 @@
                     <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
                     <li class="nav-item"><a class="nav-link active" aria-current="page">Sessions</a></li>
                     <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
-                    <div v-cloak v-if="auth && isAdmin(auth)"> <!-- Admin only links -->
+                    <div v-cloak v-if="isAdmin(auth)"> <!-- Admin only links -->
                         <li class="nav-item"><a class="nav-link" href="members.html">Members</a></li>
                     </div>
                     <li class="nav-item"><a class="nav-link" href="https://chat.whatsapp.com/CPjp84Qz6uM5t9Oq88Qb4Q" target="_blank"><i class="bi bi-question-circle"></i>&nbsp;Help</a></li>
@@ -756,6 +756,10 @@
     watch(admin_edit_session_data, async(new_data, old_data) => {
         validateEditSession(new_data, admin_edit_session_validation.value)
     })
+
+    function isAdmin(auth) {
+        return auth && auth.roles && (auth.roles.includes('admin') || auth.roles.includes('trainer'))
+    }
 
     createApp({
         setup() {
