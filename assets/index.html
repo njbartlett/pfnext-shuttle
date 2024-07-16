@@ -1,115 +1,153 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 
-	<title>FitNext</title>
-	<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💪</text></svg>">
+    <title>FitNext</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💪</text></svg>">
 
-	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
-	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link href="styles/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 </head>
 
 <body>
-<div id="app">
-	<!-- Navbar -->
-	<nav class="navbar navbar-expand navbar-dark bg-dark">
-		<div class="container-fluid">
-			<a class="navbar-brand" href="#">💪 FitNext</a>
-			<div class="collapse navbar-collapse">
-				<ul class="navbar-nav me-auto"></ul>
-			</div>
-		</div>
-	</nav>
+<!-- Navbar -->
+<nav class="navbar navbar-expand navbar-dark bg-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="#">💪 FitNext</a>
+        <div class="collapse navbar-collapse">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item"><a class="nav-link disabled" aria-disabled="true" href="index.html">Main</a></li>
+                <li class="nav-item"><a class="nav-link" href="sessions.html">Sessions</a></li>
+                <li class="nav-item"><a class="nav-link" href="bookings.html">Bookings</a></li>
+            </ul>
+        </div>
+    </div>
+</nav>
 
-	<!-- Main Content -->
-	<div class="container-lg" v-cloak>
-		<div class="bg-light border shadow rounded m-2 p-2" v-if="auth">
-			Welcome {{auth.name}}! Redirecting to sessions page&hellip;
-		</div> <!-- end login section -->
-	</div>
+<!-- Main Content -->
+<div class="container-lg">
+
+    <div class="card border-primary shadow my-3">
+        <h5 class="card-header border-primary bg-primary-subtle">Welcome to FitNext</h5>
+        <div class="card-body text-success">
+            <a id="btnLogin" class="btn btn-primary mb-1 disabled" href="login.html">Login/Register</a>
+            <a id="btnSessions" class="btn btn-primary mb-1 disabled" href="sessions.html">Book Sessions</a>
+            <a id="btnBookings" class="btn btn-primary mb-1 disabled" href="bookings.html">View Bookings</a>
+        </div>
+    </div>
+
+    <div class="card shadow my-3">
+        <h5 class="card-header"><i class="bi bi-question-circle"></i>&nbsp;How It Works</h5>
+        <div class="card-body">
+            <p>
+                We are still working on our membership model. In the interim, we are using a pay-as-you-go system:
+            </p>
+            <ol>
+                <li><a href="login.html">Create an account or login to your existing account</a>.</li>
+                <li>Browse the sessions available and click "Book" next to the ones you want to attend.</li>
+                <li>Bring a method of payment with to you the class (see below).</li>
+            </ol>
+            <p class="card-text">
+                Payment is taken at the end of the session by credit or debit card. This includes phones with Apple Pay
+                or Google Pay enabled, contactless cards and chip-and-pin cards. The trainer's fee is £76.34, which is
+                split evenly between all the attending members, but <strong>capped at £8</strong>. For example: if
+                fifteen people attend then the fee per person is <strong>£5.09</strong>. If twenty people attend then
+                the fee is only <strong>£3.82</strong> each! However, if only eight people attend then the fee is the
+                maximum £8.
+            </p>
+        </div>
+    </div>
+
+    <div class="card shadow my-3">
+        <h5 class="card-header"><i class="bi bi-person-arms-up"></i>&nbsp;Trainers</h5>
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item">
+                <div class="row">
+                    <div class="col-10">
+                        <h5 id="angela">Angela Charalambous</h5>
+                        <p class="card-text">TBD</p>
+                    </div>
+                    <div class="col-2">
+                        <img src="img/angela.jpg" class="img-fluid rounded-circle">
+                    </div>
+                </div>
+            </li>
+            <li class="list-group-item">
+                <div class="row">
+                    <div class="col-10">
+                        <h5 id="javier">Javier Suarez</h5>
+                        <p class="card-text">
+                            Javier is a total enthusiast about fitness and human movement. Currently serving as a
+                            firefighter with London Fire Brigade, Javier always manages to squeeze in time to share his
+                            passion for training with others. With years of experience, Javier has worked for several
+                            fitness providers such as British Military Fitness where was in charge of the whole West
+                            London operation.
+                        </p>
+                    </div>
+                    <div class="col-2">
+                        <img src="img/javier.jpg" class="img-fluid rounded-circle">
+                    </div>
+                </div>
+            </li>
+        </ul>
+    </div>
+
+    <div class="card shadow my-3">
+        <h5 class="card-header"><i class="bi bi-geo-alt"></i>&nbsp;Locations</h5>
+        <ul class="list-group list-group-flush">
+            <li class="list-group-item">
+                <div class="row">
+                    <div class="col-9">
+                        <h5 id="oak_hill_park">Oak Hill Park</h5>
+                        <p class="card-text">Oak Hill Park is at <a href="https://www.openstreetmap.org/?mlat=51.63622&mlon=-0.15141#map=19/51.63622/-0.15141" target="_blank">Parkside Gardens, London EN4 8JP</a> in Barnet Borough. Our meeting point is at the outdoor tables next to the car park.</p>
+                    </div>
+                    <div class="col-3">
+                        <img src="img/oak_hill.jpg" class="img-fluid rounded-circle">
+                    </div>
+                </div>
+            </li>
+            <li class="list-group-item">
+                <div class="row">
+                    <div class="col-3">
+                        <img src="img/dukes_pyramid.jpg" class="img-fluid rounded-circle">
+                    </div>
+                    <div class="col-9">
+                        <h5 id="trent_park">Trent Park</h5>
+                        <p class="card-text">Trent Park is accessible from <a href="https://www.openstreetmap.org/?mlat=51.65619&mlon=-0.14989#map=17/51.65619/-0.14989" target="_blank">Cockfosters Road, London EN4 0PS</a> in Enfield Borough. Our meeting point is at the &ldquo;Duke's Pyramid&rdquo; near to Go Ape.</p>
+                        <p class="card-text">Ample car parking is available. Please note that car access to the meeting point is only possible from Cockfosters Road, not any of the other park entrances.</p>
+                    </div>
+                </div>
+            </li>
+        </ul>
+    </div>
+
 </div>
-<body>
-	<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-		<div class="container"></div>
-	</nav>
 
-	<div class="container my-5">
-		<h1>PowerFit Has Come To an End 😢</h1>
-		<h3>&hellip;so what's next??</h3>
-
-		<!-- Intro -->
-		<div class="container px-0" style="margin-top: 30px; margin-bottom: 30px;">
-			<p class="fs-5">We don't know! But in the meantime, we still want to meet and get fit outdoors!</p>
-			<p class="fs-5">This is a temporary page for former PowerFit members to organise informal training sessions. Please see the information below and then <a href="https://doodle.com/meeting/participate/id/bYlygN9a">register for some sessions</a>!</p>
-			<p class="fs-5">
-				<a href="https://doodle.com/meeting/participate/id/bYlygN9a" class="btn btn-primary"><i class="bi bi-calendar-check"></i> Register Now</a>
-				<a href="mailto:njbartlett@gmail.com?subject=Question about post-PowerFit training" class="btn btn-secondary"><i class="bi bi-envelope"></i> Email Questions</a>
-			</p>
-		</div>
-
-		<!-- Meet Javier -->
-		<div class="container border rounded top-level bg-light">
-			<div class="row" style="padding-top: 12px; padding-bottom: 12px;">
-				<div class="col-4">
-					<img src="../../fitnext_static/javier.jpeg" class="img-fluid rounded-circle" alt="Javier"/>
-				</div>
-				<div class="col">
-					<h3>Meet Javier</h3>
-					<p class="fs-5">Javier is a total enthusiast about fitness and human movement. Currently serving as a firefighter with London Fire Brigade, Javier always manages to squeeze in time to share his passion for training with others. With years of experience, Javier has worked for several fitness providers such as BMF where was in charge of the whole West London operation. His qualifications include:</p>
-					<ul>
-						<li>Level 4 Strength and Conditioning Coach</li>
-						<li>Level 3 PT</li>
-						<li>Level 2 Fitness Instructor</li>
-						<li>Senior Kettlebells Trainer</li>
-						<li>&hellip;and others, please ask!</li>
-					</ul>
-					<p class="fs-5">Javier has true devotion to improving people's health through challenging and fun exercise classes.</p>
-				</div>
-			</div>
-		</div>
-
-		<!-- Payment -->
-		<div class="container border rounded top-level bg-light">
-			<div class="row" style="padding-top: 12px; padding-bottom: 12px;">
-				<div class="col">
-					<h3>Prices &amp; Payment</h3>
-					<p class="fs-5">
-						All sessions are "pay-as-you-go". The trainer's fee of £76.34 for each session is split evenly between all the members who attend, but <strong>capped at £8.00</strong>.
-					</p>
-					<p class="fs-5">
-						For example: If 15 people attend then the fee per person is <strong>£5.09</strong>. If 20 people attend then the fee is only <strong>£3.82</strong> each! However if only 8 people attend then the fee is the maximum £8.00.
-					<p class="fs-5">
-						If 6 or fewer people have registered for a session then it will be cancelled, please look out for notifications.
-					</p>
-					<p class="fs-5">
-						You can see when you register how many people have already registered for each session. Payment will be taken by card, so please bring a credit/debit card or your phone if it supports Apple Pay or Google Pay. If you can't pay like this then don't worry, we will sort something out, but it will be easier if most people do this.
-					</p>
-				</div>
-				<div class="col-4">
-					<img src="../../fitnext_static/payment.png" class="img-fluid" alt="Credit Card Icon"/>
-				</div>
-			</div>
-		</div>
-
-		<!-- Location -->
-		<div class="container border rounded top-level bg-light">
-			<div class="row" style="padding-top: 12px; padding-bottom: 12px;">
-				<div class="col-4">
-					<img src="../../fitnext_static/map.png" class="img-fluid rounded-circle" alt="Map Icon"/>
-				</div>
-				<div class="col">
-					<h3>Locations</h3>
-					<p class="fs-5">All <strong>weekday</strong> sessions and <strong>Saturday 8:00 AM</strong> sessesion will take place at <a href="https://maps.app.goo.gl/Rg1rJ7v9UawC96M97">Oak Hill Park</a>, Parkside Gardens, Barnet EN4 8JP. Meeting in the car park off Parkside Gardens.</p>
-					<p class="fs-5"><strong>Saturday 9:30 AM</strong> sessions <strong>only</strong> will take place at <a href="https://maps.app.goo.gl/Th9u8twoqKJJFcS66">Trent Park</a>, London EN4 0PS. Meeting at the "Duke's Pyramid", near to Go Ape.</p>
-				</div>
-			</div>
-		</div>
-
-	</div>
-
+<div class="sticky-bottom bg-body">
+    <div class="container-lg my-3 px-3">
+        <p>&copy; 2024 Neil Bartlett all rights reserved. FitNext v202.</p>
+    </div>
+</div>
 
 </body>
+<script src="js/utils.js"></script>
+<script>
+    function setDisabledLinkButton(link, disabled) {
+        if (disabled) {
+            link.setAttribute("class", "btn btn-primary mb-1 disabled")
+            link.setAttribute("aria-disabled", "true")
+        } else {
+            link.setAttribute("class", "btn mb-1 btn-primary")
+            link.removeAttribute("aria-disabled")
+        }
+    }
 
+    getValidatedAuthToken().then(auth => {
+        setDisabledLinkButton(document.getElementById("btnLogin"), auth)
+        setDisabledLinkButton(document.getElementById("btnSessions"), !auth)
+        setDisabledLinkButton(document.getElementById("btnBookings"), !auth)
+    })
+</script>
 </html>
