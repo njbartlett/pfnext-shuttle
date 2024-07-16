@@ -445,7 +445,7 @@ async fn send_email<'x>(
         .map_err(|e| Custom(Status::InternalServerError, format!("Failed to read SMTP port: {}", e.to_string())))?;
 
     // Open the client
-    info!("Connecting to SMTP server...");
+    info!("Connecting to SMTP server at {}:{}...", smtp_host, smtp_port);
     let mut client = SmtpClientBuilder::new(smtp_host, smtp_port)
         .implicit_tls(true)
         .credentials(Credentials::new(smtp_username, smtp_password))

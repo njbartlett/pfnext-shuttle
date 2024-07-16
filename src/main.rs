@@ -94,12 +94,8 @@ async fn rocket(
     info!("Loaded config: {:?}", config);
 
     // Configure CORS
-    // let allow_domain = secrets.get("CORS_ALLOWED_DOMAIN").ok_or_else(|| CustomError::new(Error::new("Missing secret CORS_ALLOWED_DOMAIN")))?;
-    // let allow_origin_regex = [
-    //     format!("^http(s)?://{}", &allow_domain),
-    // ];
-    // let allowed_origins = AllowedOrigins::some_regex(&allow_origin_regex);
-    let allowed_origins = AllowedOrigins::All;
+    let allow_domain = [secrets.get("CORS_ALLOWED").ok_or_else(|| CustomError::new(Error::new("Missing secret CORS_ALLOWED")))?];
+    let allowed_origins = AllowedOrigins::some_regex(&allow_domain);
     let cors = rocket_cors::CorsOptions {
         allowed_origins,
         allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete, Method::Put].into_iter().map(From::from).collect(),
