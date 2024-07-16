@@ -1,6 +1,8 @@
 use std::ops::Add;
 
 use chrono::{Duration, Utc};
+use mail_send::mail_builder::MessageBuilder;
+use mail_send::SmtpClientBuilder;
 use password_auth::{generate_hash, verify_password};
 use rocket::http::{Header, Status};
 use rocket::response::status::Custom;
@@ -165,4 +167,44 @@ pub async fn create_user(state: &State<AppState>, claims: Claims, user: Json<New
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     Ok(Json(new_user_response))
+}
+
+#[post("/register_user", data="<new_user>")]
+pub async fn register_user(state: &State<AppState>, /*claims: Claims,*/ new_user: Json<NewUser>)  -> Result<Json<NewUserResponse>, Custom<String>> {
+    // Build a simple multipart message
+    let message = MessageBuilder::new()
+        .from(("FitNext Admin (Neil Bartlett)", "nbartlett+fitnext@fastmail.net"))
+        .reply_to(("FitNext Admin", "admin@fitnext.uk"))
+        .to(vec![
+            ("Neil Bartlett", "njbartlett@gmail.com"),
+        ])
+        .subject("Testing")
+        .html_body("<h1>Hello, world!</h1>")
+        .text_body("Hello world!");
+    println!("Constructed message: {:?}", message);
+
+    // Connect to the SMTP submissions port, upgrade to TLS and
+    // authenticate using the provided credentials.
+    let smtp_username = state.secrets.get("SMTP_USERNAME")
+        .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
+    let smtp_password = state.secrets.get("SMTP_PASSWORD")
+        .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
+    let mut client = SmtpClientBuilder::new("smtp.fastmail.com", 465)
+        .implicit_tls(true)
+        .credentials((smtp_username.as_str(), smtp_password.as_str()))
+        .connect()
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        //
+        // .unwrap()
+        // .send(message)
+        // .await
+        // .unwrap();
+    println!("Connected to client!");
+    client.send(message)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    println!("Sent it?!?");
+
+    Err(Custom(Status::ServiceUnavailable, "not implemented".to_string()))
 }

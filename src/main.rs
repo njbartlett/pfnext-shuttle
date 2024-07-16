@@ -17,6 +17,7 @@ mod login;
 
 struct AppState {
     pool: PgPool,
+    secrets: shuttle_runtime::SecretStore
 }
 
 #[rocket::get("/<path..>")]
@@ -31,7 +32,10 @@ pub async fn static_files(mut path: PathBuf) -> Option<NamedFile> {
 }
 
 #[shuttle_runtime::main]
-async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::ShuttleRocket {
+async fn rocket(
+    #[shuttle_shared_db::Postgres] pool: PgPool,
+    #[shuttle_runtime::Secrets] secrets: shuttle_runtime::SecretStore
+) -> shuttle_rocket::ShuttleRocket {
     // Initiate tables
     pool.execute(include_str!("../schema.sql"))
         .await
@@ -48,12 +52,12 @@ async fn rocket(#[shuttle_shared_db::Postgres] pool: PgPool) -> shuttle_rocket::
     }.to_cors().map_err(CustomError::new)?;
 
     // Configure Rocket
-    let state = AppState { pool };
+    let state = AppState { pool, secrets };
     let rocket = rocket::build()
         .attach(cors)
         .mount("/", routes![
             static_files,
-            login::login, login::change_password, login::create_user,
+            login::login, login::change_password, login::create_user, login::register_user,
             sessions::list_sessions, sessions::list_bookings, sessions::book_session, sessions::cancel_booking
         ])
         .manage(state);
