@@ -1,8 +1,0 @@
-{
-	"name" : "Joe Blogs",
-	"email" : "joe@bloggs.com",
-	"pwd" : "password",
-	"roles" : [
-		"member"
-	]
-}

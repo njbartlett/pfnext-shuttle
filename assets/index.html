@@ -1,215 +1,115 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>FitNext</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💪</text></svg>">
+	<title>FitNext</title>
+	<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💪</text></svg>">
 
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <style>
-        [v-cloak] {
-            display: none;
-        }
-    </style>
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 </head>
 
 <body>
 <div id="app">
-    <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container"></div>
-    </nav>
+	<!-- Navbar -->
+	<nav class="navbar navbar-expand navbar-dark bg-dark">
+		<div class="container-fluid">
+			<a class="navbar-brand" href="#">💪 FitNext</a>
+			<div class="collapse navbar-collapse">
+				<ul class="navbar-nav me-auto"></ul>
+			</div>
+		</div>
+	</nav>
 
-
-
-        <!-- Session List -->
-        <div id="sessions" class="bg-light border rounded m-2 p-2" v-cloak v-if="auth.access_token && auth.roles.includes('member')">
-            <h5>Session List</h5>
-            <nav aria-label="Session Navigation">
-                <ul class="pagination justify-content-center">
-                    <li class="page-item" :class="{ active: session_pagination.page === 0 }"><a class="page-link" @click.stop="set_session_page(0)">This Week</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.page === 1 }"><a class="page-link" @click.stop="set_session_page(1)">Next Week</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.page === 2 }"><a class="page-link" @click.stop="set_session_page(2)">+2 Weeks</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.page === 3 }"><a class="page-link" @click.stop="set_session_page(3)">+3 Weeks</a></li>
-                </ul>
-            </nav>
-            <table class="table table-hover table-bordered">
-                <thead>
-                    <tr>
-                        <th scope="col">Date</th>
-                        <th scope="col">Time</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Trainer</th>
-                        <th scope="col">Location</th>
-                        <th scope="col"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="session in session_data">
-                        <td>{{display_date(session.datetime)}}</td>
-                        <td>{{display_time(session.datetime)}} ({{session.duration_mins}} mins.)&nbsp;<span class="badge rounded-pill text-bg-primary" title="Number of attendees registered">{{session.booking_count}}</span></td>
-                        <td>{{session.session_type}}</td>
-                        <td>{{session.trainer}}</td>
-                        <td>{{session.location}}</td>
-                        <td>
-                            <div v-if="session.booked">
-                                <span>Booked!</span> <button class="btn btn-outline-danger btn-sm" @click="cancelSession(session)">Cancel</button>
-                            </div>
-                            <div v-else><button class="btn btn-primary btn-sm" @click="bookSession(session)">Book</button></div>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div> <!-- end main content -->
-
-    <hr>
-    <p>Raw auth:</p>
-    <pre>{{auth}}</pre>
-    <p>Raw session_data</p>
-    <pre>{{session_data}}</pre>
-    <p>Raw session_err</p>
-    <pre>{{session_err}}</pre>
-
+	<!-- Main Content -->
+	<div class="container-lg" v-cloak>
+		<div class="bg-light border shadow rounded m-2 p-2" v-if="auth">
+			Welcome {{auth.name}}! Redirecting to sessions page&hellip;
+		</div> <!-- end login section -->
+	</div>
 </div>
+<body>
+	<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+		<div class="container"></div>
+	</nav>
+
+	<div class="container my-5">
+		<h1>PowerFit Has Come To an End 😢</h1>
+		<h3>&hellip;so what's next??</h3>
+
+		<!-- Intro -->
+		<div class="container px-0" style="margin-top: 30px; margin-bottom: 30px;">
+			<p class="fs-5">We don't know! But in the meantime, we still want to meet and get fit outdoors!</p>
+			<p class="fs-5">This is a temporary page for former PowerFit members to organise informal training sessions. Please see the information below and then <a href="https://doodle.com/meeting/participate/id/bYlygN9a">register for some sessions</a>!</p>
+			<p class="fs-5">
+				<a href="https://doodle.com/meeting/participate/id/bYlygN9a" class="btn btn-primary"><i class="bi bi-calendar-check"></i> Register Now</a>
+				<a href="mailto:njbartlett@gmail.com?subject=Question about post-PowerFit training" class="btn btn-secondary"><i class="bi bi-envelope"></i> Email Questions</a>
+			</p>
+		</div>
+
+		<!-- Meet Javier -->
+		<div class="container border rounded top-level bg-light">
+			<div class="row" style="padding-top: 12px; padding-bottom: 12px;">
+				<div class="col-4">
+					<img src="../../fitnext_static/javier.jpeg" class="img-fluid rounded-circle" alt="Javier"/>
+				</div>
+				<div class="col">
+					<h3>Meet Javier</h3>
+					<p class="fs-5">Javier is a total enthusiast about fitness and human movement. Currently serving as a firefighter with London Fire Brigade, Javier always manages to squeeze in time to share his passion for training with others. With years of experience, Javier has worked for several fitness providers such as BMF where was in charge of the whole West London operation. His qualifications include:</p>
+					<ul>
+						<li>Level 4 Strength and Conditioning Coach</li>
+						<li>Level 3 PT</li>
+						<li>Level 2 Fitness Instructor</li>
+						<li>Senior Kettlebells Trainer</li>
+						<li>&hellip;and others, please ask!</li>
+					</ul>
+					<p class="fs-5">Javier has true devotion to improving people's health through challenging and fun exercise classes.</p>
+				</div>
+			</div>
+		</div>
+
+		<!-- Payment -->
+		<div class="container border rounded top-level bg-light">
+			<div class="row" style="padding-top: 12px; padding-bottom: 12px;">
+				<div class="col">
+					<h3>Prices &amp; Payment</h3>
+					<p class="fs-5">
+						All sessions are "pay-as-you-go". The trainer's fee of £76.34 for each session is split evenly between all the members who attend, but <strong>capped at £8.00</strong>.
+					</p>
+					<p class="fs-5">
+						For example: If 15 people attend then the fee per person is <strong>£5.09</strong>. If 20 people attend then the fee is only <strong>£3.82</strong> each! However if only 8 people attend then the fee is the maximum £8.00.
+					<p class="fs-5">
+						If 6 or fewer people have registered for a session then it will be cancelled, please look out for notifications.
+					</p>
+					<p class="fs-5">
+						You can see when you register how many people have already registered for each session. Payment will be taken by card, so please bring a credit/debit card or your phone if it supports Apple Pay or Google Pay. If you can't pay like this then don't worry, we will sort something out, but it will be easier if most people do this.
+					</p>
+				</div>
+				<div class="col-4">
+					<img src="../../fitnext_static/payment.png" class="img-fluid" alt="Credit Card Icon"/>
+				</div>
+			</div>
+		</div>
+
+		<!-- Location -->
+		<div class="container border rounded top-level bg-light">
+			<div class="row" style="padding-top: 12px; padding-bottom: 12px;">
+				<div class="col-4">
+					<img src="../../fitnext_static/map.png" class="img-fluid rounded-circle" alt="Map Icon"/>
+				</div>
+				<div class="col">
+					<h3>Locations</h3>
+					<p class="fs-5">All <strong>weekday</strong> sessions and <strong>Saturday 8:00 AM</strong> sessesion will take place at <a href="https://maps.app.goo.gl/Rg1rJ7v9UawC96M97">Oak Hill Park</a>, Parkside Gardens, Barnet EN4 8JP. Meeting in the car park off Parkside Gardens.</p>
+					<p class="fs-5"><strong>Saturday 9:30 AM</strong> sessions <strong>only</strong> will take place at <a href="https://maps.app.goo.gl/Th9u8twoqKJJFcS66">Trent Park</a>, London EN4 0PS. Meeting at the "Duke's Pyramid", near to Go Ape.</p>
+				</div>
+			</div>
+		</div>
+
+	</div>
+
+
 </body>
 
-<script type="module">
-    import { createApp, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js'
-
-    function current_week_start() {
-        let start = new Date()
-        start.setDate(start.getDate() - start.getDay()) // Sunday of current week
-        start.setHours(0, 0, 0, 0)
-        return start
-    }
-    const session_pagination = ref({
-        page: 0
-    })
-    const session_data = ref({})
-    const session_err = ref({})
-
-    const MILLIS_IN_WEEK = 1000 * 60 * 60 * 24 * 7
-
-    async function loadSessions() {
-        const storedToken = localStorage.getItem("jwt");
-        console.log("Stored token: " + storedToken);
-
-        const now = new Date()
-        const currentWeekStart = current_week_start();
-        let pageStart = new Date(currentWeekStart.getTime() + session_pagination.value.page * MILLIS_IN_WEEK)
-        let pageEnd = new Date(pageStart.getTime() + MILLIS_IN_WEEK)
-        if (now > pageStart) {
-            pageStart = now
-        }
-
-        fetch("/sessions/list?from=" + pageStart.toISOString() + "&to=" + pageEnd.toISOString(), {
-            headers: {
-                'Authorization': 'Bearer ' + auth.value.access_token
-            },
-            withCredentials: true,
-            credentials: 'include'
-        })
-        .then(res => {
-            if (!res.ok) throw res
-            return res.json()
-        })
-        .then(json => {
-            session_data.value = json
-        })
-        .catch(err => {
-            err.text().then(err_text => {
-                session_data.value = {
-                    error: err_text
-                }
-            });
-        })
-    }
-
-    async function bookSession(session) {
-        fetch("/bookings", {
-            method: "POST",
-            headers: {
-                'Authorization': 'Bearer ' + auth.value.access_token
-            },
-            body: JSON.stringify({
-                session_id: session.id
-            }),
-            withCredentials: true,
-            credentials: 'include'
-        })
-        .then(res => {
-            if (!res.ok) throw res
-            session.booked = true
-            session.booking_count++
-        })
-        .catch(error => error.text().then(text => {
-            console.log("Error: ", text)
-        }))
-    }
-
-    async function cancelSession(session) {
-        fetch("/bookings", {
-            method: "DELETE",
-            headers: {
-                'Authorization': 'Bearer ' + auth.value.access_token
-            },
-            body: JSON.stringify({
-                session_id: session.id
-            }),
-            withCredentials: true,
-            credentials: 'include'
-        })
-        .then(res => {
-            if (!res.ok) throw res
-            session.booked = false
-            session.booking_count--
-        })
-        .catch(error => error.text().then(text => {
-            console.log("Error: ", text)
-        }))
-    }
-
-    function display_date(datestr) {
-        return new Date(datestr).toLocaleDateString("en-GB", {
-            // dateStyle: "medium",
-            weekday: "short",
-            day: 'numeric',
-            month: 'long'
-        });
-    }
-
-    function display_time(datetimestr) {
-        const datetime = new Date(datetimestr);
-        return datetime.toLocaleTimeString("en-GB", {
-            timeStyle: "short",
-            hour12: false
-        });
-    }
-
-    function set_session_page(page) {
-        let current = session_pagination.value.page
-        session_pagination.value.page = page
-        if (current !== page) {
-            loadSessions()
-        }
-    }
-
-    createApp({
-        setup() {
-            return {
-                // Data
-                auth, login_data, session_pagination, session_data, session_err,
-                // Callback functions
-                onLogin, onLogout, bookSession, cancelSession,
-                // Utility functions
-                display_date, display_time, set_session_page
-            }
-        }
-    })
-    .mount('#app')
-</script>
 </html>

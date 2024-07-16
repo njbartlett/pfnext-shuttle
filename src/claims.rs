@@ -8,13 +8,15 @@ use rocket::{
     request::{FromRequest, Outcome},
     response::status::Custom,
 };
+use rocket::response::status::Forbidden;
 use serde::{Deserialize, Serialize};
+use crate::AppState;
 
 const BEARER: &str = "Bearer ";
 const AUTHORIZATION: &str = "Authorization";
 
 /// Key used for symmetric token encoding
-const SECRET: &str = "bmfpowerfit";
+const SECRET_SIZE: usize = 1024;
 
 // Used when decoding a token to `Claims`
 #[derive(Debug, PartialEq)]
@@ -41,21 +43,26 @@ impl<'r> FromRequest<'r> for Claims {
 
     async fn from_request(request: &'r rocket::Request<'_>) -> Outcome<Self, Self::Error> {
         let auth_header = request.headers().get_one(AUTHORIZATION);
-        println!("Checking auth_header: {:?}", auth_header);
         match auth_header {
             None => {
-                println!("Missing auth header");
                 Outcome::Error((Status::Forbidden, AuthenticationError::Missing))
             },
             Some(value) => {
-                println!("Found auth header: {:?}", value);
-                match Claims::from_authorization(value) {
+                // Get the secret encoding/decoding key from the Rocket state
+                let secrets: &shuttle_runtime::SecretStore;
+                match request.rocket().state::<AppState>() {
+                    Some(app_state) => {
+                        secrets = &app_state.secrets;
+                    },
+                    None => {
+                        return Outcome::Error((Status::Forbidden, AuthenticationError::Decoding("Missing app state".to_string())));
+                    }
+                }
+                match Claims::from_authorization(value, secrets) {
                     Err(e) => {
-                        println!("Auth failure: {:?}", e);
                         Outcome::Error((Status::Forbidden, e))
                     },
                     Ok(claims) => {
-                        println!("Auth success!");
                         Outcome::Success(claims)
                     },
                 }
@@ -79,10 +86,8 @@ impl Claims {
     }
 
     /// Create a `Claims` from a 'Bearer <token>' value
-    fn from_authorization(value: &str) -> Result<Self, AuthenticationError> {
-        println!("Raw auth header: {:?}", value);
+    fn from_authorization(value: &str, secrets: &shuttle_runtime::SecretStore) -> Result<Self, AuthenticationError> {
         let token = value.strip_prefix(BEARER).map(str::trim);
-        println!("Parsed auth token: {:?}", token);
 
         if token.is_none() {
             return Err(AuthenticationError::Missing);
@@ -93,9 +98,10 @@ impl Claims {
 
         // Use `jsonwebtoken` to get the claims from a JWT
         // Consult the `jsonwebtoken` documentation for using other algorithms and validations (the default validation just checks the expiration claim)
+        let secret = secrets.get("TOKEN_KEY").ok_or(AuthenticationError::Decoding("missing decoding key".to_string()))?;
         let token = decode::<Claims>(
             token,
-            &DecodingKey::from_secret(SECRET.as_ref()),
+            &DecodingKey::from_secret(secret.as_ref()),
             &Validation::default(),
         )
         .map_err(|e| match e.kind() {
@@ -107,11 +113,12 @@ impl Claims {
     }
 
     /// Converts this claims into a token string
-    pub(crate) fn into_token(self) -> Result<String, Custom<String>> {
+    pub(crate) fn into_token(self, secrets: &shuttle_runtime::SecretStore) -> Result<String, Custom<String>> {
+        let secret = secrets.get("TOKEN_KEY").ok_or(Custom(Status::Forbidden, "missing decoding key".to_string()))?;
         let token = encode(
             &Header::default(),
             &self,
-            &EncodingKey::from_secret(SECRET.as_ref()),
+            &EncodingKey::from_secret(secret.as_ref()),
         )
         .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 

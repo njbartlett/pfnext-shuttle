@@ -1,9 +1,0 @@
-{
-	"name" : "Neil Bartlett",
-	"email" : "njbartlett@gmail.com",
-	"pwd" : "password",
-	"roles" : [
-		"member",
-		"admin"
-	]
-}

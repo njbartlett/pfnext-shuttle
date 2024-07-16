@@ -1,14 +1,19 @@
 -- DROP TABLE IF EXISTS person;
 
--- person table
+-- user tables
 CREATE TABLE IF NOT EXISTS person (
     id bigserial PRIMARY KEY,
     name text NOT NULL,
     email text NOT NULL UNIQUE,
     phone text,
-    pwd text NOT NULL,
-    must_change_pwd boolean NOT NULL,
+    pwd text,
     roles text
+);
+CREATE TABLE IF NOT EXISTS temp_password (
+    person_id bigint UNIQUE NOT NULL REFERENCES person,
+    pwd text NOT NULL,
+    sent timestamp with time zone NOT NULL,
+    expiry timestamp with time zone NOT NULL
 );
 
 -- location table and data
@@ -41,7 +46,7 @@ CREATE TABLE IF NOT EXISTS session (
 );
 
 CREATE TABLE IF NOT EXISTS booking (
-    person_id bigint NOT NULL REFERENCES person,
-    session_id bigint NOT NULL REFERENCES session,
-    UNIQUE (person_id, session_id)
+    person_id bigint NOT NULL REFERENCES person ON DELETE CASCADE,
+    session_id bigint NOT NULL REFERENCES session ON DELETE CASCADE,
+    PRIMARY KEY (person_id, session_id)
 );

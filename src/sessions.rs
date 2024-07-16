@@ -1,45 +1,67 @@
 use chrono::{DateTime, FixedOffset, Utc};
+use rocket::form::validate::Contains;
+use rocket::http::hyper::body::HttpBody;
 use rocket::http::Status;
-use rocket::response::status::Custom;
+use rocket::response::status::{Accepted, Created, Custom, NoContent, NotFound};
 use rocket::serde::Deserialize;
 use rocket::serde::json::Json;
 use rocket::State;
 use serde::Serialize;
-use sqlx::{FromRow, query_as, QueryBuilder};
+use shuttle_runtime::__internals::tracing_subscriber::fmt::writer::OptionalWriter;
+use sqlx::{Error, FromRow, Postgres, query_as, QueryBuilder, Row};
+use sqlx::postgres::{PgArguments, PgRow};
+use sqlx::query::QueryAs;
 
-use crate::AppState;
+use crate::{AppState, BigintRecord, parse_opt_date, SessionLocation, SessionTrainer, SessionType};
 use crate::claims::Claims;
 
-#[derive(Serialize, FromRow, Clone, Debug)]
-pub struct Session {
+#[derive(Serialize, Clone, Debug)]
+pub struct SessionFullRecord {
     id: i64,
     datetime: DateTime<Utc>,
     duration_mins: i32,
-    session_type: String,
-    location: String,
-    trainer: String,
+    session_type: SessionType,
+    location: SessionLocation,
+    trainer: SessionTrainer,
     booked: bool,
     booking_count: i64
 }
 
-fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, Custom<String>> {
-    if str.is_none() {
-        return Ok(None);
+impl FromRow<'_, PgRow> for SessionFullRecord {
+    fn from_row(row: &PgRow) -> Result<Self, Error> {
+        Ok(SessionFullRecord {
+            id: row.try_get("id")?,
+            datetime: row.try_get("datetime")?,
+            duration_mins: row.try_get("duration_mins")?,
+            session_type: SessionType{
+                id: row.try_get("session_type_id")?,
+                name: row.try_get("session_type_name")?
+            },
+            location: SessionLocation {
+                id: row.try_get("location_id")?,
+                name: row.try_get("location_name")?,
+                address: row.try_get("location_address")?
+            },
+            trainer: SessionTrainer {
+                id: row.try_get("trainer_id")?,
+                name: row.try_get("trainer_name")?,
+                email: row.try_get("trainer_email")?,
+            },
+            booked: row.try_get("booked").ok().unwrap_or(false),
+            booking_count: row.try_get("booking_count")?
+        })
     }
-    let parsed = DateTime::parse_from_rfc3339(str.as_ref().unwrap());
-    println!("Parsed input {:?} to {:?}", &str, parsed);
-        //.map_err(|e| BadRequest(e.to_string()))?;
-    Ok(Some(parsed.map_err(|e| Custom(Status::UnprocessableEntity, e.to_string()))?))
 }
 
-#[get("/sessions/list?<from>&<to>")]
-pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>) -> Result<Json<Vec<Session>>, Custom<String>> {
-    let mut qb = QueryBuilder::new("SELECT s.id, s.datetime, s.duration_mins, t.name as session_type, loc.name as location, trainer.name as trainer, \
-        CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
-    qb.push_bind(claim.uid);
-    qb.push(") THEN true ELSE false END AS booked, \
-        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count \
-        FROM session as s, session_type as t, location as loc, person as trainer \
+fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>, to: Option<String>, qb: &'a mut QueryBuilder<Postgres>) -> Result<(), Custom<String>> {
+    qb.push("SELECT s.id, s.datetime, s.duration_mins, t.id as session_type_id, t.name as session_type_name, loc.id as location_id, loc.name as location_name, loc.address as location_address, trainer.id as trainer_id, trainer.name as trainer_name, trainer.email as trainer_email, \
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count");
+    if let Some(booking_person_id) = booking_person_id {
+        qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
+        qb.push_bind(booking_person_id);
+        qb.push(") THEN true ELSE false END AS booked");
+    }
+    qb.push(" FROM session as s, session_type as t, location as loc, person as trainer \
         WHERE s.session_type = t.id AND s.location = loc.id AND s.trainer = trainer.id");
 
     if let Some(from) = parse_opt_date(from)? {
@@ -50,7 +72,16 @@ pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<
         qb.push(" AND s.datetime <= ");
         qb.push_bind(to);
     }
+    Ok(())
+}
+
+#[get("/sessions?<from>&<to>")]
+pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
+    build_session_query(Some(claim.uid), from, to, &mut qb)?;
     qb.push(" ORDER BY s.datetime ASC");
+    info!("build_session_query compiled SQL: {}", qb.sql());
+
     let sessions = qb.build_query_as()
         .fetch_all(&state.pool)
         .await
@@ -58,81 +89,151 @@ pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<
     Ok(Json(sessions))
 }
 
+#[get("/sessions/<session_id>")]
+pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64) -> Result<Json<SessionFullRecord>, Custom<String>> {
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
+    build_session_query(Some(claim.uid), None, None, &mut qb)?;
+    qb.push(" AND s.id = ");
+    qb.push_bind(session_id);
+    info!("build_session_query compiled SQL: {}", qb.sql());
+
+    qb.build_query_as()
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| Custom(Status::NotFound, format!("session with id {} not found", session_id)))
+        .map(|r| Json(r))
+}
+
+#[derive(Deserialize, Debug)]
+struct NewSession {
+    datetime: DateTime<Utc>,
+    duration_mins: i32,
+    session_type_id: i32,
+    location_id: i32,
+    trainer_id: i64
+}
+
+#[post("/sessions", data="<new_session>")]
+pub async fn create_session(
+    state:  &State<AppState>,
+    claims: Claims,
+    new_session: Json<NewSession>
+) -> Result<Created<Json<BigintRecord>>, Custom<String>> {
+    // Admins can create any session. Trainers can only create sessions with themselves as the trainer.
+    // Nobody else can create sessions.
+    if !claims.roles.contains(&"admin".to_string()) {
+        if claims.roles.contains(&"trainer".to_string()) {
+            if !claims.uid.eq(&new_session.trainer_id) {
+                return Err(Custom(Status::Forbidden, "trainers can only create sessions for themselves".to_string()));
+            }
+        } else {
+            return Err(Custom(Status::Forbidden, "only admins or trainers can create sessions".to_string()));
+        }
+    }
+
+    let id_record: BigintRecord = query_as("INSERT INTO session (datetime, duration_mins, session_type, location, trainer) VALUES ($1, $2, $3, $4, $5) RETURNING id")
+        .bind(&new_session.datetime)
+        .bind(&new_session.duration_mins)
+        .bind(&new_session.session_type_id)
+        .bind(&new_session.location_id)
+        .bind(&new_session.trainer_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| Custom(Status::Conflict, "no new record created".to_string()))?;
+    info!("Created session id {}", id_record.id);
+    Ok(Created::new(format!("/sessions/{}", id_record.id)))
+}
+
+#[delete("/sessions/<session_id>")]
+pub async fn delete_session(state: &State<AppState>, claims: Claims, session_id: i64) -> Result<NoContent, Custom<String>> {
+    let mut qb = QueryBuilder::new("DELETE FROM session WHERE id = ");
+    qb.push_bind(session_id);
+
+    if !claims.roles.contains(&"admin".to_string()) {
+        if claims.roles.contains(&"trainer".to_string()) {
+            qb.push(" AND trainer = ");
+            qb.push_bind(claims.uid);
+        } else {
+            return Err(Custom(Status::Forbidden, "only admins and trainers can delete sessions".to_string()));
+        }
+    }
+    qb.push(" RETURNING id");
+    let id_record: BigintRecord= qb.build_query_as()
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not deletable by current user", session_id)))?;
+    info!("Deleted session id {}", id_record.id);
+
+    Ok(NoContent)
+}
+
+#[put("/sessions/<session_id>", data="<new_session>")]
+pub async fn update_session(
+    state: &State<AppState>,
+    claims: Claims,
+    session_id: i64,
+    new_session: Json<NewSession>
+) -> Result<NoContent, Custom<String>> {
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("UPDATE session SET datetime = ");
+    qb.push_bind(new_session.datetime);
+
+    qb.push(", duration_mins = ");
+    qb.push_bind(new_session.duration_mins);
+
+    qb.push(", session_type = ");
+    qb.push_bind(new_session.session_type_id);
+
+    qb.push(", location = ");
+    qb.push_bind(new_session.location_id);
+
+    qb.push(", trainer = ");
+    qb.push_bind(new_session.trainer_id);
+
+    qb.push(" WHERE id = ");
+    qb.push_bind(session_id);
+
+    if !claims.roles.contains(&"admin".to_string()) {
+        if claims.roles.contains(&"trainer".to_string()) {
+            qb.push(" AND trainer = ");
+            qb.push_bind(claims.uid);
+        } else {
+            return Err(Custom(Status::NotFound, "only admins and trainers can update sessions".to_string()));
+        }
+    }
+    qb.push(" RETURNING id");
+
+    let id_record: BigintRecord = qb.build_query_as()
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not updatable by current user", session_id)))?;
+    info!("Updating session id {} with data {:?}", id_record.id, new_session);
+    Ok(NoContent)
+}
+
 #[derive(Serialize, Debug)]
 pub struct SessionDate {
     date: chrono::NaiveDate,
-    sessions: Vec<Session>
+    sessions: Vec<SessionFullRecord>
 }
 
-#[derive(Serialize, Deserialize, FromRow, Debug)]
-pub struct SessionBooking {
-    person_id: i64,
-    session_id: i64
-}
-
-#[post("/bookings", data="<session>")]
-pub async fn book_session(state: &State<AppState>, claim: Claims, session: Json<SessionBooking>) -> Result<Json<Vec<SessionBooking>>, Custom<String>> {
-    if session.person_id != claim.uid && !is_admin(&claim) {
-        return Err(Custom(Status::Forbidden, "not allowed to create bookings for other users".to_string()));
-    }
-    let bookings_created = query_as("INSERT INTO booking (person_id, session_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING person_id, session_id")
-        .bind(claim.uid)
-        .bind(session.session_id)
+#[get("/locations")]
+pub async fn list_locations(state: &State<AppState>) -> Result<Json<Vec<SessionLocation>>, Custom<String>> {
+    query_as("SELECT id, name, address FROM location")
         .fetch_all(&state.pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    Ok(Json(bookings_created))
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map(|v| Json(v))
 }
 
-#[delete("/bookings", data="<booking>")]
-pub async fn cancel_booking(state: &State<AppState>, claim: Claims, booking: Json<SessionBooking>) -> Result<Json<Vec<SessionBooking>>, Custom<String>> {
-    if booking.person_id != claim.uid && !is_admin(&claim) {
-        return Err(Custom(Status::Forbidden, "not allowed to cancel bookings for other users".to_string()));
-    }
-    let bookings_deleted = query_as("DELETE FROM booking WHERE person_id = $1 AND session_id = $2 RETURNING person_id, session_id")
-        .bind(booking.person_id)
-        .bind(booking.session_id)
+#[get("/session_types")]
+pub async fn list_session_types(state: &State<AppState>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
+    query_as("SELECT id, name FROM session_type")
         .fetch_all(&state.pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    Ok(Json(bookings_deleted))
-}
-
-#[derive(Serialize, FromRow, Debug)]
-pub struct SessionBookingFull {
-    person_id: i64,
-    person_name: String,
-    person_email: String,
-    session_id: i64
-}
-
-#[get("/bookings?<session_id>&<person_id>")]
-pub async fn list_bookings(state: &State<AppState>, claim: Claims, session_id: Option<i64>, mut person_id: Option<i64>) -> Result<Json<Vec<SessionBookingFull>>, Custom<String>> {
-    let mut qb = QueryBuilder::new("SELECT booking.person_id, person.name as person_name, person.email as person_email, booking.session_id \
-            FROM booking, person \
-            WHERE booking.person_id = person.id");
-
-    // For non-admins, person_id is fixed to the current user, ignoring the query param
-    if !is_admin(&claim) {
-        person_id = Some(claim.uid);
-    }
-
-    if let Some(person_id) = person_id {
-        qb.push(" AND booking.person_id = ");
-        qb.push_bind(person_id);
-    }
-    if let Some(session_id) = session_id {
-        qb.push(" AND booking.session_id = ");
-        qb.push_bind(session_id);
-    }
-
-    let bookings = qb.build_query_as()
-        .fetch_all(&state.pool)
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    Ok(Json(bookings))
-}
-
-fn is_admin(claims: &Claims) -> bool {
-    claims.roles.contains(&"admin".to_string()) || claims.roles.contains(&"trainer".to_string())
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map(|v| Json(v))
 }

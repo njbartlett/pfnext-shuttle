@@ -3,17 +3,24 @@
 extern crate rocket;
 
 use std::path::{Path, PathBuf};
+use chrono::{DateTime, FixedOffset};
 
+use rand::prelude::*;
 use rocket::fs::NamedFile;
 use rocket::fs::relative;
-use rocket::http::Method;
+use rocket::http::{Method, Status};
+use rocket::response::status::Custom;
+use rocket::serde::Serialize;
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
 use shuttle_runtime::CustomError;
-use sqlx::{Executor, PgPool};
+use sqlx::{Executor, FromRow, PgPool};
+use crate::claims::Claims;
+
 
 mod claims;
 mod sessions;
 mod login;
+mod bookings;
 
 struct AppState {
     pool: PgPool,
@@ -22,7 +29,7 @@ struct AppState {
 
 #[rocket::get("/<path..>")]
 pub async fn static_files(mut path: PathBuf) -> Option<NamedFile> {
-    path.set_extension("html");
+    //path.set_extension("html");
     let mut path = Path::new(relative!("assets")).join(path);
     if path.is_dir() {
         path.push("index.html");
@@ -57,10 +64,52 @@ async fn rocket(
         .attach(cors)
         .mount("/", routes![
             static_files,
-            login::login, login::change_password, login::create_user, login::register_user,
-            sessions::list_sessions, sessions::list_bookings, sessions::book_session, sessions::cancel_booking
+            login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::list_users,
+            sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session,
+            sessions::list_locations, sessions::list_session_types, sessions::update_session,
+            bookings::list_bookings, bookings::create_booking, bookings::delete_booking
         ])
         .manage(state);
 
     Ok(rocket.into())
+}
+
+#[derive(FromRow, Serialize)]
+struct BigintRecord {
+    id: i64
+}
+
+#[derive(FromRow, Serialize, Clone, Debug)]
+pub struct SessionType {
+    id: i32,
+    name: String
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SessionTrainer {
+    id: i64,
+    name: String,
+    email: String
+}
+
+#[derive(FromRow, Serialize, Clone, Debug)]
+pub struct SessionLocation {
+    id: i32,
+    name: String,
+    address: String
+}
+
+
+fn is_admin(claims: &Claims) -> bool {
+    claims.roles.contains(&"admin".to_string()) || claims.roles.contains(&"trainer".to_string())
+}
+
+fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, Custom<String>> {
+    if str.is_none() {
+        return Ok(None);
+    }
+    let parsed = DateTime::parse_from_rfc3339(str.as_ref().unwrap());
+    println!("Parsed input {:?} to {:?}", &str, parsed);
+    //.map_err(|e| BadRequest(e.to_string()))?;
+    Ok(Some(parsed.map_err(|e| Custom(Status::UnprocessableEntity, e.to_string()))?))
 }
