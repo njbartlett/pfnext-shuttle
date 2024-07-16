@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use rocket::futures::{Stream, StreamExt};
 use rocket::futures::stream::BoxStream;
 use rocket::http::Status;
-use rocket::response::status::{Created, Custom};
+use rocket::response::status::{Created, Custom, NoContent};
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::State;
@@ -29,7 +29,8 @@ pub struct SessionBookingFull {
     session_datetime: DateTime<Utc>,
     session_duration_mins: i32,
     session_location: SessionLocation,
-    session_type: SessionType
+    session_type: SessionType,
+    attended: bool
 }
 
 impl FromRow<'_, PgRow> for SessionBookingFull {
@@ -49,7 +50,8 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
             session_type: SessionType{
                 id: row.try_get("session_type_id")?,
                 name: row.try_get("session_type_name")?
-            }
+            },
+            attended: row.try_get("attended").ok().unwrap_or(false)
         })
     }
 }
@@ -65,7 +67,7 @@ pub async fn list_bookings(
 ) -> Result<Json<Vec<SessionBookingFull>>, Custom<String>> {
     let mut qb = QueryBuilder::new("SELECT b.person_id, p.name as person_name, p.email as person_email, b.session_id, \
                 s.datetime as session_datetime, s.duration_mins as session_duration_mins, s.location as session_location_id, l.name as session_location_name, l.address as session_location_address, \
-                s.session_type as session_type_id, t.name as session_type_name \
+                s.session_type as session_type_id, t.name as session_type_name, b.attended as attended \
             FROM booking as b, person as p, session as s, location as l, session_type as t \
             WHERE b.person_id = p.id \
             AND b.session_id = s.id \
@@ -180,7 +182,7 @@ async fn book_session_with_max_bookings(state: &State<AppState>, person_id: i64,
 }
 
 #[delete("/bookings?<session_id>&<person_id>")]
-pub async fn delete_booking(state: &State<AppState>, claim: Claims, person_id: i64, session_id: i64) -> Result<Json<Option<SessionBooking>>, Custom<String>> {
+pub async fn delete_booking(state: &State<AppState>, claim: Claims, person_id: i64, session_id: i64) -> Result<Json<SessionBooking>, Custom<String>> {
     claim.assert_roles_contains("member")?;
     if person_id != claim.uid && !claim.has_role("admin") {
         return Err(Custom(Status::Forbidden, "not allowed to cancel bookings for other users".to_string()));
@@ -190,7 +192,26 @@ pub async fn delete_booking(state: &State<AppState>, claim: Claims, person_id: i
         .bind(session_id)
         .fetch_optional(&state.pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    info!("Deleted booking(s): {:?}", booking_deleted);
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or(Custom(Status::NotFound, format!("no booking found with person_id={} and session_id={}", person_id, session_id)))?;
     Ok(Json(booking_deleted))
+}
+
+#[derive(Deserialize)]
+pub struct BookingUpdate {
+    attended: bool
+}
+
+#[put("/bookings?<session_id>&<person_id>", data="<booking_update>")]
+pub async fn update_booking(state: &State<AppState>, claim: Claims, person_id: i64, session_id: i64, booking_update: Json<BookingUpdate>) -> Result<NoContent, Custom<String>> {
+    claim.assert_roles_contains("admin")?;
+    let _ = query_as("UPDATE booking SET attended = $1 WHERE person_id = $2 AND session_id = $3 RETURNING person_id, session_id")
+        .bind(booking_update.attended)
+        .bind(person_id)
+        .bind(session_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or(Custom(Status::NotFound, format!("no booking found with person_id={} and session_id={}", person_id, session_id)))?;
+    Ok(NoContent)
 }

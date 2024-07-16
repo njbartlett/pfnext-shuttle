@@ -26,6 +26,10 @@
         input[type="number"].no-spinner {
             -moz-appearance: textfield;
         }
+        input[type="checkbox"].larger {
+            width: 1.5rem;
+            height: 1.5rem;
+        }
     </style>
     <script src="js/bootstrap.min.js"></script>
     <script src="js/utils.js"></script>
@@ -94,23 +98,34 @@
                 <div class="card-body">
                     <p>Showing attendance for session at {{displayTime(session.datetime)}} on {{displayDate(session.datetime)}}, at {{session.location.name}}.</p>
                     <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Member</th>
+                                <th>Attended?</th>
+                                <th></th>
+                            </tr>
+                        </thead>
                         <tbody>
                         <tr v-for="booking in bookings">
                             <td>{{booking.person_name}} &lt;{{booking.person_email}}&gt;</td>
+                            <td><form><input type="checkbox" class="form-check larger" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
                             <td><a href="#" class="link-danger" @click.prevent="removeMember(session.id, booking.person_id)">Cancel</a></td>
                         </tr>
 
                         <!-- Add Member Row -->
                         <tr>
-                            <td><form>
-                                <div class="input-group m-0 p-0">
-                                    <input id="addMemberToSessionInput" type="search" class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="addMemberInput">
-                                    <button class="btn btn-outline-primary" :disabled="!adding_user" @click.prevent="addMember(session.id, adding_user.id)">Add</button>
-                                </div>
-                                <datalist id="addMemberToSessionOptions">
-                                    <option v-if="all_user_data && all_user_data.name_email_to_user" v-for="user_name_email in all_user_data.name_email_to_user.keys()" :value="user_name_email">
-                                </datalist>
-                            </form></td>
+                            <td>
+                                <form>
+                                    <div class="input-group m-0 p-0">
+                                        <input id="addMemberToSessionInput" type="search" class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="addMemberInput">
+                                        <button class="btn btn-outline-primary" :disabled="!adding_user" @click.prevent="addMember(session.id, adding_user.id)">Add</button>
+                                    </div>
+                                    <datalist id="addMemberToSessionOptions">
+                                        <option v-if="all_user_data && all_user_data.name_email_to_user" v-for="user_name_email in all_user_data.name_email_to_user.keys()" :value="user_name_email">
+                                    </datalist>
+                                </form>
+                            </td>
+                            <td></td>
                             <td></td>
                         </tr>
                         </tbody>
@@ -260,7 +275,6 @@
         })
         .then(res => {
             if (!res.ok) throw res
-            return res.json()
         })
         .catch(error => {
             error.text().then(err_text => {
@@ -269,6 +283,30 @@
         })
         .then(_ => {
             loadSessionAttendees(sessionId)
+        })
+    }
+
+    async function toggleAttendance(booking) {
+        let new_attended = !booking.attended
+        http_err.value = null
+        fetch(SERVER_URL + "/bookings?person_id=" + booking.person_id + "&session_id=" + booking.session_id, {
+            method: "PUT",
+            headers: {
+                'Authorization': 'Bearer ' + auth.value.access_token
+            },
+            body: JSON.stringify({
+                attended: new_attended
+            }),
+            withCredentials: true,
+            credentials: 'include'
+        })
+        .then(res => {
+            if (!res.ok) throw res
+        })
+        .catch(error => {
+            error.text().then(err_text => {
+                http_err.value = err_text
+            })
         })
     }
 
@@ -289,7 +327,7 @@
         setup() {
             return {
                 http_err, auth, session, bookings, adding_user, all_user_data,
-                isAdmin, onLogout, displayTime, displayDate, addMemberInput, addMember, removeMember
+                isAdmin, onLogout, displayTime, displayDate, addMemberInput, addMember, removeMember, toggleAttendance
             }
         }
     }).mount('#app')

@@ -23,6 +23,16 @@ function displayDate(datestr) {
     });
 }
 
+function displayDateFull(datestr) {
+    return new Date(datestr).toLocaleDateString("en-GB", {
+        // dateStyle: "medium",
+        weekday: "long",
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+    });
+}
+
 function displayTime(datetimestr) {
     const datetime = new Date(datetimestr);
     return datetime.toLocaleTimeString("en-GB", {

@@ -80,39 +80,38 @@
 
         <!-- Logged in section -->
         <div id="loggedInSection" v-if="auth">
-
             <!-- Show bookings -->
-            <div class="card my-3">
-                <h5 class="card-header"><i class="bi bi-calendar-check"></i> My Bookings</h5>
-                <div class="card-body">
-                    <!-- booking table pagination -->
-                    <nav aria-label="Bookings Navigation">
-                        <ul class="pagination justify-content-center">
-                            <li class="page-item" :class="{ active: bookings_pagination.past }"><a class="page-link" @click.stop="setPagePast">Past</a></li>
-                            <li class="page-item" :class="{ active: !bookings_pagination.past }"><a class="page-link" @click.stop="setPageFuture">Upcoming</a></li>
-                        </ul>
-                    </nav> <!-- end booking table pagination -->
+            <h2 class="my-3">My Bookings</h2>
+            <!-- booking table pagination -->
+            <nav aria-label="Bookings Navigation">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item" :class="{ active: bookings_pagination.past }"><a class="page-link" @click.stop="setPagePast">Past</a></li>
+                    <li class="page-item" :class="{ active: !bookings_pagination.past }"><a class="page-link" @click.stop="setPageFuture">Upcoming</a></li>
+                </ul>
+            </nav> <!-- end booking table pagination -->
 
-                    <!-- bookings table -->
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Date & Time</th>
-                                <th scope="col">Location</th>
-                                <th scope="col">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="booking in bookings_list">
-                                <td>{{displayDate(booking.session_datetime)}} at {{displayTime(booking.session_datetime)}}</td>
-                                <td><a :href="'http://www.google.com/maps/search/' + encodeURIComponent(booking.session_location.address)" target="_blank">{{booking.session_location.name}}</a></td>
-                                <td><a href="#" class="link-danger" :class="{'d-none': bookings_pagination.past}" @click.prevent="cancelBooking(booking)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div> <!-- end show bookings card body -->
-            </div>
-
+            <!-- bookings table -->
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th scope="col">Date & Time</th>
+                        <th scope="col">Location</th>
+                        <th v-if="bookings_pagination.past" scope="col">Attended?</th>
+                        <th scope="col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="booking in bookings_list">
+                        <td>{{displayDate(booking.session_datetime)}} at {{displayTime(booking.session_datetime)}}</td>
+                        <td><a :href="'http://www.google.com/maps/search/' + encodeURIComponent(booking.session_location.address)" target="_blank">{{booking.session_location.name}}</a></td>
+                        <td v-if="bookings_pagination.past">
+                            <span v-if="booking.attended" class="text-success"><i class="bi bi-check-circle"> Attended</i></span>
+                            <span v-else class="text-danger"><i class="bi bi-x-circle"> Didn't Attend</i></span>
+                        </td>
+                        <td><a href="#" class="link-danger" :class="{'d-none': bookings_pagination.past}" @click.prevent="cancelBooking(booking)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a></td>
+                    </tr>
+                </tbody>
+            </table>
         </div> <!-- End logged in section -->
 
     </div> <!-- end main content -->

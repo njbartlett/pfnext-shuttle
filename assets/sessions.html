@@ -26,6 +26,10 @@
         input[type="number"].no-spinner {
             -moz-appearance: textfield;
         }
+        tr.session-past > td {
+            --bs-text-opacity: 1;
+            color: rgba(var(--bs-secondary-rgb), var(--bs-text-opacity)) !important;
+        }
     </style>
     <script src="js/popper.min.js"></script>
     <script src="js/bootstrap.min.js"></script>
@@ -93,10 +97,20 @@
             <!-- Show sessions -->
             <nav aria-label="Session Pagination" class="my-3">
                 <ul class="pagination justify-content-center">
-                    <li class="page-item" :class="{ active: session_pagination.page === 0 }"><a class="page-link" @click.stop="setSessionPage(0)">This Week</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.page === 1 }"><a class="page-link" @click.stop="setSessionPage(1)">Next Week</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.page === 2 }"><a class="page-link" @click.stop="setSessionPage(2)">+2 Weeks</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.page === 3 }"><a class="page-link" @click.stop="setSessionPage(3)">+3 Weeks</a></li>
+                    <li class="page-item">
+                        <a class="page-link" href="#" aria-label="Previous" @click.prevent="scrollPaginationBlock(-1)">
+                            <span aria-hidden="true">&laquo;</span>
+                        </a>
+                    </li>
+                    <li class="page-item" :class="{ active: session_pagination.week_offset === session_pagination.block }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block)">{{renderWeekOffset(session_pagination.block)}}</a></li>
+                    <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 1)}"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+1)">{{renderWeekOffset(session_pagination.block+1)}}</a></li>
+                    <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 2) }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+2)">{{renderWeekOffset(session_pagination.block+2)}}</a></li>
+                    <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 3) }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+3)">{{renderWeekOffset(session_pagination.block+3)}}</a></li>
+                    <li class="page-item">
+                        <a class="page-link" href="#" aria-label="Next" @click.prevent="scrollPaginationBlock(1)">
+                            <span aria-hidden="true">&raquo;</span>
+                        </a>
+                    </li>
                 </ul>
             </nav> <!-- end session table pagination -->
 
@@ -112,7 +126,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="session in session_data">
+                    <tr v-for="session in session_data" :class="{'session-past': isPast(session.datetime)}">
                         <td>{{displayDate(session.datetime)}} {{displayTime(session.datetime)}}</td>
                         <td>{{session.trainer.name}}</td>
                         <td>{{session.session_type.name}}, <a :href="'http://www.google.com/maps/search/' + encodeURIComponent(session.location.address)" target="_blank">{{session.location.name}}</a></td>
@@ -129,14 +143,14 @@
                         <!-- Member book/cancel -->
                         <td v-if="auth.roles.includes('member')">
                             <span v-if="session.booked">
-                                <span>Booked!</span> <a href="#" class="link-danger" @click.prevent="cancelBooking(session)">Cancel</a>
+                                <span>Booked!</span> <a v-if="!isPast(session.datetime)" href="#" class="link-danger" @click.prevent="cancelBooking(session)">Cancel</a>
                             </span>
                             <div v-else>
                                 <span v-if="session.max_booking_count && session.booking_count >= session.max_booking_count" class="text-secondary">
                                     Fully booked
                                 </span>
                                 <span v-else>
-                                    <a href="#" @click.prevent="bookSession(session)">Book</a>
+                                    <a  v-if="!isPast(session.datetime)" href="#" @click.prevent="bookSession(session)">Book</a>
                                 </span>
                             </div>
                         </td>
@@ -156,7 +170,7 @@
                     </tr>
                 </tbody>
             </table>
-            <p>Found {{session_data.length}} session(s) for selected week.</p>
+            <p>Showing week commencing {{displayDateFull(session_pagination.start)}}. Found {{session_data.length}} session(s) for selected week.</p>
             <a v-if="isAdmin(auth)" class="btn btn-outline-primary" href="edit_session.html"><i class="bi bi-plus-circle"></i> Add Session</a>
 
             <!-- Deletion Confirm Dialog -->
@@ -202,9 +216,14 @@
 
     // Main session list
     const session_data = ref([])
+
     // Session table page control
+    const currentWeekStart = current_week_start()
     const session_pagination = ref({
-        page: 0
+        block: 0,
+        week_offset: 0,
+        start: currentWeekStart,
+        end: new Date(currentWeekStart.getTime() + MILLIS_IN_WEEK)
     })
 
     // ADMIN ONLY DATA
@@ -212,28 +231,18 @@
         id: null,
         datetime: new Date()
     })
-    // All users
-    const admin_user_data = ref({
-        count: 0,
-        name_email_to_user: null
-    })
     // END ADMIN ONLY DATA
 
     function current_week_start() {
-        let start = new Date()
-        start.setDate(start.getDate() - start.getDay()) // Sunday of current week
-        start.setHours(0, 0, 0, 0)
+        let start = new Date() // Begin with now...
+        start.setDate(start.getDate() - start.getDay()) // Subtract weekday to get sunday of current week
+        start.setHours(0, 0, 0, 0) // Set to midnight of that day
         return start
     }
 
     async function loadSessions() {
-        const now = new Date()
-        const currentWeekStart = current_week_start();
-        let pageStart = new Date(currentWeekStart.getTime() + session_pagination.value.page * MILLIS_IN_WEEK)
-        let pageEnd = new Date(pageStart.getTime() + MILLIS_IN_WEEK)
-        if (now > pageStart) {
-            pageStart = now
-        }
+        let pageStart = session_pagination.value.start
+        let pageEnd = session_pagination.value.end
 
         if (auth.value === null) {
             session_data.value = []
@@ -296,23 +305,21 @@
         })
         .then(res => {
             if (!res.ok) throw res
-            return res.json()
-        })
-        .then(deleted_booking => {
-            if (deleted_booking) {
-                session.booking_count --
-                session.booked = false
-            }
+            session.booking_count --
+            session.booked = false
         })
         .catch(error => error.text().then(text => {
             http_err.value = text
         }))
     }
 
-    function setSessionPage(page) {
-        let current = session_pagination.value.page
-        session_pagination.value.page = page
-        if (current !== page) {
+    function setSessionPage(week_offset) {
+        session_pagination.value.start = new Date(current_week_start().getTime() + week_offset * MILLIS_IN_WEEK)
+        session_pagination.value.end = new Date(session_pagination.value.start.getTime() + MILLIS_IN_WEEK)
+
+        let current = session_pagination.value.week_offset
+        session_pagination.value.week_offset = week_offset
+        if (current !== week_offset) {
             loadSessions()
         }
     }
@@ -340,6 +347,28 @@
         })
     }
 
+    function scrollPaginationBlock(amount) {
+        session_pagination.value.block = session_pagination.value.block + amount
+    }
+
+    function renderWeekOffset(offset) {
+        if (offset < -1) {
+            return Math.abs(offset) + " Weeks Ago"
+        } else if (offset === -1) {
+            return "Last Week"
+        } else if (offset === 0) {
+            return "This Week"
+        } else if (offset === 1) {
+            return "Next Week"
+        } else {
+            return "+" + offset + " Weeks"
+        }
+    }
+
+    function isPast(datetime) {
+        return new Date() > new Date(datetime)
+    }
+
     createApp({
         setup() {
             return {
@@ -347,11 +376,11 @@
                 auth, http_err,
 
                 // Session/booking data and callbacks
-                session_data, session_pagination, admin_user_data,
+                session_data, session_pagination,
                 bookSession, cancelBooking, setSessionPage,
 
                 // Misc callbacks and utility functions
-                deleting_session, onClickDeleteSession, deleteSession, onLogout, displayDate, displayTime, isAdmin
+                deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBlock, displayDate, displayTime, displayDateFull, isPast, isAdmin
             }
         }
     })
