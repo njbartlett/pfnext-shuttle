@@ -2,9 +2,11 @@
 
 CREATE TABLE IF NOT EXISTS person (
     id bigserial PRIMARY KEY,
-    name varchar(255) NOT NULL,
-    email varchar(255) NOT NULL,
-    phone varchar(255)
+    name text NOT NULL,
+    email text NOT NULL UNIQUE,
+    phone text,
+    pwd text NOT NULL,
+    roles text
 );
 
 CREATE TABLE IF NOT EXISTS session_type (
@@ -25,5 +27,12 @@ CREATE TABLE IF NOT EXISTS session (
     datetime timestamp with time zone NOT NULL,
     duration_mins integer NOT NULL,
     session_type integer NOT NULL REFERENCES session_type,
-    location integer NOT NULL REFERENCES location
+    location integer NOT NULL REFERENCES location,
+    trainer bigint NOT NULL REFERENCES person
+);
+
+CREATE TABLE IF NOT EXISTS booking (
+    person_id bigint NOT NULL REFERENCES person,
+    session_id bigint NOT NULL REFERENCES session,
+    UNIQUE (person_id, session_id)
 );

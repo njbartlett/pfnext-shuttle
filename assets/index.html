@@ -1,9 +1,264 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Static Files</title>
+    <meta charset="UTF-8">
+<!--    <meta name="viewport" content="width=device-width, initial-scale=1">-->
+
+    <title>FitNext</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💪</text></svg>">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <!--<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">-->
+    <style>
+        [v-cloak] {
+            display: none;
+        }
+    </style>
 </head>
+
 <body>
-<p>This is an example of serving static files with Actix Web and Shuttle.</p>
+<div id="app">
+    <!-- Navbar -->
+<!--    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">-->
+<!--        <div class="container"></div>-->
+<!--    </nav>-->
+
+    <!-- Main Content -->
+    <div class="container-lg">
+
+        <!-- User Welcome or Login Form -->
+        <div id="user" class="bg-light border rounded m-2 p-2" v-cloak>
+            <div v-if="auth.access_token">
+                <h5>Welcome, {{auth.name}}!</h5>
+                Roles: <span v-for="role in auth.roles"><span class="badge rounded-pill text-bg-secondary">{{role}}</span>&nbsp;</span> <button id="logoutSubmit" type="button" class="btn btn-outline-danger btn-sm" @click="onLogout">Logout</button>
+            </div>
+            <div v-else>
+                <h5>Welcome! Please login...</h5>
+                <form @submit.prevent="onLogin">
+                    <div class="mb-3">
+                        <label for="inputEmail" class="form-label">Email address</label>
+                        <input type="email" class="form-control" id="inputEmail" aria-describedby="emailHelp" v-model="login_data.username">
+                    </div>
+                    <div class="mb-3">
+                        <label for="inputPassword" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="inputPassword" v-model="login_data.password">
+                    </div>
+                    <button id="loginSubmit" type="submit" class="btn btn-primary">Submit</button>
+                    <div class="text-danger" v-if="auth.error">{{auth.error}}</div>
+                </form>
+            </div>
+        </div> <!-- end user welcome/login -->
+
+        <!-- Session List -->
+        <div id="sessions" class="bg-light border rounded m-2 p-2" v-cloak v-if="auth.access_token && auth.roles.includes('member')">
+            <h5>Session List</h5>
+            <nav aria-label="Session Navigation">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item" :class="{ active: session_pagination.page === 0 }"><a class="page-link" @click.stop="set_session_page(0)">This Week</a></li>
+                    <li class="page-item" :class="{ active: session_pagination.page === 1 }"><a class="page-link" @click.stop="set_session_page(1)">Next Week</a></li>
+                    <li class="page-item" :class="{ active: session_pagination.page === 2 }"><a class="page-link" @click.stop="set_session_page(2)">+2 Weeks</a></li>
+                    <li class="page-item" :class="{ active: session_pagination.page === 3 }"><a class="page-link" @click.stop="set_session_page(3)">+3 Weeks</a></li>
+                </ul>
+            </nav>
+            <table class="table table-hover table-bordered">
+                <thead>
+                    <tr>
+                        <th scope="col">Date</th>
+                        <th scope="col">Time</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Trainer</th>
+                        <th scope="col">Location</th>
+                        <th scope="col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="session in session_data">
+                        <td>{{display_date(session.datetime)}}</td>
+                        <td>{{display_time(session.datetime)}} ({{session.duration_mins}} mins.)&nbsp;<span class="badge rounded-pill text-bg-primary" title="Number of attendees registered">{{session.booking_count}}</span></td>
+                        <td>{{session.session_type}}</td>
+                        <td>{{session.trainer}}</td>
+                        <td>{{session.location}}</td>
+                        <td>
+                            <div v-if="session.booked">
+                                <span>Booked!</span> <button class="btn btn-outline-danger btn-sm" @click="cancelSession(session)">Cancel</button>
+                            </div>
+                            <div v-else><button class="btn btn-primary btn-sm" @click="bookSession(session)">Book</button></div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div> <!-- end main content -->
+
+    <hr>
+    <p>Raw auth:</p>
+    <pre>{{auth}}</pre>
+    <p>Raw session_data</p>
+    <pre>{{session_data}}</pre>
+    <p>Raw session_err</p>
+    <pre>{{session_err}}</pre>
+
+</div>
 </body>
+
+<script type="module">
+    import { createApp, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js'
+
+    function current_week_start() {
+        let start = new Date()
+        start.setDate(start.getDate() - start.getDay()) // Sunday of current week
+        start.setHours(0, 0, 0, 0)
+        return start
+    }
+    const auth = ref({})
+    const login_data = ref({
+        username: "njbartlett@gmail.com",
+        password: "password"
+    })
+    const session_pagination = ref({
+        page: 0
+    })
+    const session_data = ref({})
+    const session_err = ref({})
+
+    async function onLogin() {
+        fetch("http://localhost:8000/login", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(login_data.value)
+        }).then(res => {
+            if (!res.ok) throw res
+            return res.json()
+        }).then(json => {
+            localStorage.setItem("jwt", json.access_token)
+            auth.value = json
+            loadSessions()
+        }).catch(error => {
+            error.text().then(error_text => auth.value = {error: error_text})
+        })
+    }
+    function onLogout() {
+        auth.value = {}
+    }
+
+    const MILLIS_IN_WEEK = 1000 * 60 * 60 * 24 * 7
+
+    async function loadSessions() {
+        const storedToken = localStorage.getItem("jwt");
+        console.log("Stored token: " + storedToken);
+
+        const now = new Date()
+        const currentWeekStart = current_week_start();
+        let pageStart = new Date(currentWeekStart.getTime() + session_pagination.value.page * MILLIS_IN_WEEK)
+        let pageEnd = new Date(pageStart.getTime() + MILLIS_IN_WEEK)
+        if (now > pageStart) {
+            pageStart = now
+        }
+
+        fetch("/sessions/list?from=" + pageStart.toISOString() + "&to=" + pageEnd.toISOString(), {
+            headers: {
+                'Authorization': 'Bearer ' + auth.value.access_token
+            },
+            withCredentials: true,
+            credentials: 'include'
+        })
+        .then(res => {
+            if (!res.ok) throw res
+            return res.json()
+        })
+        .then(json => {
+            session_data.value = json
+        })
+        .catch(err => {
+            err.text().then(err_text => {
+                session_data.value = {
+                    error: err_text
+                }
+            });
+        })
+    }
+
+    async function bookSession(session) {
+        fetch("/bookings", {
+            method: "POST",
+            headers: {
+                'Authorization': 'Bearer ' + auth.value.access_token
+            },
+            body: JSON.stringify({
+                session_id: session.id
+            }),
+            withCredentials: true,
+            credentials: 'include'
+        })
+        .then(res => {
+            if (!res.ok) throw res
+            session.booked = true
+            session.booking_count++
+        })
+        .catch(error => error.text().then(text => {
+            console.log("Error: ", text)
+        }))
+    }
+
+    async function cancelSession(session) {
+        fetch("/bookings", {
+            method: "DELETE",
+            headers: {
+                'Authorization': 'Bearer ' + auth.value.access_token
+            },
+            body: JSON.stringify({
+                session_id: session.id
+            }),
+            withCredentials: true,
+            credentials: 'include'
+        })
+        .then(res => {
+            if (!res.ok) throw res
+            session.booked = false
+            session.booking_count--
+        })
+        .catch(error => error.text().then(text => {
+            console.log("Error: ", text)
+        }))
+    }
+
+    function display_date(datestr) {
+        return new Date(datestr).toLocaleDateString("en-GB", {
+            // dateStyle: "medium",
+            weekday: "short",
+            day: 'numeric',
+            month: 'long'
+        });
+    }
+
+    function display_time(datetimestr) {
+        const datetime = new Date(datetimestr);
+        return datetime.toLocaleTimeString("en-GB", {
+            timeStyle: "short",
+            hour12: false
+        });
+    }
+
+    function set_session_page(page) {
+        let current = session_pagination.value.page
+        session_pagination.value.page = page
+        if (current !== page) {
+            loadSessions()
+        }
+    }
+
+    createApp({
+        setup() {
+            return {
+                // Data
+                auth, login_data, session_pagination, session_data, session_err,
+                // Callback functions
+                onLogin, onLogout, bookSession, cancelSession,
+                // Utility functions
+                display_date, display_time, set_session_page
+            }
+        }
+    })
+    .mount('#app')
+</script>
 </html>

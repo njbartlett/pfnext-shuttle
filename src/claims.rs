@@ -17,11 +17,6 @@ const AUTHORIZATION: &str = "Authorization";
 /// Key used for symmetric token encoding
 const SECRET: &str = "secret";
 
-lazy_static! {
-    /// Time before token expires (aka exp claim)
-    static ref TOKEN_EXPIRATION: Duration = Duration::minutes(5);
-}
-
 // Used when decoding a token to `Claims`
 #[derive(Debug, PartialEq)]
 pub(crate) enum AuthenticationError {
@@ -34,7 +29,9 @@ pub(crate) enum AuthenticationError {
 // The `name` is a custom claim for this API
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Claims {
-    pub(crate) name: String,
+    pub(crate) uid: i64,
+    pub(crate) email: String,
+    pub(crate) roles: Vec<String>,
     exp: usize,
 }
 
@@ -69,10 +66,16 @@ impl<'r> FromRequest<'r> for Claims {
 }
 
 impl Claims {
-    pub(crate) fn from_name(name: &str) -> Self {
+    pub(crate) fn create(uid: i64, email: &str, roles: &Vec<String>, duration: Duration) -> Self {
+        let expiration = Utc::now()
+            .checked_add_signed(duration)
+            .expect("failed to create an expiration time")
+            .timestamp();
         Self {
-            name: name.to_string(),
-            exp: 0,
+            uid,
+            email: email.to_string(),
+            roles: roles.to_owned(),
+            exp: expiration as usize,
         }
     }
 
@@ -96,31 +99,22 @@ impl Claims {
             &DecodingKey::from_secret(SECRET.as_ref()),
             &Validation::default(),
         )
-            .map_err(|e| match e.kind() {
-                ErrorKind::ExpiredSignature => AuthenticationError::Expired,
-                _ => AuthenticationError::Decoding(e.to_string()),
-            })?;
+        .map_err(|e| match e.kind() {
+            ErrorKind::ExpiredSignature => AuthenticationError::Expired,
+            _                           => AuthenticationError::Decoding(e.to_string()),
+        })?;
 
         Ok(token.claims)
     }
 
     /// Converts this claims into a token string
     pub(crate) fn into_token(mut self) -> Result<String, Custom<String>> {
-        let expiration = Utc::now()
-            .checked_add_signed(*TOKEN_EXPIRATION)
-            .expect("failed to create an expiration time")
-            .timestamp();
-
-        self.exp = expiration as usize;
-
-        // Construct and return JWT using `jsonwebtoken`
-        // Consult the `jsonwebtoken` documentation for using other algorithms and asymmetric keys
         let token = encode(
             &Header::default(),
             &self,
             &EncodingKey::from_secret(SECRET.as_ref()),
         )
-            .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
+        .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 
         Ok(token)
     }
@@ -147,6 +141,6 @@ mod tests {
 
         let claim = Claims::from_authorization(&token).unwrap();
 
-        assert_eq!(claim.name, "test runner");
+        assert_eq!(claim.email, "test runner");
     }
 }

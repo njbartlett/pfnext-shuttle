@@ -24,8 +24,10 @@
             <button type="submit" class="pure-button pure-button-primary">Sign In</button>
         </fieldset>
     </form>
-    <p>Raw Data:</p>
+    <p>Raw data:</p>
     <pre>{{data}}</pre>
+    <p>Raw auth_token:</p>
+    <pre>{{auth_token}}</pre>
 </div>
 </body>
 
@@ -33,25 +35,31 @@
     import { createApp, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js'
 
     const data = ref({
-        username: "b@b.com",
-        password: null
+        username: "username@a.com",
+        password: "password"
     })
+
+    const auth_token = ref({})
 
     const error = ref(null)
 
     async function onLogin() {
-        fetch("https://pfnext.shuttleapp.rs/authenticate", {
+        fetch("http://localhost:8000/authenticate", {
             method: "POST",
             headers: { "Content-Type": "application/json"},
             body: JSON.stringify(data.value)
         }).then(res => {
             console.log("Request complete: ", res)
+            return res.json();
+        }).then(json => {
+            console.log("Auth response: ", json);
+            auth_token.value = json;
         });
     }
 
     createApp({
         setup() {
-            return { data, onLogin }
+            return { data, auth_token, onLogin }
         }
     })
     .mount('#app')
