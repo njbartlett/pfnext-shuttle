@@ -190,7 +190,13 @@
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
                         <div class="modal-body">
-                            <p>Are you sure you want to delete the session on {{displayDate(deleting_session.datetime)}} at {{displayTime(deleting_session.datetime)}}?</p>
+                            <p>Are you sure you want to delete the following session?</p>
+                            <ul>
+                                <li>{{displayDate(deleting_session.datetime)}} at {{displayTime(deleting_session.datetime)}}</li>
+                                <li><span v-if="deleting_session.session_type">{{deleting_session.session_type.name}}</span><span v-if="deleting_session.location">, {{deleting_session.location.name}}</span></li>
+                                <li v-if="deleting_session.trainer">{{deleting_session.trainer.name}}</li>
+                                <li>{{deleting_session.booking_count}} member(s) booked</li>
+                            </ul>
                             <p>This cannot be undone. All related bookings and attendance records will be deleted.</p>
                         </div>
                         <div class="modal-footer">
