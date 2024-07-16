@@ -40,6 +40,10 @@
                     <span class="navbar-text"><a href="profile.html" style="text-decoration: none; color: var(--bs-nav-link-color)"><i class="bi bi-person-fill"></i>&nbsp;{{auth.name}}</a></span>&nbsp;
                     <button id="logout" type="button" class="btn btn-outline-danger" @click="onLogout">Logout</button>
                 </div>
+                <div v-else class="btn-group" role="group">
+                    <a id="navbarLogin" class="btn btn-primary" href="login.html">Login</a>
+                    <a id="navbarRegister" class="btn btn-primary" href="register.html">Register</a>
+                </div>
             </div>
         </div>
     </nav>
@@ -48,7 +52,7 @@
     <div class="container-fluid text-center my-5">
         <h1 style="font-size: xxx-large">Another Level</h1>
         <h3 style="font-variant: all-small-caps">Community Fitness</h3>
-        <div class="btn-group mt-3" role="group" aria-label="Basic outlined example" v-cloak>
+        <div class="btn-group mt-3" role="group">
             <a id="btnLogin" class="btn btn-outline-primary mb-1" :class="{'disabled': auth}" href="login.html">Login/<wbr>Register</a>
             <a id="btnSessions" class="btn btn-outline-primary mb-1" :class="{'disabled': !auth}" href="sessions.html">Book Sessions</a>
             <a id="btnBookings" class="btn btn-outline-primary mb-1" :class="{'disabled': !auth}" href="bookings.html">View Bookings</a>
