@@ -93,46 +93,45 @@
 
         <!-- Logged in section -->
         <div id="loggedInSection" v-else>
-            <div v-if="session" class="card my-3">
-                <h5 class="card-header">Session Attendance</h5>
-                <div class="card-body">
-                    <p>Showing attendance for session at {{displayTime(session.datetime)}} on {{displayDate(session.datetime)}}, at {{session.location.name}}.</p>
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>Member</th>
-                                <th>Attended?</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <tr v-for="booking in bookings">
-                            <td>{{booking.person_name}} &lt;{{booking.person_email}}&gt;</td>
-                            <td><form><input type="checkbox" class="form-check larger" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
-                            <td><a href="#" class="link-danger" @click.prevent="removeMember(session.id, booking.person_id)">Cancel</a></td>
-                        </tr>
-
-                        <!-- Add Member Row -->
+            <div v-if="session">
+                <h2 class="my-3">Session Attendance</h2>
+                <p>Showing attendance for session at {{displayTime(session.datetime)}} on {{displayDate(session.datetime)}}, at {{session.location.name}}.</p>
+                <table class="table table-hover table-sm">
+                    <thead>
                         <tr>
-                            <td>
-                                <form>
-                                    <div class="input-group m-0 p-0">
-                                        <input id="addMemberToSessionInput" type="search" class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="addMemberInput">
-                                        <button class="btn btn-outline-primary" :disabled="!adding_user" @click.prevent="addMember(session.id, adding_user.id)">Add</button>
-                                    </div>
-                                    <datalist id="addMemberToSessionOptions">
-                                        <option v-if="all_user_data && all_user_data.name_email_to_user" v-for="user_name_email in all_user_data.name_email_to_user.keys()" :value="user_name_email">
-                                    </datalist>
-                                </form>
-                            </td>
-                            <td></td>
-                            <td></td>
+                            <th>Member</th>
+                            <th>Attended?</th>
+                            <th></th>
                         </tr>
-                        </tbody>
-                    </table>
-                </div> <!-- end attendance card body -->
-            </div> <!-- end attendance card -->
+                    </thead>
+                    <tbody>
+                    <tr v-for="booking in bookings">
+                        <td>{{booking.person_name}} &lt;{{booking.person_email}}&gt;</td>
+                        <td><form><input type="checkbox" class="form-check larger" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
+                        <td><a href="#" class="link-danger" @click.prevent="removeMember(session.id, booking.person_id)">Cancel</a></td>
+                    </tr>
+
+                    <!-- Add Member Row -->
+                    <tr>
+                        <td>
+                            <form>
+                                <div class="input-group m-0 p-0">
+                                    <input id="addMemberToSessionInput" type="search" class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="addMemberInput">
+                                    <button class="btn btn-outline-primary" :disabled="!adding_user" @click.prevent="addMember(session.id, adding_user.id)">Add</button>
+                                </div>
+                                <datalist id="addMemberToSessionOptions">
+                                    <option v-if="all_user_data && all_user_data.name_email_to_user" v-for="user_name_email in all_user_data.name_email_to_user.keys()" :value="user_name_email">
+                                </datalist>
+                            </form>
+                        </td>
+                        <td></td>
+                        <td></td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div> <!-- end attendance -->
         </div> <!-- end logged in section -->
+        <button class="btn btn-outline-light" onclick="history.back();">&laquo; Back</button>
     </div> <!-- end main content -->
 </div> <!-- end vue app -->
 </body>
@@ -308,6 +307,10 @@
                 http_err.value = err_text
             })
         })
+    }
+
+    function isAdmin(auth) {
+        return auth && (auth.roles.includes('admin') || auth.roles.includes('trainer'))
     }
 
     let jwtRaw = localStorage.getItem("jwt")

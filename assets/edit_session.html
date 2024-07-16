@@ -68,13 +68,12 @@
 
     <!-- Main Content -->
     <div class="container-fluid" v-cloak>
-        <!-- REST errors -->
-        <div v-if="http_err" class="alert alert-danger my-2" role="alert">
-            <div v-if="'authorization token expired' === http_err">
+        <div v-if="alert" class="alert my-2" :class="{'alert-danger': alert.is_error, 'alert-success': !alert.is_error}" role="alert">
+            <div v-if="'authorization token expired' === alert.message">
                 Your login session has expired, please <a href="login.html">login again</a>.
             </div>
             <div v-else>
-                {{http_err}}
+                {{alert.message}}
             </div>
         </div>
 
@@ -89,97 +88,103 @@
 
         <!-- Logged in section -->
         <div id="loggedInSection" v-else>
-            <div class="card my-3">
-                <h5 class="card-header">{{session_data.id ? 'Edit' : 'Create New'}} Session</h5>
-                <div class="card-body">
-                    <form>
-                        <div class="mb-2 row">
-                            <div class="col-4">
-                                <label for="editSessionDate" class="form-label">Date</label>
-                                <input id="editSessionDate" class="form-control" :class="{'is-invalid': session_data_validation.date}" type="date" v-model="session_data.date" required>
-                                <div class="invalid-feedback">
-                                    {{session_data_validation.date}}
-                                </div>
-                            </div>
-                            <div class="col-4">
-                                <label for="editSessionTime" class="form-label">Time</label>
-                                <input id="editSessionTime" class="form-control" :class="{'is-invalid': session_data_validation.time}" type="time" list="editSessionTimeList" v-model="session_data.time" required>
-                                <datalist id="editSessionTimeList">
-                                    <option v-for="time in suggested_session_times" :value="time"></option>
-                                </datalist>
-                                <div class="invalid-feedback">
-                                    {{session_data_validation.time}}
-                                </div>
-                            </div>
-                            <div class="col-4">
-                                <label for="editSessionDuration" class="form-label">Duration</label>
-                                <div class="input-group">
-                                    <input id="editSessionDuration" class="form-control no-spinner" :class="{'is-invalid': session_data_validation.duration_mins}" type="number" v-model="session_data.duration_mins" required>
-                                    <span class="input-group-text">mins</span>
-                                    <div class="invalid-feedback">
-                                        {{session_data_validation.duration_mins}}
-                                    </div>
-                                </div>
-                            </div>
+            <h2 class="my-3">{{session_data.id ? 'Edit' : 'Create New'}} Session</h2>
+            <form>
+                <div class="mb-2 row"> <!-- Date, time and duration row -->
+                    <div class="col-4">
+                        <label for="editSessionDate" class="form-label">Date</label>
+                        <input id="editSessionDate" class="form-control" :class="{'is-invalid': session_data_validation.date}" type="date" v-model="session_data.date" required>
+                        <div class="invalid-feedback">
+                            {{session_data_validation.date}}
                         </div>
-
-                        <div class="mb-2">
-                            <label for="editSessionTrainer" class="form-label">Trainer</label>
-                            <select id="editSessionTrainer" class="form-control" :class="{'is-invalid': session_data_validation.trainer_id}" v-model="session_data.trainer_id" required>
-                                <option disabled value="">Select trainer&hellip;</option>
-                                <option v-for="trainer in admin_trainer_list" :value="trainer.id">{{trainer.name}}</option>
-                            </select>
+                    </div>
+                    <div class="col-4">
+                        <label for="editSessionTime" class="form-label">Time</label>
+                        <input id="editSessionTime" class="form-control" :class="{'is-invalid': session_data_validation.time}" type="time" list="editSessionTimeList" v-model="session_data.time" required>
+                        <datalist id="editSessionTimeList">
+                            <option v-for="time in suggested_session_times" :value="time"></option>
+                        </datalist>
+                        <div class="invalid-feedback">
+                            {{session_data_validation.time}}
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <label for="editSessionDuration" class="form-label">Duration</label>
+                        <div class="input-group">
+                            <input id="editSessionDuration" class="form-control no-spinner" :class="{'is-invalid': session_data_validation.duration_mins}" type="number" v-model="session_data.duration_mins" required>
+                            <span class="input-group-text">mins</span>
                             <div class="invalid-feedback">
-                                {{session_data_validation.trainer_id}}
+                                {{session_data_validation.duration_mins}}
                             </div>
                         </div>
+                    </div>
+                </div>  <!-- END date, time and duration row -->
 
-                        <div class="mb-2">
-                            <label for="editSessionLocation" class="form-label">Location</label>
-                            <select id="editSessionLocation" class="form-control" :class="{'is-invalid': session_data_validation.location_id}" v-model="session_data.location_id" required>
-                                <option disabled value="">Select location&hellip;</option>
-                                <option v-for="location in admin_location_list" :value="location.id">{{location.name}}</option>
-                            </select>
+                <div class="mb-2"> <!-- trainer row -->
+                    <label for="editSessionTrainer" class="form-label">Trainer</label>
+                    <select id="editSessionTrainer" class="form-control" :class="{'is-invalid': session_data_validation.trainer_id}" v-model="session_data.trainer_id" required>
+                        <option disabled value="">Select trainer&hellip;</option>
+                        <option v-for="trainer in admin_trainer_list" :value="trainer.id">{{trainer.name}}</option>
+                    </select>
+                    <div class="invalid-feedback">
+                        {{session_data_validation.trainer_id}}
+                    </div>
+                </div> <!-- END: trainer row -->
+
+                <div class="mb-2"> <!-- location row -->
+                    <label for="editSessionLocation" class="form-label">Location</label>
+                    <select id="editSessionLocation" class="form-control" :class="{'is-invalid': session_data_validation.location_id}" v-model="session_data.location_id" required>
+                        <option disabled value="">Select location&hellip;</option>
+                        <option v-for="location in admin_location_list" :value="location.id">{{location.name}}</option>
+                    </select>
+                    <div class="invalid-feedback">
+                        {{session_data_validation.location_id}}
+                    </div>
+                </div> <!-- END location row -->
+
+                <div class="mb-2 row"> <!-- type and limit row -->
+                    <div class="col-8">
+                        <label for="editSessionType" class="form-label">Type</label>
+                        <select id="editSessionType" class="form-control" :class="{'is-invalid': session_data_validation.session_type_id}" v-model="session_data.session_type_id" required>
+                            <option disabled value="">Type&hellip;</option>
+                            <option v-for="session_type in admin_session_type_list" :value="session_type.id">{{session_type.name}}</option>
+                        </select>
+                        <div class="invalid-feedback">
+                            {{session_data_validation.session_type_id}}
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <label for="editSessionBookingLimit" class="form-label">Max. Bookings</label>
+                        <div class="input-group">
+                            <div class="input-group-text">
+                                <input class="form-check-input mt-0" type="checkbox" aria-label="Enable max booking limit" title="Enable max bookings limit" v-model="session_data.max_bookings_enabled">
+                            </div>
+                            <input id="editSessionBookingLimit" type="number" class="form-control no-spinner" v-model="session_data.max_bookings" title="Max bookings limit" :class="{'is-invalid': session_data_validation.max_bookings}" :disabled="!session_data.max_bookings_enabled" aria-label="Max bookings limit">
                             <div class="invalid-feedback">
-                                {{session_data_validation.location_id}}
+                                {{session_data_validation.max_bookings}}
                             </div>
                         </div>
+                    </div>
+                </div>  <!-- END type and limit row -->
 
-                        <div class="mb-2 row">
-                            <div class="col-8">
-                                <label for="editSessionType" class="form-label">Type</label>
-                                <select id="editSessionType" class="form-control" :class="{'is-invalid': session_data_validation.session_type_id}" v-model="session_data.session_type_id" required>
-                                    <option disabled value="">Type&hellip;</option>
-                                    <option v-for="session_type in admin_session_type_list" :value="session_type.id">{{session_type.name}}</option>
-                                </select>
-                                <div class="invalid-feedback">
-                                    {{session_data_validation.session_type_id}}
-                                </div>
-                            </div>
-                            <div class="col-4">
-                                <label for="editSessionBookingLimit" class="form-label">Max. Bookings</label>
-                                <div class="input-group">
-                                    <div class="input-group-text">
-                                        <input class="form-check-input mt-0" type="checkbox" aria-label="Enable max booking limit" title="Enable max bookings limit" v-model="session_data.max_bookings_enabled">
-                                    </div>
-                                    <input id="editSessionBookingLimit" type="number" class="form-control no-spinner" v-model="session_data.max_bookings" title="Max bookings limit" :class="{'is-invalid': session_data_validation.max_bookings}" :disabled="!session_data.max_bookings_enabled" aria-label="Max bookings limit">
-                                    <div class="invalid-feedback">
-                                        {{session_data_validation.max_bookings}}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div>
-                            <button id="editSessionSubmit" type="button" class="btn btn-primary" :disabled="!session_data_validation.ready" @click.prevent="saveSession(session_data)">
-                                {{session_data.id ? 'Save Changes' : 'Create'}}
-                            </button>
-                        </div>
-                        <span class="form-text" v-if="save_result.message">{{save_result.message}}</span>
-                    </form>
+                <div class="mb-2"> <!- session notes -->
+                    <label for="editSessionNotes" class="form-label">Notes</label>
+                    <textarea id="editSessionNotes" class="form-control" rows="5" v-model="session_data.notes"></textarea>
                 </div>
-            </div>
+
+                <div class="d-flex mb-3"> <!-- save buttons -->
+                    <div class="me-auto p-2">
+                    </div>
+                    <div class="p-2">
+                        <button id="editSessionSubmit" type="button" class="btn btn-primary" :disabled="!session_data_validation.ready" @click.prevent="saveSession(session_data, false)">Save</button>
+                    </div>
+                    <div class="p-2">
+                        <button id="editSessionSubmitAndCreate" type="button" class="btn btn-primary" :disabled="!session_data_validation.ready" @click.prevent="saveSession(session_data, true)">Save &amp; Create Another</button>
+                    </div>
+                </div>
+            </form>
         </div> <!-- end logged in section -->
+
     </div> <!-- end main content -->
 
 </div> <!-- end vue app -->
@@ -187,7 +192,7 @@
 <script type="module">
     import { createApp, reactive, ref, watch } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js'
 
-    const http_err = ref(null)
+    const alert = ref(null)
     const auth = ref(null)
 
     const session_data = reactive({
@@ -199,7 +204,8 @@
         trainer_id: null,
         location_id: null,
         max_bookings_enabled: false,
-        max_bookings: null
+        max_bookings: null,
+        notes: null
     })
     const session_data_validation = ref({
         id: null,
@@ -210,13 +216,8 @@
         trainer_id: null,
         location_id: null,
         max_bookings: null,
+        notes: null,
         ready: false
-    })
-    const session_data_orig = ref({})
-    Object.assign(session_data_orig.value, session_data)
-    const save_result = ref({
-        message: null,
-        is_error: false
     })
 
     // Reference data
@@ -244,7 +245,7 @@
     ])
 
     async function doFetch(endpoint, onjson) {
-        http_err.value = null
+        alert.value = null
         fetch(SERVER_URL + endpoint, {
             headers: {
                 'Authorization': 'Bearer ' + auth.value.access_token
@@ -256,7 +257,10 @@
             return res.json()
         }).then(onjson).catch(err => {
             err.text().then(error_text => {
-                http_err.value = error_text
+                alert.value = {
+                    message: error_text,
+                    is_error: true
+                }
             })
         })
     }
@@ -271,7 +275,7 @@
         }
 
         // Fetch all users and load into the admin_user_data map
-        http_err.value = null
+        alert.value = null
         fetch(SERVER_URL + "/users/list", {
             headers: {
                 'Authorization': 'Bearer ' + auth.value.access_token
@@ -293,7 +297,12 @@
                 count: count,
                 name_email_to_user: name_email_to_user
             }
-        }).catch(err => err.text().then(error_text => http_err.value = error_text))
+        }).catch(err => err.text().then(error_text => {
+            alert.value = {
+                message: error_text,
+                is_error: true
+            }
+        }))
 
 
         // Fetch list of trainers
@@ -316,14 +325,12 @@
             doFetch("/sessions/" + editSessionId, session => {
                 session_data.id = session.id
                 copySessionFields(session, session_data)
-                copySessionFields(session, session_data_orig.value)
             })
         } else if (copySessionId) {
             // Get data from an existing session but leave our session ID blank
             // to force creation instead of edit.
             doFetch("/sessions/" + copySessionId, session => {
                 copySessionFields(session, session_data)
-                copySessionFields(session, session_data_orig.value)
             })
         }
     }
@@ -338,9 +345,10 @@
         to_session.location_id = from_session.location.id
         to_session.max_bookings_enabled = from_session.max_booking_count !== null
         to_session.max_bookings = from_session.max_booking_count
+        to_session.notes = from_session.notes
     }
 
-    async function saveSession(session) {
+    async function saveSession(session, createAnother) {
         let datetime = new Date(session.date + " " + session.time)
         let request = {
             datetime: datetime.toISOString(),
@@ -348,9 +356,10 @@
             session_type_id: session.session_type_id,
             location_id: session.location_id,
             trainer_id: session.trainer_id,
-            max_bookings: session.max_bookings_enabled ? session.max_bookings : null
+            max_bookings: session.max_bookings_enabled ? session.max_bookings : null,
+            notes: session.notes
         }
-        http_err.value = null
+        alert.value = null
         let url = session.id ? "/sessions/" + session.id : "/sessions"
         fetch(SERVER_URL + url, {
             method: session.id ? "PUT" : "POST",
@@ -362,13 +371,19 @@
             credentials: 'include'
         }).then(res => {
             if (!res.ok) throw res
-            save_result.value = {
-                message: "Saved!",
-                is_error: false
+            if (res.status === 201) { // Created new session
+                res.json().then(json => document.location = (createAnother ? "?copy=" : "?edit=") + json.id)
+            } else if (createAnother) {
+                document.location = "?copy=" + session.id
+            } else {
+                alert.value = {
+                    message: "Saved!",
+                    is_error: false
+                }
             }
         }).catch(err => {
             err.text().then(err_text => {
-                save_result.value = {
+                alert.value = {
                     message: err_text,
                     is_error: true
                 }
@@ -391,8 +406,7 @@
             val.duration_mins === null &&
             val.trainer_id === null &&
             val.location_id === null &&
-            val.max_bookings === null &&
-            !_.isEqual(new_data, session_data_orig.value)
+            val.max_bookings === null
     }
 
     watch(session_data, new_data => validateEditSession(new_data, session_data_validation.value))
@@ -406,8 +420,8 @@
     createApp({
         setup() {
             return {
-                http_err, auth,
-                session_data, session_data_validation, session_data_orig, save_result,
+                alert, auth,
+                session_data, session_data_validation,
                 admin_user_data, admin_trainer_list, admin_session_type_list, admin_location_list, suggested_session_times,
                 saveSession, isAdmin, onLogout
             }

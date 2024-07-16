@@ -98,37 +98,36 @@
             <nav aria-label="Session Pagination" class="my-3">
                 <ul class="pagination justify-content-center">
                     <li class="page-item">
-                        <a class="page-link" href="#" aria-label="Previous" @click.prevent="scrollPaginationBlock(-1)">
+                        <a class="page-link" href="#" aria-label="Previous" @click.prevent="scrollPaginationBlock(-3)">
                             <span aria-hidden="true">&laquo;</span>
                         </a>
                     </li>
                     <li class="page-item" :class="{ active: session_pagination.week_offset === session_pagination.block }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block)">{{renderWeekOffset(session_pagination.block)}}</a></li>
                     <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 1)}"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+1)">{{renderWeekOffset(session_pagination.block+1)}}</a></li>
                     <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 2) }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+2)">{{renderWeekOffset(session_pagination.block+2)}}</a></li>
-                    <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 3) }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+3)">{{renderWeekOffset(session_pagination.block+3)}}</a></li>
                     <li class="page-item">
-                        <a class="page-link" href="#" aria-label="Next" @click.prevent="scrollPaginationBlock(1)">
+                        <a class="page-link" href="#" aria-label="Next" @click.prevent="scrollPaginationBlock(3)">
                             <span aria-hidden="true">&raquo;</span>
                         </a>
                     </li>
                 </ul>
             </nav> <!-- end session table pagination -->
 
-            <table class="table table-hover">
+            <table class="table table-borderless table-sm">
                 <thead>
                     <tr>
-                        <th scope="col">Date & Time</th>
-                        <th scope="col">Trainer</th>
-                        <th scope="col">Type & Location</th>
+                        <th scope="col">When</th>
+                        <th scope="col">Who</th>
+                        <th scope="col">What &amp; Where</th>
                         <th scope="col"></th>
                         <th v-if="auth.roles.includes('member')" scope="col">Actions</th>
                         <th v-if="isAdmin(auth)" scope="col"></th>
                     </tr>
                 </thead>
-                <tbody>
-                    <tr v-for="session in session_data" :class="{'session-past': isPast(session.datetime)}">
-                        <td>{{displayDate(session.datetime)}} {{displayTime(session.datetime)}}</td>
-                        <td>{{session.trainer.name}}</td>
+                <tbody v-for="session in session_data">
+                    <tr class="border-top" :class="{'session-past': isPast(session.datetime), 'border-bottom': !session.notes}">
+                        <td :rowspan="session.notes ? 2 : 1">{{displayDate(session.datetime)}} {{displayTime(session.datetime)}}</td>
+                        <td :rowspan="session.notes ? 2 : 1">{{session.trainer.name}}</td>
                         <td>{{session.session_type.name}}, <a :href="'http://www.google.com/maps/search/' + encodeURIComponent(session.location.address)" target="_blank">{{session.location.name}}</a></td>
                         <td>
                             <span v-if="session.max_booking_count" class="badge rounded-pill"
@@ -167,6 +166,9 @@
                                 </ul>
                             </div>
                         </td>
+                    </tr>
+                    <tr v-if="session.notes" class="border-bottom">
+                        <td colspan="10">{{session.notes}}</td>
                     </tr>
                 </tbody>
             </table>
@@ -363,6 +365,16 @@
         } else {
             return "+" + offset + " Weeks"
         }
+    }
+
+    function displayDateFull(datestr) {
+        return new Date(datestr).toLocaleDateString("en-GB", {
+            // dateStyle: "medium",
+            weekday: "long",
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+        });
     }
 
     function isPast(datetime) {
