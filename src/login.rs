@@ -207,7 +207,7 @@ pub async fn request_pwd_reset(
         \n\
         This password and link will expire in {} minutes.\n\
         \n\
-        If you did not request a password reset, you can safely ignore and delete this email.", temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
+        If you did not request a password reset, you can safely ignore this email.", temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     let message = MessageBuilder::new()
         .from((EMAIL_SENDER_NAME, EMAIL_SENDER_ADDRESS))
         .reply_to((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
@@ -250,19 +250,29 @@ pub async fn register_user(
         To enable your account, please use the following temporary password on the password reset\n\
         page:\n\
         \n\
-            {}\n\
+        {}\n\
         \n\
         Alternatively click the following link or copy it into your web browser's address bar: \n\
         \n\
         {}\n\
         \n\
-        This password and link will expire in {} minutes.\n\
+        This password and link will expire in {} minutes. If you did not request a new account, you\n\
+        can safely ignore this email.\n\
         \n\
-        If you did not request new account, you can safely ignore and delete this email.", temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
+        When clicking the above link or using the provided temporary password to complete your\n\
+        registration, you acknowledge that you have read and agreed to the following waiver:\n\
+        \n\
+        By attending classes and using the park or venue or facilities and equipment, you hereby\n\
+        acknowledge and agree on behalf of yourself that you have voluntarily chosen to participate\n\
+        in intense physical exercise. We rely on you carrying out your own health self-assessment\n\
+        prior to taking part in any class. You agree to assume full responsibility for any and all\n\
+        injuries or damage to your person or property, which are sustained or aggravated by you in\n\
+        relation to the use of equipment and/or park or venue facilities.", temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     let message = MessageBuilder::new()
         .from((EMAIL_SENDER_NAME, EMAIL_SENDER_ADDRESS))
         .reply_to((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
         .to(Address::new_address(Some(&new_user.name), &new_user.email))
+        .bcc((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
         .subject("💪 FitNext User Registration")
         .text_body(text)
         .into_message()
@@ -359,6 +369,26 @@ pub async fn reset_pwd(
         .await
         .map(|user_updated: UserUpdated| info!("Deleted temporary password for user {}", user_updated.id))
         .inspect_err(|e| error!("Failed to delete temporary password for user {}: {}", &user_record.email, e));
+
+    // Send acknowledgement email
+    let text = format!(
+        "The password for {} <{}> on fitnext.uk has just been changed.\n\
+        \n\
+        If you did NOT request a password change, please get in touch with us urgently! You can do\n\
+        so by replying to this email or by asking on the WhatsApp group.", &user_record.name, &user_record.email);
+    let message = MessageBuilder::new()
+        .from((EMAIL_SENDER_NAME, EMAIL_SENDER_ADDRESS))
+        .reply_to((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
+        .to(Address::new_address(Some(&user_record.name), &user_record.email))
+        .bcc((EMAIL_REPLYTO_NAME, EMAIL_REPLYTO_ADDRESS))
+        .subject("💪 FitNext Password Changed")
+        .text_body(text)
+        .into_message()
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    let _ = send_email(message, &state.secrets)
+        .await
+        .inspect_err(|e| error!("Failed to send password change email to {}: {:?}", &user_record.email, e));
+
     Ok(Accepted(format!("Updated password for user with email {}", &user_record.email)))
 }
 

@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS person (
     roles text
 );
 CREATE TABLE IF NOT EXISTS temp_password (
-    person_id bigint UNIQUE NOT NULL REFERENCES person,
+    person_id bigint UNIQUE NOT NULL REFERENCES person ON DELETE CASCADE,
     pwd text NOT NULL,
     sent timestamp with time zone NOT NULL,
     expiry timestamp with time zone NOT NULL
