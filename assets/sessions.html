@@ -224,10 +224,12 @@
 
     const MILLIS_IN_WEEK = 1000 * 60 * 60 * 24 * 7
     const PAGINATION_BLOCK_WEEKS = 3
+    const START_OF_WEEK = 1 // Monday
 
     function startOfWeek(date) {
         let start = new Date(date)
-        start.setDate(start.getDate() - start.getDay()) // Subtract weekday to get sunday of current week
+        // Subtracting weekday gives Sunday of that week
+        start.setDate(start.getDate() - start.getDay() + START_OF_WEEK)
         start.setHours(0, 0, 0, 0) // Set to midnight of that day
         return start
     }
