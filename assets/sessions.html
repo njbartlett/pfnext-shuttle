@@ -293,7 +293,7 @@
 </div> <!-- End App -->
 <div class="sticky-bottom bg-body">
     <div class="container-lg my-3 px-3">
-        <p>&copy; 2024 Neil Bartlett all rights reserved. ALCFv001.</p>
+        <p>&copy; 2024 Neil Bartlett all rights reserved. ALCFv002.</p>
     </div>
 </div>
 </body>
@@ -628,8 +628,9 @@
         doSaveSession(admin_edit_session_data, "PUT", "/sessions/" + session_selection.value.id)
     }
     async function doSaveSession(new_session, method, url) {
+        let datetime = new Date(new_session.date + " " + new_session.time)
         let request = {
-            datetime: new Date(new_session.date + "  " + new_session.time).toISOString(),
+            datetime: datetime.toISOString(),
             duration_mins: new_session.duration_mins,
             session_type_id: new_session.session_type_id,
             location_id: new_session.location_id,
