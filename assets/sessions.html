@@ -75,7 +75,7 @@
         <!-- REST errors -->
         <div v-if="http_err" class="alert alert-danger my-2" role="alert">
             <div v-if="'authorization token expired' === http_err">
-                Your login session has expired, please <a href="login.html">login again</a>.
+                Your login session has expired, please <a :href="'login.html?return=' + encodeLoginReturnUrl()">login again</a>.
             </div>
             <div v-else>
                 {{http_err}}
@@ -86,7 +86,7 @@
         <div class="alert alert-danger my-2" role="alert" v-if="!auth">
             <div class="card-body text-danger">
                 <p class="card-text">
-                    You are not logged in. Please return to the <a href="login.html">login page</a>.
+                    You are not logged in. Please return to the <a :href="'login.html?return=' + encodeLoginReturnUrl()">login page</a>.
                 </p>
             </div>
         </div> <!-- End not logged in section -->
@@ -347,12 +347,11 @@
         if (hashStr) {
             urlParams = new URLSearchParams(hashStr.substring(1))
         } else {
-            urlParams = new URLSearchParams("#")
+            urlParams = new URLSearchParams("")
         }
-        let [startDate, startTime] = session_pagination.value.start.toISOString().split('T')
+        let startDate = session_pagination.value.start.toLocaleDateString("sv")
         urlParams.set("week", startDate)
-        let urlParamsStr = urlParams.toString();
-        window.location.hash = urlParamsStr
+        window.location.hash = urlParams.toString()
     }
 
     function isAdmin(auth) {
@@ -414,6 +413,10 @@
         return new Date() > new Date(datetime)
     }
 
+    function encodeLoginReturnUrl() {
+        return encodeURIComponent(window.location.pathname + window.location.hash)
+    }
+
     createApp({
         setup() {
             return {
@@ -425,7 +428,7 @@
                 bookSession, cancelBooking, setSessionPage,
 
                 // Misc callbacks and utility functions
-                deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, displayDate, displayTime, displayDateFull, isPast, isAdmin
+                deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, displayDate, displayTime, displayDateFull, isPast, isAdmin, encodeLoginReturnUrl
             }
         }
     })
@@ -439,19 +442,22 @@
         }
     })
 
+    // Parse the current week from the URL fragment
+    let currentWeek = startOfWeek(new Date())
     let hashStr = window.location.hash;
-    if (hashStr) {
-        let urlParams = new URLSearchParams(hashStr.substring(1))
-        let dateStr = urlParams.get("week")
-        if (dateStr) {
-            let targetWeek = startOfWeek(new Date(dateStr))
-            let currentWeek = startOfWeek(new Date())
-            let offsetMillis = targetWeek.getTime() - currentWeek.getTime()
-            session_pagination.value.week_offset = Math.floor(offsetMillis / MILLIS_IN_WEEK)
-            session_pagination.value.start = targetWeek
-            session_pagination.value.end = new Date(targetWeek.getTime() + MILLIS_IN_WEEK)
-            session_pagination.value.block = Math.floor(session_pagination.value.week_offset / PAGINATION_BLOCK_WEEKS) * PAGINATION_BLOCK_WEEKS
-        }
+    let dateStr = hashStr ? new URLSearchParams(hashStr.substring(1)).get("week") : null
+    if (dateStr) {
+        let targetWeek = startOfWeek(new Date(dateStr))
+        let offsetMillis = targetWeek.getTime() - currentWeek.getTime()
+        session_pagination.value.week_offset = Math.floor(offsetMillis / MILLIS_IN_WEEK)
+        session_pagination.value.start = targetWeek
+        session_pagination.value.end = new Date(targetWeek.getTime() + MILLIS_IN_WEEK)
+        session_pagination.value.block = Math.floor(session_pagination.value.week_offset / PAGINATION_BLOCK_WEEKS) * PAGINATION_BLOCK_WEEKS
+    } else {
+        let currentWeekStr = currentWeek.toLocaleDateString("sv")
+        let urlParams = new URLSearchParams()
+        urlParams.set("week", currentWeekStr)
+        window.location.hash = urlParams.toString()
     }
 
 </script>

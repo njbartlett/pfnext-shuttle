@@ -340,8 +340,8 @@
         to_session.time = String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0')
         to_session.duration_mins = from_session.duration_mins
         to_session.session_type_id = from_session.session_type.id
-        to_session.trainer_id = from_session.trainer.id
-        to_session.location_id = from_session.location.id
+        to_session.trainer_id = from_session.trainer ? from_session.trainer.id : null
+        to_session.location_id = from_session.location ? from_session.location.id : null
         to_session.max_bookings_enabled = from_session.max_booking_count !== null
         to_session.max_bookings = from_session.max_booking_count
         to_session.notes = from_session.notes

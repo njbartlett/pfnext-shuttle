@@ -140,6 +140,7 @@
     const http_err = ref(null)
     const auth = ref(null)
     const reset_password_result = ref(null)
+    const login_return_path = ref("/sessions.html")
 
     async function onLogin() {
         http_err.value = null
@@ -156,7 +157,7 @@
         }).then(json => {
             auth.value = json
             localStorage.setItem("jwt", JSON.stringify(json))
-            window.location.href = "sessions.html"
+            window.location.href = login_return_path.value
         }).catch(error => {
             error.text().then(error_text => {
                 auth.value = null
@@ -230,5 +231,11 @@
     .mount('#app')
 
     getValidatedAuthToken().then(a => auth.value = a)
+
+    let return_path = url_params.get("return")
+    if (return_path) {
+        login_return_path.value = decodeURIComponent(return_path)
+    }
+
 </script>
 </html>
