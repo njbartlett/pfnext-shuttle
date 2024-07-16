@@ -72,11 +72,15 @@ struct UserLoginRecord {
     roles: String
 }
 
-async fn verify_user(state: &State<AppState>, email: &str, password: &str) -> Result<UserLoginRecord, Custom<String>>{
-    let login_record = load_user_record(state, email)
-        .await?
-        .ok_or_else(|| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
-    info!("verify_user: loaded user record {:?}", login_record);
+async fn verify_user_by_id(pool: &PgPool, user_id: i64, password: &str) -> Result<UserLoginRecord, Custom<String>> {
+    verify_user(load_user_record_by_id(pool, user_id).await?.ok_or_else(|| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?, password)
+}
+
+async fn verify_user_by_email(pool: &PgPool, email: &str, password: &str) -> Result<UserLoginRecord, Custom<String>> {
+    verify_user(load_user_record_by_email(pool, email).await?.ok_or_else(|| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?, password)
+}
+
+fn verify_user(login_record: UserLoginRecord, password: &str) -> Result<UserLoginRecord, Custom<String>> {
     let recorded_pwd = login_record.pwd
         .as_ref()
         .ok_or_else(|| Custom(Status::Forbidden, "please reset your password".to_string()))?;
@@ -88,7 +92,7 @@ async fn verify_user(state: &State<AppState>, email: &str, password: &str) -> Re
 
 #[post("/login", data = "<login>")]
 pub async fn login(state: &State<AppState>, login: Json<LoginRequest>) -> Result<LoginResponse, Custom<String>> {
-    let login_record = verify_user(state, &login.email, &login.password).await?;
+    let login_record = verify_user_by_email(&state.pool, &login.email, &login.password).await?;
     build_login_response(login_record, &state.secrets)
 }
 
@@ -107,7 +111,7 @@ pub struct UpdatePasswordRequest {
 
 #[post("/change_password", data = "<password_update>")]
 pub async fn change_password(state: &State<AppState>, password_update: Json<UpdatePasswordRequest>) -> Result<LoginResponse, Custom<String>> {
-    let login_record = verify_user(state, &password_update.username, &password_update.current_password).await?;
+    let login_record = verify_user_by_email(&state.pool, &password_update.username, &password_update.current_password).await?;
 
     verify_suitable_password(&password_update.new_password, &password_update.current_password)?;
 
@@ -150,7 +154,7 @@ pub async fn request_pwd_reset(
     state: &State<AppState>,
     reset_request: Json<PasswordResetRequest>
 ) -> Result<Accepted<String>, Custom<String>> {
-    let user_record = load_user_record(state, &reset_request.email)
+    let user_record = load_user_record_by_email(&state.pool, &reset_request.email)
         .await?
         .ok_or(Custom(Status::BadRequest, format!("user does not exist: {}", reset_request.email)))?;
 
@@ -190,7 +194,7 @@ pub async fn register_user(
     new_user: Json<NewUserRequest>
 ) -> Result<Accepted<String>, Custom<String>> {
     // Error if already existing record for the specified email
-    let existing_user_record = load_user_record(state, &new_user.email).await?;
+    let existing_user_record = load_user_record_by_email(&state.pool, &new_user.email).await?;
     if let Some(existing_user_record) = existing_user_record {
         return Err(Custom(Status::Conflict, "User already exists with this email address".to_string()));
     }
@@ -282,7 +286,7 @@ pub async fn reset_pwd(
     verify_suitable_password(&user_pwd_reset.new_password, &user_pwd_reset.temp_password)?;
 
     // Get the user => error if not found
-    let user_record = load_user_record(state, &user_pwd_reset.email)
+    let user_record = load_user_record_by_email(&state.pool, &user_pwd_reset.email)
         .await?
         .ok_or(Custom(Status::BadRequest, format!("User does not exist with email address {}", &user_pwd_reset.email)))?;
 
@@ -370,6 +374,53 @@ pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<Str
     Ok(Json(users))
 }
 
+#[derive(Deserialize)]
+pub struct UserDelete {
+    password: Option<String>,
+    website_url: String
+}
+
+#[delete("/users/<user_id>", data="<deletion>")]
+pub async fn delete_user(state: &State<AppState>, claims: Claims, user_id: i64, deletion: Json<UserDelete>) -> Result<NoContent, Custom<String>> {
+    // Load the user record
+    let mut login_record = load_user_record_by_id(&state.pool, user_id)
+        .await?
+        .ok_or(Custom(Status::NotFound, format!("user id not found: {}", user_id)))?;
+
+    if user_id == claims.uid {
+        // If this is the current user, require correct password even if the user is an admin
+        let password = deletion.password.as_ref().ok_or(Custom(Status::Forbidden, "password is required to delete profile".to_string()))?;
+        login_record = verify_user(login_record, password)?;
+    } else {
+        // Not the current user, only admins can perform
+        claims.assert_roles_contains("admin")?;
+    }
+
+    // Actually delete the data. Related records in bookings are removed by DELETE CASCADE
+    let _ = query_as("DELETE FROM person WHERE id = $1 RETURNING id")
+        .bind(user_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+
+    // Send an email to the user confirming their account has been deleted
+    let text = format!(include_str!("post_delete_profile_email.txt"), &login_record.email, &deletion.website_url);
+    let sender = Address::new_address(Some(&state.config.email_sender_name), &state.config.email_sender_address);
+    let message = MessageBuilder::new()
+        .from(sender.clone())
+        .reply_to(sender)
+        .to(Address::new_address(Some(&login_record.name), &login_record.email))
+        .subject(format!("User Profile Deleted for {}", &state.config.branding))
+        .text_body(text)
+        .into_message()
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    let _ = send_email(message, &state.secrets)
+        .await
+        .inspect_err(|e| error!("Failed to send deletion email to {}: {:?}", &login_record.email, e));
+
+    Ok(NoContent)
+}
+
 fn verify_suitable_password(new_password: &str, current_password: &str) -> Result<(), Custom<String>> {
     // Check suitability of new password
     if new_password.eq(current_password) {
@@ -415,10 +466,18 @@ fn build_login_response(
     })
 }
 
-async fn load_user_record(state: &State<AppState>, user_email: &str) -> Result<Option<UserLoginRecord>, Custom<String>> {
+async fn load_user_record_by_email(pool: &PgPool, user_email: &str) -> Result<Option<UserLoginRecord>, Custom<String>> {
     query_as("SELECT id, name, email, phone, pwd, roles FROM person WHERE email = $1")
         .bind(user_email)
-        .fetch_optional(&state.pool)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+}
+
+async fn load_user_record_by_id(pool: &PgPool, user_id: i64) -> Result<Option<UserLoginRecord>, Custom<String>> {
+    query_as("SELECT id, name, email, phone, pwd, roles FROM person WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
 }

@@ -18,6 +18,19 @@
         [v-cloak] {
             display: none;
         }
+        .form-control-danger::placeholder { /* Chrome, Firefox, Opera, Safari 10.1+ */
+            color: #dc3545;
+            opacity: 1; /* Firefox */
+        }
+
+        .form-control-danger:-ms-input-placeholder { /* Internet Explorer 10-11 */
+            color: #dc3545;
+        }
+
+        .form-control-danger::-ms-input-placeholder { /* Microsoft Edge */
+            color: #dc3545;
+        }
+
     </style>
     <script src="js/bootstrap.min.js"></script>
     <script src="js/utils.js"></script>
@@ -99,13 +112,33 @@
                                 <td>
                                     <button class="btn btn-sm btn-outline-danger" @click.prevent="onResetPassword">Reset</button> <span class="text-secondary">Send a password reset email.</span>
                                     <br>
-                                    <span v-if="reset_password_message">{{reset_password_message}}</span>
+                                    <span v-if="reset_password_message.message" :class="{'text-danger': reset_password_message.is_error}">{{reset_password_message.message}}</span>
                                 </td>
                             </tr>
                         </tbody>
                     </table>
                 </div> <!-- end show profile card body -->
             </div> <!-- end show profile card -->
+
+            <div class="card border-danger">
+                <h5 class="card-header bg-danger-subtle"><i class="bi bi-trash"></i> Delete My Profile</h5>
+                <div class="card-body">
+                    <p>Delete your profile PERMANENTLY along with all data that we hold about you. This includes personal details, bookings, and attendance records.</p>
+                    <p>This cannot be undone!</p>
+                    <p>To proceed, please click &ldquo;Unlock&rdquo; then enter your password and click the Delete button.</p>
+                    <form>
+                        <div class="form-check mb-2">
+                            <input id="deleteProfileUnlock" type="checkbox" class="form-check-input" v-model="delete_profile.unlock">
+                            <label for="deleteProfileUnlock" class="form-check-label text-danger">Unlock</label>&nbsp;
+                        </div>
+                        <div class="input-group">
+                            <input id="deleteProfilePassword" class="form-control form-control-danger border-danger" type="password" :disabled="!delete_profile.unlock" placeholder="Enter password" v-model="delete_profile.password">
+                            <button class="btn btn-outline-danger btn-sm" type="button" :disabled="!delete_profile.unlock || delete_profile.password.length === 0" @click.prevent="onDeleteProfile">Delete My Profile</button>&nbsp;
+                        </div>
+                        <span v-if="delete_profile_message.message" :class="{'text-danger': delete_profile_message.is_error}">{{delete_profile_message.message}}</span>
+                    </form>
+                </div>
+            </div>
         </div> <!-- End logged in section -->
 
     </div> <!-- end main content -->
@@ -123,10 +156,24 @@
 
     const auth = ref(null)
     const http_err = ref(null)
-    const reset_password_message = ref(null)
+    const reset_password_message = ref({
+        message: null,
+        is_error: false
+    })
+    const delete_profile = ref({
+        password: "",
+        unlock: false
+    })
+    const delete_profile_message = ref({
+        message: null,
+        is_error: false
+    })
 
     async function onResetPassword() {
-        reset_password_message.value = "Processing..."
+        reset_password_message.value = {
+            message: "Processing...",
+            is_error: false
+        }
         fetch(SERVER_URL + "/request_pwd_reset", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
@@ -139,22 +186,60 @@
             if (!res.ok) throw res
             return res.text()
         }).then(text => {
-            reset_password_message.value = text
+            reset_password_message.value = {
+                message: text,
+                is_error: false
+            }
+            localStorage.removeItem("jwt")
             window.location.href = "/passwordreset.html?email=" + encodeURIComponent(auth.value.email)
         }).catch(error => {
             error.text().then(error_text => {
-                reset_password_message.value = null
-                http_err.value = error_text
+                reset_password_message.value = {
+                    message: error_text,
+                    is_error: true
+                }
             })
         })
+    }
+
+    async function onDeleteProfile() {
+        delete_profile_message.value = {
+            message: "Processing...",
+            is_error: false
+        }
+        fetch(SERVER_URL + "/users/" + auth.value.id, {
+            method: "DELETE",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + auth.value.access_token
+            },
+            body: JSON.stringify({
+                password: delete_profile.value.password,
+                website_url: document.location.host
+            })
+        }).then(res => {
+            if (!res.ok) throw res
+        }).then(_ => {
+            delete_profile_message.value = {
+                message: "Profile deleted. Redirecting to home page.",
+                is_error: false
+            }
+            localStorage.removeItem("jwt")
+            setTimeout(_ => window.location.href = "/", 1000)
+        }).catch(err => err.text().then(err_text => {
+            delete_profile_message.value = {
+                message: err_text,
+                is_error: true
+            }
+        }))
     }
 
 
     createApp({
         setup() {
             return {
-                auth, http_err, reset_password_message,
-                onResetPassword, onLogout
+                auth, http_err, reset_password_message, delete_profile, delete_profile_message,
+                onResetPassword, onLogout, onDeleteProfile
             }
         }
     }).mount('#app')

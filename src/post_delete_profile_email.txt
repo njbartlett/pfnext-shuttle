@@ -1,0 +1,5 @@
+This is to confirm that your user profile for {} at {} has been deleted.
+
+All personal data along with bookings and attendance records has been removed and can no longer be restored.
+
+We are sorry to see you go!
