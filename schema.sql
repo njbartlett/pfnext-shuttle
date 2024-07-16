@@ -34,7 +34,6 @@ CREATE TABLE IF NOT EXISTS session_type (
     id serial PRIMARY KEY,
     name varchar(255) UNIQUE NOT NULL
 );
-INSERT INTO session_type (name) VALUES ('Outdoor') ON CONFLICT DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS session (
     id bigserial PRIMARY KEY,

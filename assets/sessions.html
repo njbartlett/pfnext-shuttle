@@ -98,7 +98,7 @@
             <nav aria-label="Session Pagination" class="my-3">
                 <ul class="pagination justify-content-center">
                     <li class="page-item">
-                        <a class="page-link" href="#" aria-label="Previous" @click.prevent="scrollPaginationBlock(-3)">
+                        <a class="page-link" href="#" aria-label="Previous" @click.prevent="scrollPaginationBackwards()">
                             <span aria-hidden="true">&laquo;</span>
                         </a>
                     </li>
@@ -106,7 +106,7 @@
                     <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 1)}"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+1)">{{renderWeekOffset(session_pagination.block+1)}}</a></li>
                     <li class="page-item" :class="{ active: session_pagination.week_offset === (session_pagination.block + 2) }"><a class="page-link" @click.stop="setSessionPage(session_pagination.block+2)">{{renderWeekOffset(session_pagination.block+2)}}</a></li>
                     <li class="page-item">
-                        <a class="page-link" href="#" aria-label="Next" @click.prevent="scrollPaginationBlock(3)">
+                        <a class="page-link" href="#" aria-label="Next" @click.prevent="scrollPaginationForwards()">
                             <span aria-hidden="true">&raquo;</span>
                         </a>
                     </li>
@@ -223,6 +223,14 @@
     import { createApp, onMounted, reactive, ref, watch } from './js/vue.esm-browser.js'
 
     const MILLIS_IN_WEEK = 1000 * 60 * 60 * 24 * 7
+    const PAGINATION_BLOCK_WEEKS = 3
+
+    function startOfWeek(date) {
+        let start = new Date(date)
+        start.setDate(start.getDate() - start.getDay()) // Subtract weekday to get sunday of current week
+        start.setHours(0, 0, 0, 0) // Set to midnight of that day
+        return start
+    }
 
     // Current user information
     const auth = ref(null)
@@ -232,7 +240,7 @@
     const session_data = ref([])
 
     // Session table page control
-    const currentWeekStart = current_week_start()
+    const currentWeekStart = startOfWeek(new Date())
     const session_pagination = ref({
         block: 0,
         week_offset: 0,
@@ -246,13 +254,6 @@
         datetime: new Date()
     })
     // END ADMIN ONLY DATA
-
-    function current_week_start() {
-        let start = new Date() // Begin with now...
-        start.setDate(start.getDate() - start.getDay()) // Subtract weekday to get sunday of current week
-        start.setHours(0, 0, 0, 0) // Set to midnight of that day
-        return start
-    }
 
     async function loadSessions() {
         let pageStart = session_pagination.value.start
@@ -328,14 +329,30 @@
     }
 
     function setSessionPage(week_offset) {
-        session_pagination.value.start = new Date(current_week_start().getTime() + week_offset * MILLIS_IN_WEEK)
+        // Update the week
+        let currentWeekStart = startOfWeek(new Date())
+        session_pagination.value.start = new Date(currentWeekStart.getTime() + week_offset * MILLIS_IN_WEEK)
         session_pagination.value.end = new Date(session_pagination.value.start.getTime() + MILLIS_IN_WEEK)
 
+        // Reload data if not already on the current week
         let current = session_pagination.value.week_offset
         session_pagination.value.week_offset = week_offset
         if (current !== week_offset) {
             loadSessions()
         }
+
+        // Update the URL hash string
+        let urlParams;
+        let hashStr = window.location.hash
+        if (hashStr) {
+            urlParams = new URLSearchParams(hashStr.substring(1))
+        } else {
+            urlParams = new URLSearchParams("#")
+        }
+        let [startDate, startTime] = session_pagination.value.start.toISOString().split('T')
+        urlParams.set("week", startDate)
+        let urlParamsStr = urlParams.toString();
+        window.location.hash = urlParamsStr
     }
 
     function isAdmin(auth) {
@@ -361,8 +378,12 @@
         })
     }
 
-    function scrollPaginationBlock(amount) {
-        session_pagination.value.block = session_pagination.value.block + amount
+    function scrollPaginationBackwards() {
+        session_pagination.value.block = session_pagination.value.block - PAGINATION_BLOCK_WEEKS
+    }
+
+    function scrollPaginationForwards() {
+        session_pagination.value.block = session_pagination.value.block + PAGINATION_BLOCK_WEEKS
     }
 
     function renderWeekOffset(offset) {
@@ -404,7 +425,7 @@
                 bookSession, cancelBooking, setSessionPage,
 
                 // Misc callbacks and utility functions
-                deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBlock, displayDate, displayTime, displayDateFull, isPast, isAdmin
+                deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, displayDate, displayTime, displayDateFull, isPast, isAdmin
             }
         }
     })
@@ -417,6 +438,21 @@
             loadSessions()
         }
     })
+
+    let hashStr = window.location.hash;
+    if (hashStr) {
+        let urlParams = new URLSearchParams(hashStr.substring(1))
+        let dateStr = urlParams.get("week")
+        if (dateStr) {
+            let targetWeek = startOfWeek(new Date(dateStr))
+            let currentWeek = startOfWeek(new Date())
+            let offsetMillis = targetWeek.getTime() - currentWeek.getTime()
+            session_pagination.value.week_offset = Math.floor(offsetMillis / MILLIS_IN_WEEK)
+            session_pagination.value.start = targetWeek
+            session_pagination.value.end = new Date(targetWeek.getTime() + MILLIS_IN_WEEK)
+            session_pagination.value.block = Math.floor(session_pagination.value.week_offset / PAGINATION_BLOCK_WEEKS) * PAGINATION_BLOCK_WEEKS
+        }
+    }
 
 </script>
 </html>
