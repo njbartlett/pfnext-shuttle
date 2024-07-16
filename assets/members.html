@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Members</title>
+</head>
+<body>
+
+<div id="app">
+    <table>
+        <thead>
+            <th>Name</th>
+            <th>Email</th>
+        </thead>
+        <tr v-for="item in data">
+            <td>{{item.name}}</td>
+            <td>{{item.email}}</td>
+        </tr>
+    </table>
+</div>
+
+</body>
+<script type="module">
+    import { createApp, ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js'
+
+    createApp({
+        setup() {
+            const data = ref(null);
+            const error = ref(null);
+
+            fetch("/person")
+                .then((res) => res.json())
+                .then((json) => (data.value = json))
+                .catch((err) => (error.value = err));
+            return { data }
+        }
+    }).mount('#app')
+</script>
