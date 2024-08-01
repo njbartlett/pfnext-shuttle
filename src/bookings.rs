@@ -57,7 +57,8 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
             session_type: SessionType{
                 id: row.try_get("session_type_id")?,
                 name: row.try_get("session_type_name")?,
-                requires_trainer: row.try_get("session_type_requires_trainer").ok().unwrap_or(true)
+                requires_trainer: row.try_get("session_type_requires_trainer").ok().unwrap_or(true),
+                cost: row.try_get("session_type_cost")?
             },
             attended: row.try_get("attended").ok().unwrap_or(false)
         })
@@ -75,7 +76,7 @@ pub async fn list_bookings(
 ) -> Result<Json<Vec<SessionBookingFull>>, Custom<String>> {
     let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, \
                 s.datetime AS session_datetime, s.duration_mins AS session_duration_mins, s.location AS session_location_id, l.name AS session_location_name, l.address AS session_location_address, \
-                s.session_type AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, b.attended \
+                s.session_type AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, b.attended \
             FROM booking as b \
             JOIN person AS p ON b.person_id = p.id \
             JOIN session AS s ON b.session_id = s.id \

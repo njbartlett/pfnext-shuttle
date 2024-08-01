@@ -136,7 +136,8 @@ struct BigintRecord {
 pub struct SessionType {
     id: i32,
     name: String,
-    requires_trainer: bool
+    requires_trainer: bool,
+    cost: i16
 }
 
 impl SessionType {
