@@ -462,7 +462,16 @@ fn verify_suitable_password(new_password: &str, current_password: &str) -> Resul
 }
 
 fn parse_roles(roles_str: &str) -> Vec<String> {
-    roles_str.split(",").map(|s| s.to_string()).collect::<Vec<_>>()
+    let parsed_roles = roles_str
+        .split(",")
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+
+    if vec![String::from("")].eq(&parsed_roles) {
+        Vec::new()
+    } else {
+        parsed_roles
+    }
 }
 
 fn build_login_response(
