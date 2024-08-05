@@ -37,6 +37,7 @@ struct Config {
     email_sender_address: String,
     email_replyto_name: String,
     email_replyto_address: String,
+    email_admin_notifications: String,
     cors_allowed: String
 }
 impl ::std::default::Default for Config {
@@ -47,6 +48,7 @@ impl ::std::default::Default for Config {
             email_sender_address: String::from("unknown@example.com"),
             email_replyto_name: String::from("Unknown"),
             email_replyto_address: String::from("unknown@example.com"),
+            email_admin_notifications: String::from("admin@anotherlevelfitness.uk"),
             cors_allowed: String::from("^http://localhost")
         }
     }

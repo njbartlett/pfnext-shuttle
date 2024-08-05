@@ -217,13 +217,28 @@ pub async fn register_user(
     let sender = Address::new_address(Some(&state.config.email_sender_name), &state.config.email_sender_address);
     let message = MessageBuilder::new()
         .from(sender.clone())
-        .reply_to(sender)
+        .reply_to(sender.clone())
         .to(Address::new_address(Some(&new_user.name), &new_user.email))
         .subject(format!("New User Registration for {}", &state.config.branding))
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     send_email(message, &state.secrets).await?;
+
+    // Send notification email to admin
+    let notification_message = MessageBuilder::new()
+        .from(sender.clone())
+        .reply_to(sender.clone())
+        .to(state.config.email_admin_notifications.as_str())
+        .subject(format!("New User Registration for {}", &state.config.branding))
+        .text_body(format!(include_str!("register_notify_email.txt"),
+            &new_user.name,
+            &new_user.email,
+            &new_user.phone.as_ref().unwrap_or(&"<unspecified>".to_string())
+        ))
+        .into_message()
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    send_email(notification_message, &state.secrets).await?;
 
     Ok(Accepted(format!("New user instructions email sent to {}. Please check your spam folder if not received!", &new_user.email)))
 }
