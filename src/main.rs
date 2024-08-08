@@ -5,6 +5,7 @@ extern crate rocket;
 use std::env;
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, FixedOffset};
+use chrono_tz::Tz;
 use rand::Error;
 
 use rand::prelude::*;
@@ -38,6 +39,7 @@ struct Config {
     email_replyto_name: String,
     email_replyto_address: String,
     email_admin_notifications: String,
+    timezone_name: String,
     cors_allowed: String
 }
 impl ::std::default::Default for Config {
@@ -49,6 +51,7 @@ impl ::std::default::Default for Config {
             email_replyto_name: String::from("Unknown"),
             email_replyto_address: String::from("unknown@example.com"),
             email_admin_notifications: String::from("admin@anotherlevelfitness.uk"),
+            timezone_name: String::from("Europe/London"),
             cors_allowed: String::from("^http://localhost")
         }
     }
@@ -57,7 +60,8 @@ impl ::std::default::Default for Config {
 struct AppState {
     pool: PgPool,
     secrets: shuttle_runtime::SecretStore,
-    config: Config
+    config: Config,
+    timezone: Tz
 }
 
 #[rocket::get("/<path..>")]
@@ -110,7 +114,8 @@ async fn rocket(
     }.to_cors().map_err(CustomError::new)?;
 
     // Configure Rocket
-    let state = AppState { pool, secrets, config };
+    let timezone = config.timezone_name.as_str().parse().unwrap();
+    let state = AppState { pool, secrets, config, timezone };
     let rocket = rocket::build()
         .attach(cors)
         .register("/", catchers![forbidden])

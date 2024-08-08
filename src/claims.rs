@@ -104,7 +104,7 @@ impl Claims {
 
     pub(crate) fn assert_roles_contains(&self, required_role: &str) -> Result<(), Custom<String>> {
         if !self.has_role(required_role) {
-            return Err(Custom(Status::Forbidden, format!("missing required role: {}", required_role)));
+            return Err(Custom(Status::Forbidden, format!("user is not allowed to perform this action (missing required role: {})", required_role)));
         }
         Ok(())
     }

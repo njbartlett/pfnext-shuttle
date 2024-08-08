@@ -258,6 +258,9 @@ pub async fn update_session(
     qb.push(", max_booking_count = ");
     qb.push_bind(new_session.max_bookings);
 
+    qb.push(", cost = ");
+    qb.push_bind(new_session.cost);
+
     qb.push(", notes = ");
     qb.push_bind(&new_session.notes);
 

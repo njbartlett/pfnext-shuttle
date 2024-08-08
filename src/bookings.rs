@@ -1,14 +1,14 @@
-use chrono::{DateTime, Utc};
+use chrono::{Datelike, DateTime, Days, NaiveTime, TimeZone, Utc};
 use rocket::form::FromForm;
 use rocket::futures::{Stream, StreamExt};
 use rocket::futures::stream::BoxStream;
 use rocket::http::Status;
-use rocket::response::status::{Created, Custom, NoContent};
+use rocket::response::status::{Created, Custom, Forbidden, NoContent};
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::State;
 use serde::Deserialize;
-use sqlx::{Acquire, Error, Executor, FromRow, Postgres, query_as, QueryBuilder, raw_sql, Row};
+use sqlx::{Acquire, Error, Executor, FromRow, PgPool, Postgres, query_as, QueryBuilder, raw_sql, Row};
 use sqlx::postgres::{PgArguments, PgQueryResult, PgRow};
 use sqlx::query::{Query, QueryAs};
 
@@ -130,9 +130,31 @@ async fn take_result_from_stream<'a>(stream: &mut BoxStream<'a, Result<PgQueryRe
 
 #[post("/bookings", data="<booking>")]
 pub async fn create_booking(state: &State<AppState>, claim: Claims, booking: Json<SessionBooking>) -> Result<Created<Json<SessionBooking>>, Custom<String>> {
-    claim.assert_roles_contains("member")?;
-    if booking.person_id != claim.uid && !claim.has_role("admin") {
-        return Err(Custom(Status::Forbidden, "not allowed to create bookings for other users".to_string()));
+    // Admins can always make a booking for any user
+    if !claim.has_role("admin") {
+        // Members can only book on their own behalf
+        if claim.uid != booking.person_id {
+            info!("person id {} attempted to book session on behalf of person id {}; denied: missing admin role", claim.uid, booking.person_id);
+            return Err(Custom(Status::Forbidden, "cannot create a booking for another user".to_string()));
+        }
+
+        // Fail if no membership exists
+        if !claim.has_role("member") && !claim.has_role("limited-member") {
+            info!("person id {} attempted to book session; denied: missing member or limited-member role", claim.uid);
+            return Err(Custom(Status::Forbidden, "missing or expired membership".to_string()));
+        }
+
+        // Non-admins can only book future sessions
+        let session_date_and_cost = get_session_date_and_cost(&state.pool, &booking.session_id).await?;
+        if session_date_and_cost.datetime.lt(&Utc::now()) {
+            info!("person id {} attempted to book session in past (session id {}, date {}); denied: missing admin role", claim.uid, session_date_and_cost.id, session_date_and_cost.datetime);
+            return Err(Custom(Status::Forbidden, "cannot create booking in the past".to_string()));
+        }
+
+        // Limited members can only book if they have no other payable sessions in the same week
+        if claim.has_role("limited-member") {
+            check_limited_member_has_no_bookings_in_same_week(&state, claim.uid, &session_date_and_cost).await?;
+        }
     }
 
     // Read the max_booking_count for the session if present
@@ -142,13 +164,67 @@ pub async fn create_booking(state: &State<AppState>, claim: Claims, booking: Jso
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::NotFound, format!("no session with id {}", &booking.session_id)))?;
-    let result = match session_with_max_booking_count.max_booking_count {
+
+    // Make the booking
+    match session_with_max_booking_count.max_booking_count {
         Some(max_booking_count) => book_session_with_max_bookings(state, booking.person_id, booking.session_id, max_booking_count).await,
         None => book_session_no_max_bookings(state, booking.person_id, booking.session_id).await
-    };
+    }?;
 
     info!("Created booking: {:?}", &booking);
     Ok(Created::new(format!("/bookings?sessionid={},person_id={}", booking.session_id, booking.person_id)))
+}
+
+#[derive(FromRow)]
+pub struct SessionDateAndCost {
+    id: i64,
+    datetime: DateTime<Utc>,
+    cost: i16
+}
+
+#[derive(FromRow, Debug)]
+struct MemberExistingBooking {
+    person_id: i64,
+    session_id: i64,
+    datetime: DateTime<Utc>
+}
+
+async fn check_limited_member_has_no_bookings_in_same_week(state: &State<AppState>, uid: i64, session_date_and_cost: &SessionDateAndCost) -> Result<(), Custom<String>> {
+    // Can always book a zero-cost session even if you already have other bookings.
+    if session_date_and_cost.cost == 0 {
+        return Ok(());
+    }
+
+    // Get the date/time of the session and work out the start and end of the week that the session occurs in
+    let datetime_in_local = &state.timezone.from_utc_datetime(&session_date_and_cost.datetime.naive_utc());
+    let start_of_week_local = datetime_in_local
+        .checked_sub_days(Days::new(datetime_in_local.weekday().num_days_from_monday() as u64)).unwrap()
+        .with_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+        .unwrap();
+    let end_of_week_local = start_of_week_local
+        .checked_add_days(Days::new(7)).unwrap();
+
+    // Find other bookings in the same week (only sessions with nonzero cost)
+    let existing_bookings: Vec<MemberExistingBooking> = query_as("SELECT b.person_id AS person_id, b.session_id AS session_id, s.datetime AS datetime, s.cost AS cost \
+            FROM booking AS b \
+            JOIN session AS s ON b.session_id = s.id \
+            WHERE b.person_id = $1 \
+            AND s.cost > 0 \
+            AND s.datetime >= $2 \
+            AND s.datetime < $3")
+        .bind(uid)
+        .bind(start_of_week_local)
+        .bind(end_of_week_local)
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+
+    // Error if there is at least one existing booking
+    if !existing_bookings.is_empty() {
+        return Err(Custom(Status::Forbidden, format!("cannot book session: member already has {} booking(s) in this week", existing_bookings.len())));
+    }
+
+    Ok(())
 }
 
 async fn book_session_no_max_bookings(state: &State<AppState>, person_id: i64, session_id: i64) -> Result<(), Custom<String>> {
@@ -197,11 +273,25 @@ async fn book_session_with_max_bookings(state: &State<AppState>, person_id: i64,
     Ok(())
 }
 
+async fn get_session_date_and_cost(pool: &PgPool, session_id: &i64) -> Result<SessionDateAndCost, Custom<String>> {
+    query_as("SELECT id, datetime, cost FROM session WHERE id = $1")
+        .bind(&session_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or(Custom(Status::NotFound, format!("no session with id {}", &session_id)))
+}
+
 #[delete("/bookings?<session_id>&<person_id>")]
 pub async fn delete_booking(state: &State<AppState>, claim: Claims, person_id: i64, session_id: i64) -> Result<Json<SessionBooking>, Custom<String>> {
-    claim.assert_roles_contains("member")?;
-    if person_id != claim.uid && !claim.has_role("admin") {
-        return Err(Custom(Status::Forbidden, "not allowed to cancel bookings for other users".to_string()));
+    if !claim.has_role("admin") {
+        if person_id != claim.uid {
+            return Err(Custom(Status::Forbidden, "not allowed to cancel bookings for other users".to_string()));
+        }
+        // Error if session is in the past
+        if get_session_date_and_cost(&state.pool, &session_id).await?.datetime.lt(&Utc::now()) {
+            return Err(Custom(Status::Forbidden, "cannot cancel past booking".to_string()));
+        }
     }
     let booking_deleted = query_as("DELETE FROM booking WHERE person_id = $1 AND session_id = $2 RETURNING person_id, session_id")
         .bind(person_id)
