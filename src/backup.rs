@@ -41,6 +41,8 @@ pub struct SessionRow {
     session_type_name: String,
     location_name: Option<String>,
     trainer_email: Option<String>,
+    max_booking_count: Option<i64>,
+    notes: Option<String>,
 }
 
 #[derive(FromRow, Serialize)]
@@ -94,7 +96,7 @@ async fn location_table(state: &State<AppState>) -> Result<Vec<LocationRow>, Cus
 }
 
 async fn session_table(state: &State<AppState>) -> Result<Vec<SessionRow>, Custom<String>> {
-    query_as("SELECT s.id, s.datetime, s.duration_mins, st.name as session_type_name, l.name as location_name, t.email as trainer_email \
+    query_as("SELECT s.id, s.datetime, s.duration_mins, s.max_booking_count as max_booking_count, s.notes as notes, st.name as session_type_name, l.name as location_name, t.email as trainer_email \
             FROM session as s, session_type as st, location as l, person as t \
             WHERE s.session_type = st.id \
             AND s.location = l.id \
