@@ -97,10 +97,10 @@ impl NewSession {
     }
 }
 
-#[get("/sessions?<from>&<to>")]
-pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
+#[get("/sessions?<from>&<to>&<trainer_id>")]
+pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>, trainer_id: Option<i64>) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
-    build_session_query(Some(claim.uid), from, to, &mut qb)?;
+    build_session_query(Some(claim.uid), from, to, trainer_id, &mut qb)?;
     qb.push(" ORDER BY s.datetime ASC");
     info!("build_session_query compiled SQL: {}", qb.sql());
 
@@ -114,7 +114,7 @@ pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<
 #[get("/sessions/<session_id>")]
 pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64) -> Result<Json<SessionFullRecord>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
-    build_session_query(Some(claim.uid), None, None, &mut qb)?;
+    build_session_query(Some(claim.uid), None, None, None, &mut qb)?;
     qb.push(" WHERE s.id = ");
     qb.push_bind(session_id);
     info!("build_session_query compiled SQL: {}", qb.sql());
@@ -127,7 +127,7 @@ pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64
         .map(|r| Json(r))
 }
 
-fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>, to: Option<String>, qb: &'a mut QueryBuilder<Postgres>) -> Result<(), Custom<String>> {
+fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>, to: Option<String>, trainer_id: Option<i64>, qb: &'a mut QueryBuilder<Postgres>) -> Result<(), Custom<String>> {
     qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, \
         t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, \
         loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, \
@@ -147,19 +147,21 @@ fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>,
 
     let parsed_from = parse_opt_date(from)?;
     let parsed_to = parse_opt_date(to)?;
+    let mut operator: String = " WHERE".to_string();
     if let Some(from) = parsed_from {
-        qb.push(" WHERE s.datetime >= ");
+        qb.push(operator + " s.datetime >= ");
         qb.push_bind(from);
+        operator = " AND".to_string();
     }
     if let Some(to) = parsed_to {
-        let operator: String;
-        if parsed_from.is_some() {
-            operator = String::from(" AND");
-        } else {
-            operator = String::from(" WHERE");
-        }
         qb.push(operator + " s.datetime <= ");
         qb.push_bind(to);
+        operator = " AND".to_string();
+    }
+    if let Some(trainer_id) = trainer_id {
+        qb.push(operator + " trainer.id = ");
+        qb.push_bind(trainer_id);
+        operator = " AND".to_string();
     }
     Ok(())
 }
