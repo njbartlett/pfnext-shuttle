@@ -1,18 +1,16 @@
 use chrono::{Datelike, DateTime, Days, NaiveTime, TimeZone, Utc};
-use rocket::form::FromForm;
-use rocket::futures::{Stream, StreamExt};
+use rocket::futures::StreamExt;
 use rocket::futures::stream::BoxStream;
 use rocket::http::Status;
-use rocket::response::status::{Created, Custom, Forbidden, NoContent};
+use rocket::response::status::{Created, Custom, NoContent};
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::State;
 use serde::Deserialize;
-use sqlx::{Acquire, Error, Executor, FromRow, PgPool, Postgres, query_as, QueryBuilder, raw_sql, Row};
-use sqlx::postgres::{PgArguments, PgQueryResult, PgRow};
-use sqlx::query::{Query, QueryAs};
+use sqlx::{Error, FromRow, PgPool, query_as, QueryBuilder, raw_sql, Row};
+use sqlx::postgres::{PgQueryResult, PgRow};
 
-use crate::{AppState, CountResult, parse_opt_date, SessionLocation, SessionType};
+use crate::{AppState, parse_opt_date, SessionLocation, SessionType};
 use crate::claims::Claims;
 
 #[derive(Serialize, Deserialize, FromRow, Debug)]
@@ -109,7 +107,6 @@ pub async fn list_bookings(
     if let Some(to) = parse_opt_date(to)? {
         qb.push(where_op + " s.datetime <= ");
         qb.push_bind(to);
-        where_op = String::from(" AND");
     }
 
     qb.push(" ORDER BY session_datetime, person_name");

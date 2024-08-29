@@ -5,7 +5,6 @@ use rocket::serde::json::Json;
 use rocket::State;
 use serde::Serialize;
 use sqlx::{FromRow, query_as};
-use sqlx::postgres::PgRow;
 use crate::AppState;
 use crate::claims::Claims;
 

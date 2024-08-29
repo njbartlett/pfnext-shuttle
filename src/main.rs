@@ -6,23 +6,17 @@ use std::env;
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, FixedOffset};
 use chrono_tz::Tz;
-use rand::Error;
 
-use rand::prelude::*;
-use rocket::{config, Request};
+use rocket::Request;
 use rocket::fs::NamedFile;
 use rocket::fs::relative;
 use rocket::http::{Method, Status};
-use rocket::response::Responder;
 use rocket::response::status::Custom;
 use rocket::serde::Serialize;
-use rocket_cors::{AllowedHeaders, AllowedMethods, AllowedOrigins};
+use rocket_cors::{AllowedHeaders, AllowedOrigins};
 use serde::Deserialize;
 use shuttle_runtime::CustomError;
-use shuttle_runtime::Error::StringInterpolation;
-use sqlx::{Column, Executor, FromRow, PgPool, query, query_as, Row};
-use sqlx::migrate::MigrationSource;
-use sqlx::postgres::PgRow;
+use sqlx::{Executor, FromRow, PgPool, query_as};
 use crate::claims::AuthenticationError;
 
 mod claims;
@@ -65,7 +59,7 @@ struct AppState {
 }
 
 #[rocket::get("/<path..>")]
-pub async fn static_files(mut path: PathBuf) -> Option<NamedFile> {
+pub async fn static_files(path: PathBuf) -> Option<NamedFile> {
     //path.set_extension("html");
     let mut path = Path::new(relative!("assets")).join(path);
     if path.is_dir() {
@@ -76,7 +70,7 @@ pub async fn static_files(mut path: PathBuf) -> Option<NamedFile> {
 }
 
 #[catch(403)]
-pub fn forbidden(status: Status, request: &Request) -> Custom<String> {
+pub fn forbidden(request: &Request) -> Custom<String> {
     let auth_error = request.local_cache::<Option<AuthenticationError>, _>(|| None);
     let message = match auth_error {
         Some(msg) => msg.to_string(),
@@ -182,11 +176,4 @@ fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, 
     println!("Parsed input {:?} to {:?}", &str, parsed);
     //.map_err(|e| BadRequest(e.to_string()))?;
     Ok(Some(parsed.map_err(|e| Custom(Status::UnprocessableEntity, e.to_string()))?))
-}
-
-fn log_info(row: &PgRow) -> () {
-    let cols = row.columns();
-    for col in cols {
-        info!("Column: {}", col.name())
-    }
 }

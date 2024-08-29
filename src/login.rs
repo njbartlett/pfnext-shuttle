@@ -1,22 +1,18 @@
-use std::fmt::format;
-use std::num;
 use std::ops::Add;
 
 use chrono::{DateTime, Duration, Utc};
-use mail_send::mail_builder::headers::address::{Address, EmailAddress};
+use mail_send::mail_builder::headers::address::Address;
 use mail_send::mail_builder::MessageBuilder;
 use mail_send::smtp::message::{IntoMessage, Message};
 use mail_send::{Credentials, SmtpClientBuilder};
 use password_auth::{generate_hash, verify_password};
 use passwords::PasswordGenerator;
 use rocket::http::{Header, Status};
-use rocket::http::hyper::body::HttpBody;
 use rocket::response::status::{Accepted, Custom, NoContent};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::serde::json::Json;
 use rocket::State;
-use rocket::yansi::Paint;
-use sqlx::{Error, FromRow, PgPool, query_as, QueryBuilder, raw_sql, Row};
+use sqlx::{Error, FromRow, PgPool, query_as, raw_sql, Row};
 use sqlx::postgres::PgRow;
 use urlencoding::encode;
 
@@ -196,7 +192,7 @@ pub async fn register_user(
 ) -> Result<Accepted<String>, Custom<String>> {
     // Error if already existing record for the specified email
     let existing_user_record = load_user_record_by_email(&state.pool, &new_user.email).await?;
-    if let Some(existing_user_record) = existing_user_record {
+    if let Some(_existing) = existing_user_record {
         return Err(Custom(Status::Conflict, "User already exists with this email address".to_string()));
     }
 
@@ -311,9 +307,9 @@ pub async fn reset_pwd(
         .bind(&user_record.id)
         .fetch_one(&state.pool)
         .await
-        .map_err(|e| Custom(Status::Forbidden, "Password reset has not been requested, or it has expired.".to_string()))?;
+        .map_err(|_e| Custom(Status::Forbidden, "Password reset has not been requested, or it has expired.".to_string()))?;
     verify_password(&user_pwd_reset.temp_password, &temp_pwd_record.pwd)
-        .map_err(|e| Custom(Status::Forbidden, INVALID_LOGIN_MESSAGE.to_string()))?;
+        .map_err(|_e| Custom(Status::Forbidden, INVALID_LOGIN_MESSAGE.to_string()))?;
 
     // Update the user's main password
     let updated_user: UserUpdated = query_as("UPDATE person SET pwd = $1 WHERE id = $2 RETURNING id")

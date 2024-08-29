@@ -1,19 +1,15 @@
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Utc};
 use rocket::form::validate::Contains;
-use rocket::futures::TryFutureExt;
-use rocket::http::hyper::body::HttpBody;
 use rocket::http::Status;
-use rocket::response::status::{Accepted, Created, Custom, NoContent, NotFound};
+use rocket::response::status::{Created, Custom, NoContent};
 use rocket::serde::Deserialize;
 use rocket::serde::json::Json;
 use rocket::State;
 use serde::Serialize;
-use shuttle_runtime::__internals::tracing_subscriber::fmt::writer::OptionalWriter;
 use sqlx::{Error, FromRow, PgPool, Postgres, query_as, QueryBuilder, Row};
-use sqlx::postgres::{PgArguments, PgRow};
-use sqlx::query::QueryAs;
+use sqlx::postgres::PgRow;
 
-use crate::{AppState, BigintRecord, log_info, parse_opt_date, SessionLocation, SessionTrainer, SessionType};
+use crate::{AppState, BigintRecord, parse_opt_date, SessionLocation, SessionTrainer, SessionType};
 use crate::claims::Claims;
 
 #[derive(Serialize, Clone, Debug)]
@@ -76,7 +72,7 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
 }
 
 #[derive(Deserialize, Debug)]
-struct NewSession {
+pub struct NewSession {
     datetime: DateTime<Utc>,
     duration_mins: i32,
     session_type_id: i32,
@@ -165,7 +161,6 @@ fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>,
     if let Some(trainer_id) = trainer_id {
         qb.push(operator + " trainer.id = ");
         qb.push_bind(trainer_id);
-        operator = " AND".to_string();
     }
     Ok(())
 }

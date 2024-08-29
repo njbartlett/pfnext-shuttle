@@ -1,17 +1,14 @@
 // claims.rs
 use std::fmt::{Display, Formatter};
 use std::ops::Add;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use jsonwebtoken::{errors::ErrorKind, DecodingKey, EncodingKey, Header, Validation, Algorithm};
-use rocket::{http::Status, request::{FromRequest, Outcome}, response::status::Custom, State};
+use rocket::{http::Status, request::{FromRequest, Outcome}, response::status::Custom};
 use serde::{Deserialize, Serialize};
 use crate::AppState;
 
 const BEARER: &str = "Bearer ";
 const AUTHORIZATION: &str = "Authorization";
-
-/// Key used for symmetric token encoding
-const SECRET_SIZE: usize = 1024;
 
 // Used when decoding a token to `Claims`
 #[derive(Debug, PartialEq, Clone)]
@@ -129,7 +126,7 @@ impl Claims {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    
     use chrono::Duration;
     use rocket::http::Status;
     use rocket::response::status::Custom;
