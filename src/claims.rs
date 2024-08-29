@@ -156,7 +156,7 @@ mod tests {
     fn assert_roles_any() {
         let claim = Claims::create(1, "joe@example.com", &Some(String::from("010101")), &vec!("member".to_string()), Duration::minutes(1));
         assert_eq!(claim.assert_roles_contains("member"), Ok(()));
-        assert_eq!(claim.assert_roles_contains("admin"), Err(Custom(Status::Forbidden, "missing required role: admin".to_string())));
+        assert_eq!(claim.assert_roles_contains("admin"), Err(Custom(Status::Forbidden, "user is not allowed to perform this action (missing required role: admin)".to_string())));
     }
 
 }
