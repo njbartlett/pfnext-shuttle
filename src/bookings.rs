@@ -157,14 +157,14 @@ async fn _create_booking(pool: &PgPool, timezone: &Tz, claim: &Claims, booking: 
         // Non-admins can only book on their own behalf
         if claim.uid != booking.person_id {
             info!("person id {} attempted to book session on behalf of person id {}; denied: missing admin role", claim.uid, booking.person_id);
-            return Err(Custom(Status::Forbidden, "cannot create a booking for another user".to_string()));
+            return Err(Custom(Status::Forbidden, "Cannot create a booking for another user!".to_string()));
         }
 
         // Non-admins can only book future sessions
         let session_date_and_cost = get_session_date_and_cost(pool, &booking.session_id).await?;
         if session_date_and_cost.datetime.lt(&Utc::now()) {
             info!("person id {} attempted to book session in past (session id {}, date {}); denied: missing admin role", claim.uid, session_date_and_cost.id, session_date_and_cost.datetime);
-            return Err(Custom(Status::Forbidden, "cannot create booking in the past".to_string()));
+            return Err(Custom(Status::Forbidden, "Cannot create booking in the past!".to_string()));
         }
 
         // Check whether the user has full membership or a usable limited membership
@@ -174,7 +174,8 @@ async fn _create_booking(pool: &PgPool, timezone: &Tz, claim: &Claims, booking: 
         } else if claim.has_role(ROLE_LIMITED_MEMBER) {
             membership_check = check_limited_member_has_no_bookings_in_same_week(pool, timezone, claim.uid, &session_date_and_cost).await;
         } else {
-            membership_check = Err(Custom(Status::Forbidden, "missing or expired membership".to_string()));
+            info!("person id {} attempted to book session id {} (cost {}) without active membership or PAYG credits", claim.uid, session_date_and_cost.id, session_date_and_cost.cost);
+            membership_check = Err(Custom(Status::Forbidden, "Missing or expired membership, and no PAYG credits.".to_string()));
         }
 
         // If no usable membership, check for credits
@@ -184,7 +185,7 @@ async fn _create_booking(pool: &PgPool, timezone: &Tz, claim: &Claims, booking: 
                 .ok_or(Custom(Status::Unauthorized, "missing user record".to_string()))?;
             if user_record.credits >= session_date_and_cost.cost {
                 if booking.credits_used.unwrap_or(0) < session_date_and_cost.cost {
-                    return Err(Custom(Status::PaymentRequired, "opt in to use credits for booking".to_string()));
+                    return Err(Custom(Status::PaymentRequired, "Opt in to use credits for booking.".to_string()));
                 } else {
                     credits_cost = session_date_and_cost.cost;
                 }
@@ -271,7 +272,7 @@ async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezo
 
     // Error if there is at least one existing booking
     if !existing_bookings.is_empty() {
-        return Err(Custom(Status::Forbidden, format!("cannot book session: member already has {} booking(s) in this week", existing_bookings.len())));
+        return Err(Custom(Status::Forbidden, format!("Cannot book session: member already has {} booking(s) in this week.", existing_bookings.len())));
     }
 
     Ok(())
@@ -319,7 +320,7 @@ async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_i
     info!("Insert result: {:?}", insert_result);
 
     if insert_result.rows_affected() == 0 {
-        return Err(Custom(Status::Conflict, format!("session has reached it maximum number of bookings: {}", max_bookings)));
+        return Err(Custom(Status::Conflict, format!("Session has reached it maximum number of bookings: {}.", max_bookings)));
     }
     Ok(())
 }
@@ -341,11 +342,11 @@ pub async fn delete_booking(state: &State<AppState>, claim: Claims, person_id: i
 async fn _delete_booking(pool: &PgPool, claim: &Claims, person_id: i64, session_id: i64) -> Result<Json<SessionBooking>, Custom<String>> {
     if !claim.has_role("admin") {
         if person_id != claim.uid {
-            return Err(Custom(Status::Forbidden, "not allowed to cancel bookings for other users".to_string()));
+            return Err(Custom(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string()));
         }
         // Error if session is in the past
         if get_session_date_and_cost(pool, &session_id).await?.datetime.lt(&Utc::now()) {
-            return Err(Custom(Status::Forbidden, "cannot cancel past booking".to_string()));
+            return Err(Custom(Status::Forbidden, "Cannot cancel past booking.".to_string()));
         }
     }
     let booking_deleted: SessionBooking = query_as("DELETE FROM booking WHERE person_id = $1 AND session_id = $2 RETURNING person_id, session_id, credits_used")
@@ -354,7 +355,7 @@ async fn _delete_booking(pool: &PgPool, claim: &Claims, person_id: i64, session_
         .fetch_optional(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or(Custom(Status::NotFound, format!("no booking found with person_id={} and session_id={}", person_id, session_id)))?;
+        .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))?;
 
     // Restore the credits used for this booking
     if booking_deleted.credits_used.unwrap_or(0) > 0 {
@@ -383,7 +384,7 @@ pub async fn update_booking(state: &State<AppState>, claim: Claims, person_id: i
         .fetch_optional(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or(Custom(Status::NotFound, format!("no booking found with person_id={} and session_id={}", person_id, session_id)))?;
+        .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))?;
     Ok(NoContent)
 }
 
@@ -554,7 +555,7 @@ mod tests {
         let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
         let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await;
         assert!(result.is_err());
-        assert_eq!(Custom(Status::Forbidden, "missing or expired membership".to_string()), result.err().unwrap());
+        assert_eq!(Custom(Status::Forbidden, "Missing or expired membership, and no PAYG credits.".to_string()), result.err().unwrap());
 
         // Postcondition: still zero bookings
         assert_eq!(0, count_bookings(&pool).await);
@@ -595,7 +596,7 @@ mod tests {
         let claim = Claims::create(member_id, "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
         let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking_2.clone())).await;
         assert!(result.is_err());
-        assert_eq!(Custom(Status::Forbidden, "cannot book session: member already has 1 booking(s) in this week".to_string()), result.err().unwrap());
+        assert_eq!(Custom(Status::Forbidden, "Cannot book session: member already has 1 booking(s) in this week.".to_string()), result.err().unwrap());
 
         // Postcondition 2: one booking
         assert_eq!(1, count_bookings(&pool).await);
@@ -675,7 +676,7 @@ mod tests {
         let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
         let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await;
         assert!(result.is_err());
-        assert_eq!(Custom(Status::PaymentRequired, "opt in to use credits for booking".to_string()), result.err().unwrap());
+        assert_eq!(Custom(Status::PaymentRequired, "Opt in to use credits for booking.".to_string()), result.err().unwrap());
 
         // Postcondition: still zero bookings
         assert_eq!(0, count_bookings(&pool).await);
@@ -749,7 +750,7 @@ mod tests {
         let timezone: Tz = "Europe/London".parse().unwrap();
         let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
         let booking_result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await.err().unwrap();
-        assert_eq!(Custom(Status::Conflict, "session has reached it maximum number of bookings: 0".to_string()), booking_result);
+        assert_eq!(Custom(Status::Conflict, "Session has reached it maximum number of bookings: 0.".to_string()), booking_result);
 
         // Still zero bookings
         assert_eq!(0, count_bookings(&pool).await);
