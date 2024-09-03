@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS person (
     email text NOT NULL UNIQUE,
     phone text,
     pwd text,
-    roles text
+    roles text,
+    credits int2 DEFAULT 0 NOT NULL CHECK (credits >= 0)
 );
 CREATE TABLE IF NOT EXISTS temp_password (
     person_id bigint UNIQUE NOT NULL REFERENCES person ON DELETE CASCADE,
@@ -30,12 +31,12 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- session tables
-CREATE TABLE public.session_type (
+CREATE TABLE IF NOT EXISTS session_type (
 	id serial4 NOT NULL,
 	name varchar(255) NOT NULL,
 	requires_trainer bool DEFAULT true NULL,
 	cost int2 DEFAULT 0 NULL,
-	CONSTRAINT session_type_cost_check CHECK ((cost >= 0)),
+	CONSTRAINT session_type_cost_check CHECK (cost >= 0),
 	CONSTRAINT session_type_name_key UNIQUE (name),
 	CONSTRAINT session_type_pkey PRIMARY KEY (id)
 );

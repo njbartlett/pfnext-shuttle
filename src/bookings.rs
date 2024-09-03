@@ -11,13 +11,18 @@ use serde::Deserialize;
 use sqlx::{Error, Executor, FromRow, PgPool, query_as, QueryBuilder, raw_sql, Row};
 use sqlx::postgres::{PgQueryResult, PgRow};
 
-use crate::{AppState, parse_opt_date, SessionLocation, SessionType};
+use crate::{AppState, parse_opt_date, SessionLocation, SessionType, UserLoginRecord};
 use crate::claims::Claims;
+
+const ROLE_ADMIN: &str = "admin";
+const ROLE_FULL_MEMBER: &str = "member";
+const ROLE_LIMITED_MEMBER: &str = "limited-member";
 
 #[derive(Serialize, Deserialize, FromRow, Debug, Clone)]
 pub struct SessionBooking {
     person_id: i64,
-    session_id: i64
+    session_id: i64,
+    credits_used: Option<i16>
 }
 
 #[derive(Serialize, Debug)]
@@ -30,7 +35,8 @@ pub struct SessionBookingFull {
     session_duration_mins: i32,
     session_location: Option<SessionLocation>,
     session_type: SessionType,
-    attended: bool
+    attended: bool,
+    credits_used: i16
 }
 
 impl FromRow<'_, PgRow> for SessionBookingFull {
@@ -59,7 +65,8 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
                 requires_trainer: row.try_get("session_type_requires_trainer").ok().unwrap_or(true),
                 cost: row.try_get("session_type_cost")?
             },
-            attended: row.try_get("attended").ok().unwrap_or(false)
+            attended: row.try_get("attended").ok().unwrap_or(false),
+            credits_used: row.try_get("credits_used")?
         })
     }
 }
@@ -84,7 +91,7 @@ async fn _list_bookings(
     from: Option<String>,
     to: Option<String>
 ) -> Result<Json<Vec<SessionBookingFull>>, Custom<String>> {
-    let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, \
+    let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, b.credits_used, \
                 s.datetime AS session_datetime, s.duration_mins AS session_duration_mins, s.location AS session_location_id, l.name AS session_location_name, l.address AS session_location_address, \
                 s.session_type AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, b.attended \
             FROM booking as b \
@@ -141,19 +148,16 @@ async fn take_result_from_stream<'a>(stream: &mut BoxStream<'a, Result<PgQueryRe
 pub async fn create_booking(state: &State<AppState>, claim: Claims, booking: Json<SessionBooking>) -> Result<Created<Json<SessionBooking>>, Custom<String>> {
     _create_booking(&state.pool, &state.timezone, &claim, booking).await
 }
+
 async fn _create_booking(pool: &PgPool, timezone: &Tz, claim: &Claims, booking: Json<SessionBooking>) -> Result<Created<Json<SessionBooking>>, Custom<String>> {
+    let mut credits_cost: i16 = 0;
+
     // Admins can always make a booking for any user
-    if !claim.has_role("admin") {
-        // Members can only book on their own behalf
+    if !claim.has_role(ROLE_ADMIN) {
+        // Non-admins can only book on their own behalf
         if claim.uid != booking.person_id {
             info!("person id {} attempted to book session on behalf of person id {}; denied: missing admin role", claim.uid, booking.person_id);
             return Err(Custom(Status::Forbidden, "cannot create a booking for another user".to_string()));
-        }
-
-        // Fail if no membership exists
-        if !claim.has_role("member") && !claim.has_role("limited-member") {
-            info!("person id {} attempted to book session; denied: missing member or limited-member role", claim.uid);
-            return Err(Custom(Status::Forbidden, "missing or expired membership".to_string()));
         }
 
         // Non-admins can only book future sessions
@@ -163,9 +167,33 @@ async fn _create_booking(pool: &PgPool, timezone: &Tz, claim: &Claims, booking: 
             return Err(Custom(Status::Forbidden, "cannot create booking in the past".to_string()));
         }
 
-        // Limited members can only book if they have no other payable sessions in the same week
-        if claim.has_role("limited-member") {
-            check_limited_member_has_no_bookings_in_same_week(pool, timezone, claim.uid, &session_date_and_cost).await?;
+        // Check whether the user has full membership or a usable limited membership
+        let membership_check: Result<(), Custom<String>>;
+        if claim.has_role(ROLE_FULL_MEMBER) {
+            membership_check = Ok(());
+        } else if claim.has_role(ROLE_LIMITED_MEMBER) {
+            membership_check = check_limited_member_has_no_bookings_in_same_week(pool, timezone, claim.uid, &session_date_and_cost).await;
+        } else {
+            membership_check = Err(Custom(Status::Forbidden, "missing or expired membership".to_string()));
+        }
+
+        // If no usable membership, check for credits
+        if membership_check.is_err() && membership_check.as_ref().err().unwrap().0 == Status::Forbidden {
+            let user_record = UserLoginRecord::load_by_id(pool, booking.person_id).await
+                .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+                .ok_or(Custom(Status::Unauthorized, "missing user record".to_string()))?;
+            if user_record.credits >= session_date_and_cost.cost {
+                if booking.credits_used.unwrap_or(0) < session_date_and_cost.cost {
+                    return Err(Custom(Status::PaymentRequired, "opt in to use credits for booking".to_string()));
+                } else {
+                    credits_cost = session_date_and_cost.cost;
+                }
+            } else {
+                membership_check?;
+            }
+        } else {
+            // Technical errors other than forbidden should break out
+            membership_check?;
         }
     }
 
@@ -179,11 +207,21 @@ async fn _create_booking(pool: &PgPool, timezone: &Tz, claim: &Claims, booking: 
 
     // Make the booking
     match session_with_max_booking_count.max_booking_count {
-        Some(max_booking_count) => book_session_with_max_bookings(pool, booking.person_id, booking.session_id, max_booking_count).await,
-        None => book_session_no_max_bookings(pool, booking.person_id, booking.session_id).await
+        Some(max_booking_count) => book_session_with_max_bookings(pool, booking.person_id, booking.session_id, max_booking_count, credits_cost).await,
+        None => book_session_no_max_bookings(pool, booking.person_id, booking.session_id, credits_cost).await
     }?;
 
     info!("Created booking: {:?}", &booking);
+
+    // Debit the credits used from the user if required
+    if credits_cost > 0 {
+        query_as("UPDATE person SET credits = credits - $1 WHERE id = $2 RETURNING id, credits")
+            .bind(credits_cost)
+            .bind(booking.person_id)
+            .fetch_one(pool)
+            .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    }
+
     Ok(Created::new(format!("/bookings?sessionid={},person_id={}", booking.session_id, booking.person_id)))
 }
 
@@ -239,10 +277,11 @@ async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezo
     Ok(())
 }
 
-async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id: i64) -> Result<(), Custom<String>> {
-    query_as("INSERT INTO booking (person_id, session_id) VALUES ($1, $2) RETURNING person_id, session_id")
+async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, credits_used: i16) -> Result<(), Custom<String>> {
+    query_as("INSERT INTO booking (person_id, session_id, credits_used) VALUES ($1, $2, $3) RETURNING person_id, session_id")
         .bind(person_id)
         .bind(session_id)
+        .bind(credits_used)
         .fetch_one(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
@@ -255,7 +294,7 @@ struct SessionWithMaxBookingCount {
 }
 
 
-async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, max_bookings: i64) -> Result<(), Custom<String>> {
+async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, max_bookings: i64, credits_used: i16) -> Result<(), Custom<String>> {
     // Atomically update the booking table to insert a new booking if and only if the count of
     // bookings for the referenced session is less than the maximum. Adapted from this StackOverflow
     // answer: https://dba.stackexchange.com/a/167283
@@ -263,13 +302,13 @@ async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_i
     // are numeric.
     let sql = format!("BEGIN; \
         SELECT id FROM session WHERE id = {} FOR NO KEY UPDATE; \
-        INSERT INTO booking (person_id, session_id) \
-        SELECT {}, {} FROM booking \
+        INSERT INTO booking (person_id, session_id, credits_used) \
+        SELECT {}, {}, {} FROM booking \
         WHERE session_id = {} \
         HAVING count(*) < {} \
         ON CONFLICT DO NOTHING \
         RETURNING person_id, session_id; \
-        END;", session_id, person_id, session_id, session_id, max_bookings);
+        END;", session_id, person_id, session_id, credits_used, session_id, max_bookings);
     info!("Executing raw SQL: {}", &sql);
     let mut result_stream = raw_sql(sql.as_str()).execute_many(pool);
 
@@ -309,13 +348,23 @@ async fn _delete_booking(pool: &PgPool, claim: &Claims, person_id: i64, session_
             return Err(Custom(Status::Forbidden, "cannot cancel past booking".to_string()));
         }
     }
-    let booking_deleted = query_as("DELETE FROM booking WHERE person_id = $1 AND session_id = $2 RETURNING person_id, session_id")
+    let booking_deleted: SessionBooking = query_as("DELETE FROM booking WHERE person_id = $1 AND session_id = $2 RETURNING person_id, session_id, credits_used")
         .bind(person_id)
         .bind(session_id)
         .fetch_optional(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::NotFound, format!("no booking found with person_id={} and session_id={}", person_id, session_id)))?;
+
+    // Restore the credits used for this booking
+    if booking_deleted.credits_used.unwrap_or(0) > 0 {
+        query_as("UPDATE person SET credits = credits + $1 WHERE id = $2 RETURNING id, credits")
+            .bind(booking_deleted.credits_used)
+            .bind(person_id)
+            .fetch_one(pool)
+            .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    }
+
     Ok(Json(booking_deleted))
 }
 
@@ -403,8 +452,9 @@ mod tests {
     use rocket::serde::json::Json;
     use rocket::response::status::Custom;
     use sqlx::{Executor, FromRow, PgPool, query_as};
-    use crate::bookings::{_delete_booking, SessionBooking};
+    use crate::bookings::{_delete_booking, _list_bookings, SessionBooking};
     use crate::claims::Claims;
+    use crate::{CountResult, UserLoginRecord};
 
     #[derive(FromRow)]
     struct IntRecord {
@@ -415,17 +465,20 @@ mod tests {
     struct BigintRecord {
         id: i64
     }
-
-    async fn create_person(pool: &PgPool, email: &str, roles: &str) -> i64 {
-        let member_id: BigintRecord = query_as("insert into person (name, email, roles) values ('Test User', $1, $2) returning id")
+    async fn create_person(pool: &PgPool, email: &str, roles: &str, credits: i32) -> i64 {
+        let member_id: BigintRecord = query_as("insert into person (name, email, roles, credits) values ('Test User', $1, $2, $3) returning id")
             .bind(email)
             .bind(roles)
+            .bind(credits)
             .fetch_one(pool)
             .await.unwrap();
         member_id.id
     }
-
     async fn create_session(pool: &PgPool, datetime: &DateTime<Utc>, trainer_id: i64, session_type_name: &str, location_name: &str) -> i64 {
+        create_session_max_bookings(pool, datetime, trainer_id, session_type_name, location_name, None).await
+    }
+
+    async fn create_session_max_bookings(pool: &PgPool, datetime: &DateTime<Utc>, trainer_id: i64, session_type_name: &str, location_name: &str, max_bookings: Option<i64>) -> i64 {
         let session_type_id: IntRecord = query_as("select id from session_type where name = $1")
             .bind(session_type_name)
             .fetch_one(pool).await.unwrap();
@@ -434,29 +487,38 @@ mod tests {
             .bind(location_name)
             .fetch_one(pool).await.unwrap();
 
-        let session_id_record: BigintRecord = query_as("insert into session (datetime, duration_mins, session_type, location, trainer, cost) \
-            VALUES ($1, 60, $2, $3, $4, 1) \
+        let session_id_record: BigintRecord = query_as("insert into session (datetime, duration_mins, session_type, location, trainer, cost, max_booking_count) \
+            VALUES ($1, 60, $2, $3, $4, 1, $5) \
             RETURNING id
         ")
             .bind(datetime)
             .bind(session_type_id.id)
             .bind(location_id.id)
             .bind(trainer_id)
+            .bind(max_bookings)
             .fetch_one(pool).await.unwrap();
 
         session_id_record.id
+    }
+    async fn count_bookings(pool: &PgPool) -> i64 {
+        let record: CountResult = query_as("select count(*) from booking")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        record.count
     }
 
     #[sqlx::test]
     async fn book_session_full_member(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer").await;
-        let member_id = create_person(&pool, "member@example.org", "member").await;
+        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member_id,
-            session_id
+            session_id,
+            credits_used: None
         };
 
         // Precondition: zero bookings
@@ -475,12 +537,13 @@ mod tests {
     async fn book_session_non_member(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer").await;
-        let member_id = create_person(&pool, "member@example.org", "member").await;
+        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member_id,
-            session_id
+            session_id,
+            credits_used: None
         };
 
         // Precondition: zero bookings
@@ -498,21 +561,23 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn book_session_limited_member(pool: PgPool) {
+    async fn book_session_limited_member_existing_session_same_week(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer").await;
-        let member_id = create_person(&pool, "member@example.org", "limited-member").await;
+        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "member@example.org", "limited-member", 0).await;
         let datetime = Utc::now().add(TimeDelta::days(1));
         let session_id_1 = create_session(&pool, &datetime, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking_1 = SessionBooking {
             person_id: member_id,
-            session_id: session_id_1
+            session_id: session_id_1,
+            credits_used: None
         };
         let session_id_2 = create_session(&pool, &datetime, trainer_id, "On The Move", "Oak Hill Park").await;
         let booking_2 = SessionBooking {
             person_id: member_id,
-            session_id: session_id_2
+            session_id: session_id_2,
+            credits_used: None
         };
         let timezone: Tz = "Europe/London".parse().unwrap();
 
@@ -549,13 +614,150 @@ mod tests {
         assert_eq!(1, count_bookings(&pool).await);
     }
 
+    #[sqlx::test]
+    async fn book_session_limited_member_existing_session_next_week(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-    async fn count_bookings(pool: &PgPool) -> i64 {
-        let record: BigintRecord = query_as("select count(*) as id from booking")
-            .fetch_one(pool)
-            .await
-            .unwrap();
-        record.id
+        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "member@example.org", "limited-member", 0).await;
+        let tomorrow = Utc::now().add(TimeDelta::days(1));
+        let next_week = tomorrow.add(TimeDelta::weeks(1));
+        let session_id_1 = create_session(&pool, &tomorrow, trainer_id, "HIIT", "Oak Hill Park").await;
+        let booking_1 = SessionBooking {
+            person_id: member_id,
+            session_id: session_id_1,
+            credits_used: None
+        };
+        let session_id_2 = create_session(&pool, &next_week, trainer_id, "On The Move", "Oak Hill Park").await;
+        let booking_2 = SessionBooking {
+            person_id: member_id,
+            session_id: session_id_2,
+            credits_used: None
+        };
+        let timezone: Tz = "Europe/London".parse().unwrap();
+
+        // Precondition: zero bookings
+        assert_eq!(0, count_bookings(&pool).await);
+
+        // Create booking 1
+        let claim = Claims::create(member_id, "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
+        crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking_1)).await.unwrap();
+
+        // Postcondition 1: one booking
+        assert_eq!(1, count_bookings(&pool).await);
+
+        // Create booking 2: succeeds because it's next week
+        let claim = Claims::create(member_id, "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
+        crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking_2.clone())).await.unwrap();
+
+        // Postcondition 2: two bookings
+        assert_eq!(2, count_bookings(&pool).await);
+    }
+
+    #[sqlx::test]
+    async fn book_session_non_member_using_credit_not_opted_in(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "member@example.org", "member", 5).await;
+        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let booking = SessionBooking {
+            person_id: member_id,
+            session_id,
+            credits_used: None
+        };
+
+        // Precondition: zero bookings
+        assert_eq!(0, count_bookings(&pool).await);
+
+        // Create booking
+        let timezone: Tz = "Europe/London".parse().unwrap();
+        let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
+        let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await;
+        assert!(result.is_err());
+        assert_eq!(Custom(Status::PaymentRequired, "opt in to use credits for booking".to_string()), result.err().unwrap());
+
+        // Postcondition: still zero bookings
+        assert_eq!(0, count_bookings(&pool).await);
+    }
+
+    #[sqlx::test]
+    async fn book_session_non_member_using_credit_opted_in(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "member@example.org", "", 5).await;
+        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let booking = SessionBooking {
+            person_id: member_id,
+            session_id,
+            credits_used: Some(1)
+        };
+
+        // Precondition: zero bookings
+        assert_eq!(0, count_bookings(&pool).await);
+
+        // Create booking
+        let timezone: Tz = "Europe/London".parse().unwrap();
+        let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
+        let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await.unwrap();
+
+        // Check that the booking has the used credits
+        let created_booking: SessionBooking = query_as("SELECT person_id, session_id, credits_used FROM booking WHERE person_id = $1 AND session_id = $2")
+            .bind(member_id)
+            .bind(session_id)
+            .fetch_one(&pool)
+            .await.unwrap();
+        assert_eq!(Some(1), created_booking.credits_used);
+        let bookings_list = _list_bookings(&pool, &claim, None, Some(member_id), None, None).await.unwrap();
+        assert_eq!(1, bookings_list.len());
+        assert_eq!(1, bookings_list.get(0).unwrap().credits_used);
+
+        // Check that the user has been debited one credit
+        let member_record = UserLoginRecord::load_by_id(&pool, member_id)
+            .await.unwrap().unwrap();
+        assert_eq!(4, member_record.credits);
+
+        // Cancel booking
+        _delete_booking(&pool, &claim, member_id, session_id).await.unwrap();
+        // Postcondition: zero bookings
+        assert_eq!(0, count_bookings(&pool).await);
+
+        // Check that the user's credit has been restored
+        let member_record = UserLoginRecord::load_by_id(&pool, member_id)
+            .await.unwrap().unwrap();
+        assert_eq!(5, member_record.credits);
+    }
+
+    #[sqlx::test]
+    async fn book_session_non_member_using_credit_max_bookings_reached(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "member@example.org", "", 5).await;
+        let session_id = create_session_max_bookings(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park", Some(0)).await;
+        let booking = SessionBooking {
+            person_id: member_id,
+            session_id,
+            credits_used: Some(1)
+        };
+
+        // Precondition: zero bookings
+        assert_eq!(0, count_bookings(&pool).await);
+
+        // Create booking: fail due to max bookings reached
+        let timezone: Tz = "Europe/London".parse().unwrap();
+        let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
+        let booking_result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await.err().unwrap();
+        assert_eq!(Custom(Status::Conflict, "session has reached it maximum number of bookings: 0".to_string()), booking_result);
+
+        // Still zero bookings
+        assert_eq!(0, count_bookings(&pool).await);
+
+        // Check that the user has NOT been debited any credits
+        let member_record = UserLoginRecord::load_by_id(&pool, member_id)
+            .await.unwrap().unwrap();
+        assert_eq!(5, member_record.credits);
     }
 }
 

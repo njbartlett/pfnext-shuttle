@@ -16,7 +16,7 @@ use sqlx::{Error, FromRow, PgPool, query_as, raw_sql, Row};
 use sqlx::postgres::PgRow;
 use urlencoding::encode;
 
-use crate::{AppState, CountResult};
+use crate::{AppState, CountResult, UserLoginRecord};
 use crate::claims::Claims;
 
 const ACCESS_TOKEN_TTL: Duration = Duration::hours(3);
@@ -59,22 +59,18 @@ pub struct LoggedInUser {
     access_token: String
 }
 
-#[derive(Serialize, FromRow, Clone, Debug)]
-struct UserLoginRecord {
-    id: i64,
-    name: String,
-    email: String,
-    phone: Option<String>,
-    pwd: Option<String>,
-    roles: String
-}
-
 async fn verify_user_by_id(pool: &PgPool, user_id: i64, password: &str) -> Result<UserLoginRecord, Custom<String>> {
-    verify_user(load_user_record_by_id(pool, user_id).await?.ok_or_else(|| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?, password)
+    let user_record = UserLoginRecord::load_by_id(pool, user_id)
+        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
+    verify_user(user_record, password)
 }
 
 async fn verify_user_by_email(pool: &PgPool, email: &str, password: &str) -> Result<UserLoginRecord, Custom<String>> {
-    verify_user(load_user_record_by_email(pool, email).await?.ok_or_else(|| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?, password)
+    let user_record = UserLoginRecord::load_by_email(pool, email)
+        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
+    verify_user(user_record, password)
 }
 
 fn verify_user(login_record: UserLoginRecord, password: &str) -> Result<UserLoginRecord, Custom<String>> {
@@ -151,8 +147,8 @@ pub async fn request_pwd_reset(
     state: &State<AppState>,
     reset_request: Json<PasswordResetRequest>
 ) -> Result<Accepted<String>, Custom<String>> {
-    let user_record = load_user_record_by_email(&state.pool, &reset_request.email)
-        .await?
+    let user_record = UserLoginRecord::load_by_email(&state.pool, &reset_request.email)
+        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::BadRequest, format!("user does not exist: {}", reset_request.email)))?;
 
     // Fail if we have sent an email to this address within the last 2 mins
@@ -191,13 +187,14 @@ pub async fn register_user(
     new_user: Json<NewUserRequest>
 ) -> Result<Accepted<String>, Custom<String>> {
     // Error if already existing record for the specified email
-    let existing_user_record = load_user_record_by_email(&state.pool, &new_user.email).await?;
+    let existing_user_record = UserLoginRecord::load_by_email(&state.pool, &new_user.email)
+        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     if let Some(_existing) = existing_user_record {
         return Err(Custom(Status::Conflict, "User already exists with this email address".to_string()));
     }
 
     // Create user record with null password (must use password reset)
-    let user_updated: UserUpdated = query_as("INSERT INTO person (name, email, phone, roles) VALUES ($1, $2, $3, 'member') RETURNING id")
+    let user_updated: UserUpdated = query_as("INSERT INTO person (name, email, phone, credits, roles) VALUES ($1, $2, $3, 1, '') RETURNING id")
         .bind(&new_user.name)
         .bind(&new_user.email)
         .bind(&new_user.phone)
@@ -298,8 +295,8 @@ pub async fn reset_pwd(
     verify_suitable_password(&user_pwd_reset.new_password, &user_pwd_reset.temp_password)?;
 
     // Get the user => error if not found
-    let user_record = load_user_record_by_email(&state.pool, &user_pwd_reset.email)
-        .await?
+    let user_record = UserLoginRecord::load_by_email(&state.pool, &user_pwd_reset.email)
+        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::BadRequest, format!("User does not exist with email address {}", &user_pwd_reset.email)))?;
 
     // Get the temporary password record and verify against user input
@@ -347,33 +344,48 @@ pub async fn reset_pwd(
 }
 
 #[derive(Serialize, Debug)]
-pub struct User {
+pub struct UserListingEntry {
     id: i64,
     name: String,
     email: String,
     phone: Option<String>,
-    roles: Vec<String>
+    roles: Vec<String>,
+    credits: i16
 }
 
-impl FromRow<'_, PgRow> for User {
+impl FromRow<'_, PgRow> for UserListingEntry {
     fn from_row(row: &PgRow) -> Result<Self, Error> {
-        Ok(User{
+        Ok(UserListingEntry {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
             email: row.try_get("email")?,
             phone: row.try_get("phone").ok(),
-            roles: parse_roles(row.try_get("roles")?)
+            roles: parse_roles(row.try_get("roles")?),
+            credits: row.try_get("credits")?
         })
     }
 }
 
+#[get("/users/<user_id>")]
+pub async fn get_user(state: &State<AppState>, claim: Claims, user_id: i64) -> Result<Json<Option<UserListingEntry>>, Custom<String>> {
+    if !claim.has_role("admin") && !claim.uid == user_id {
+        return Err(Custom(Status::Forbidden, "cannot view user record for other users".to_string()));
+    }
+    let user: Option<UserListingEntry> = query_as("SELECT id, name, email, phone, roles, credits FROM person WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    Ok(Json(user))
+}
+
 #[get("/users/list?<role>")]
-pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<String>) -> Result<Json<Vec<User>>, Custom<String>> {
+pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<String>) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
     if !claim.has_role("admin") {
         return Err(Custom(Status::Forbidden, "admin only".to_string()));
     }
 
-    let mut users: Vec<User> = query_as("SELECT id, name, email, phone, roles FROM person ORDER BY name")
+    let mut users: Vec<UserListingEntry> = query_as("SELECT id, name, email, phone, roles, credits FROM person ORDER BY name")
         .fetch_all(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
@@ -395,8 +407,8 @@ pub struct UserDelete {
 #[delete("/users/<user_id>", data="<deletion>")]
 pub async fn delete_user(state: &State<AppState>, claims: Claims, user_id: i64, deletion: Json<UserDelete>) -> Result<NoContent, Custom<String>> {
     // Load the user record
-    let mut login_record = load_user_record_by_id(&state.pool, user_id)
-        .await?
+    let mut login_record = UserLoginRecord::load_by_id(&state.pool, user_id)
+        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::NotFound, format!("user id not found: {}", user_id)))?;
 
     if user_id == claims.uid {
@@ -438,7 +450,8 @@ pub struct UserUpdate {
     name: String,
     email: String,
     phone: Option<String>,
-    roles: Vec<String>
+    roles: Vec<String>,
+    credits: i32
 }
 
 #[put("/users/<user_id>", data="<update>")]
@@ -448,11 +461,12 @@ pub async fn update_user(state: &State<AppState>, claims: Claims, user_id: i64, 
     }
 
     let roles_str = &update.roles.join(",");
-    let _: UserLoginRecord = query_as("UPDATE person SET name = $1, email = $2, phone = $3, roles = $4 WHERE id = $5 RETURNING id, name, email, phone, pwd, roles")
+    let _: UserLoginRecord = query_as("UPDATE person SET name = $1, email = $2, phone = $3, roles = $4, credits = $5 WHERE id = $6 RETURNING id, name, email, phone, pwd, roles, credits")
         .bind(&update.name)
         .bind(&update.email)
         .bind(&update.phone)
         .bind(roles_str)
+        .bind(&update.credits)
         .bind(user_id)
         .fetch_one(&state.pool)
         .await
@@ -516,22 +530,6 @@ fn build_login_response(
     })
 }
 
-async fn load_user_record_by_email(pool: &PgPool, user_email: &str) -> Result<Option<UserLoginRecord>, Custom<String>> {
-    query_as("SELECT id, name, email, phone, pwd, roles FROM person WHERE email = $1")
-        .bind(user_email)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-}
-
-async fn load_user_record_by_id(pool: &PgPool, user_id: i64) -> Result<Option<UserLoginRecord>, Custom<String>> {
-    query_as("SELECT id, name, email, phone, pwd, roles FROM person WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-}
-
 async fn send_email<'x>(
     message: Message<'x>,
     secrets: &shuttle_runtime::SecretStore
@@ -563,4 +561,56 @@ async fn send_email<'x>(
     client.send(message)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+}
+
+mod tests {
+    use rocket::http::Status;
+    use rocket::response::status::Custom;
+    use sqlx::{Executor, FromRow, PgPool, query_as};
+
+    const DEFAULT_PASSWORD: &str = "password";
+    const DEFAULT_PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$X6SS0kJdO6uW3snBe7t1hA$gcYt1rDiSi+f1Rh0tQK+xzgF6ou7zzEbY/2XW33z3YE";
+
+    #[derive(FromRow)]
+    struct BigintRecord {
+        id: i64
+    }
+    async fn create_person(pool: &PgPool, email: &str, pwd: &str, roles: &str, credits: i32) -> i64 {
+        let member_id: BigintRecord = query_as("insert into person (name, email, pwd, roles, credits) values ('Test User', $1, $2, $3, $4) returning id")
+            .bind(email)
+            .bind(pwd)
+            .bind(roles)
+            .bind(credits)
+            .fetch_one(pool)
+            .await.unwrap();
+        member_id.id
+    }
+
+    #[sqlx::test]
+    async fn verify_user_by_email(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let person_id = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
+        let verify_result = crate::login::verify_user_by_email(&pool, "joe@example.com", DEFAULT_PASSWORD).await.unwrap();
+        assert_eq!(person_id, verify_result.id);
+    }
+
+    #[sqlx::test]
+    async fn verify_user_by_id(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let person_id = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
+        let verify_result = crate::login::verify_user_by_id(&pool, person_id, DEFAULT_PASSWORD).await.unwrap();
+        assert_eq!("joe@example.com", verify_result.email);
+    }
+
+    #[sqlx::test]
+    async fn verify_user_by_id_incorrect_pwd(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let person_id = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
+        let verify_result = crate::login::verify_user_by_id(&pool, person_id, "wrong").await;
+        assert_eq!(Custom(Status::Unauthorized, "incorrect username or password".to_string()), verify_result.err().unwrap());
+    }
+
 }

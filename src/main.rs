@@ -3,6 +3,7 @@
 extern crate rocket;
 
 use std::env;
+use std::error::Error;
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, FixedOffset};
 use chrono_tz::Tz;
@@ -115,7 +116,7 @@ async fn rocket(
         .register("/", catchers![forbidden])
         .mount("/", routes![
             static_files,
-            login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::list_users, login::delete_user, login::update_user,
+            login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::get_user, login::list_users, login::delete_user, login::update_user,
             sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session,
             sessions::list_locations, sessions::list_session_types, sessions::update_session,
             bookings::list_bookings, bookings::create_booking, bookings::delete_booking, bookings::update_booking, bookings::get_attendance_stats,
@@ -124,6 +125,32 @@ async fn rocket(
         .manage(state);
 
     Ok(rocket.into())
+}
+
+#[derive(Serialize, FromRow, Clone, Debug)]
+pub struct UserLoginRecord {
+    id: i64,
+    name: String,
+    email: String,
+    phone: Option<String>,
+    pwd: Option<String>,
+    roles: String,
+    credits: i16
+}
+
+impl UserLoginRecord {
+    pub async fn load_by_id(pool: &PgPool, user_id: i64) -> Result<Option<UserLoginRecord>, sqlx::Error> {
+        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+    }
+    pub async fn load_by_email(pool: &PgPool, user_email: &str) -> Result<Option<UserLoginRecord>, sqlx::Error> {
+        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE email = $1")
+            .bind(user_email)
+            .fetch_optional(pool)
+            .await
+    }
 }
 
 #[derive(FromRow, Serialize)]
