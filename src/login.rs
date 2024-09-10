@@ -19,11 +19,12 @@ use urlencoding::encode;
 use crate::{AppState, CountResult, UserLoginRecord};
 use crate::claims::Claims;
 
-const ACCESS_TOKEN_TTL: Duration = Duration::hours(3);
-const REFRESH_TOKEN_EXIRATION: Duration = Duration::days(1);
+const ACCESS_TOKEN_TTL: Duration = Duration::hours(6);
+const ACCESS_TOKEN_TTL_ADMIN: Duration = Duration::hours(3);
+const REFRESH_TOKEN_EXPIRATION: Duration = Duration::hours(24);
 
 const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
-    length: 20,
+    length: 10,
     numbers: true,
     lowercase_letters: false,
     uppercase_letters: true,
@@ -505,12 +506,17 @@ fn build_login_response(
 ) -> Result<LoginResponse, Custom<String>> {
     // Create access and refresh tokens
     let roles = parse_roles(&login_record.roles);
+    let access_token_ttl: Duration = match roles.iter().any(|r| r == "admin") {
+        true => ACCESS_TOKEN_TTL_ADMIN,
+        false => ACCESS_TOKEN_TTL
+    };
     let access_token_key = secrets.get("ACCESS_TOKEN_KEY")
         .ok_or(Custom(Status::InternalServerError, String::from("missing secret ACCESS_TOKEN_KEY")))?;
-    let access_token = Claims::create(login_record.id, &login_record.email, &login_record.phone, &roles, ACCESS_TOKEN_TTL).into_token(&access_token_key)?;
+
+    let access_token = Claims::create(login_record.id, &login_record.email, &login_record.phone, &roles, access_token_ttl).into_token(&access_token_key)?;
     let refresh_token_key = secrets.get("REFRESH_TOKEN_KEY")
         .ok_or(Custom(Status::InternalServerError, String::from("missing secret REFRESH_TOKEN_KEY")))?;
-    let refresh_token: String = Claims::create(login_record.id, &login_record.email, &login_record.phone, &roles, REFRESH_TOKEN_EXIRATION).into_token(&refresh_token_key)?;
+    let refresh_token: String = Claims::create(login_record.id, &login_record.email, &login_record.phone, &roles, REFRESH_TOKEN_EXPIRATION).into_token(&refresh_token_key)?;
 
     // Build login response body
     let body = LoggedInUser {
@@ -523,7 +529,7 @@ fn build_login_response(
     };
 
     // Build overall response with refresh token as cookie
-    let cookie_expiry = Utc::now().add(REFRESH_TOKEN_EXIRATION);
+    let cookie_expiry = Utc::now().add(REFRESH_TOKEN_EXPIRATION);
     Ok(LoginResponse {
         inner: Json(body),
         cookie: Header::new("Set-Cookie", format!("refresh_token={};HttpOnly;Expires={}", refresh_token, cookie_expiry.to_rfc2822()))
