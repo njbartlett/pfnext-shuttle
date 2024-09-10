@@ -23,6 +23,7 @@ pub struct SessionFullRecord {
     booked: bool,
     booking_count: i64,
     max_booking_count: Option<i64>,
+    attended_count: Option<i64>,
     notes: Option<String>,
     cost: i16
 }
@@ -65,6 +66,7 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
             booked: row.try_get("booked").ok().unwrap_or(false),
             booking_count: row.try_get("booking_count")?,
             max_booking_count: row.try_get("max_booking_count").ok(),
+            attended_count: row.try_get("attended_count").ok(),
             notes: row.try_get("notes").ok(),
             cost: row.try_get("cost")?
         })
@@ -97,10 +99,13 @@ impl NewSession {
     }
 }
 
-#[get("/sessions?<from>&<to>&<trainer_id>")]
-pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>, trainer_id: Option<i64>) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
+#[get("/sessions?<from>&<to>&<trainer_id>&<attended>")]
+pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
-    build_session_query(Some(claim.uid), from, to, trainer_id, &mut qb)?;
+    if attended && !claim.has_role("admin") {
+        return Err(Custom(Status::Forbidden, "attendance data only available to admins".to_string()));
+    }
+    build_session_query(Some(claim.uid), from, to, trainer_id, attended, &mut qb)?;
     qb.push(" ORDER BY s.datetime ASC");
     info!("build_session_query compiled SQL: {}", qb.sql());
 
@@ -111,10 +116,13 @@ pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<
     Ok(Json(sessions))
 }
 
-#[get("/sessions/<session_id>")]
-pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64) -> Result<Json<SessionFullRecord>, Custom<String>> {
+#[get("/sessions/<session_id>?<attended>")]
+pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64, attended: bool) -> Result<Json<SessionFullRecord>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
-    build_session_query(Some(claim.uid), None, None, None, &mut qb)?;
+    if attended && !claim.has_role("admin") {
+        return Err(Custom(Status::Forbidden, "attendance data only available to admins".to_string()));
+    }
+    build_session_query(Some(claim.uid), None, None, None, attended, &mut qb)?;
     qb.push(" WHERE s.id = ");
     qb.push_bind(session_id);
     info!("build_session_query compiled SQL: {}", qb.sql());
@@ -127,12 +135,23 @@ pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64
         .map(|r| Json(r))
 }
 
-fn build_session_query<'a>(booking_person_id: Option<i64>, from: Option<String>, to: Option<String>, trainer_id: Option<i64>, qb: &'a mut QueryBuilder<Postgres>) -> Result<(), Custom<String>> {
+fn build_session_query(
+    booking_person_id: Option<i64>,
+    from: Option<String>,
+    to: Option<String>,
+    trainer_id: Option<i64>,
+    show_attended: bool,
+    qb: &mut QueryBuilder<Postgres>
+) -> Result<(), Custom<String>> {
     qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, s.cost, \
         t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, \
         loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, \
         trainer.id AS trainer_id, trainer.name AS trainer_name, trainer.email AS trainer_email, \
-        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count, s.max_booking_count as max_booking_count");
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count, s.max_booking_count AS max_booking_count");
+
+    if show_attended {
+        qb.push(", (SELECT COUNT(*) from booking WHERE booking.session_id = s.id AND booking.attended = true) AS attended_count");
+    }
 
     if let Some(booking_person_id) = booking_person_id {
         qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
