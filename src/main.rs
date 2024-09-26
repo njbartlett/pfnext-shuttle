@@ -158,7 +158,7 @@ struct BigintRecord {
     id: i64
 }
 
-#[derive(FromRow, Serialize, Clone, Debug)]
+#[derive(FromRow, Serialize, Clone, Debug, PartialEq)]
 pub struct SessionType {
     id: i32,
     name: String,
@@ -183,7 +183,7 @@ pub struct SessionTrainer {
     email: String
 }
 
-#[derive(FromRow, Serialize, Clone, Debug)]
+#[derive(FromRow, Serialize, Clone, Debug, PartialEq)]
 pub struct SessionLocation {
     id: i32,
     name: String,

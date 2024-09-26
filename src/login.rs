@@ -382,7 +382,7 @@ pub async fn get_user(state: &State<AppState>, claim: Claims, user_id: i64) -> R
 
 #[get("/users/list?<role>")]
 pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<String>) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
-    if !claim.has_role("admin") {
+    if !claim.has_role("admin") && !claim.has_role("trainer") {
         return Err(Custom(Status::Forbidden, "admin only".to_string()));
     }
 
