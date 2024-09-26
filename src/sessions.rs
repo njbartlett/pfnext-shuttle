@@ -59,7 +59,8 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
                 id: row.try_get("session_type_id")?,
                 name: row.try_get("session_type_name")?,
                 requires_trainer: row.try_get("session_type_requires_trainer").ok().unwrap_or(true),
-                cost: row.try_get("session_type_cost")?
+                cost: row.try_get("session_type_cost")?,
+                deprecated: row.try_get("session_type_deprecated")?
             },
             location,
             trainer,
@@ -144,7 +145,7 @@ fn build_session_query(
     qb: &mut QueryBuilder<Postgres>
 ) -> Result<(), Custom<String>> {
     qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, s.cost, \
-        t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, \
+        t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated, \
         loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, \
         trainer.id AS trainer_id, trainer.name AS trainer_name, trainer.email AS trainer_email, \
         (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count, s.max_booking_count AS max_booking_count");
@@ -313,9 +314,16 @@ pub async fn list_locations(state: &State<AppState>) -> Result<Json<Vec<SessionL
         .map(|v| Json(v))
 }
 
-#[get("/session_types")]
-pub async fn list_session_types(state: &State<AppState>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
-    query_as("SELECT id, name, requires_trainer, cost FROM session_type ORDER BY requires_trainer DESC, name")
+#[get("/session_types?<deprecated>")]
+pub async fn list_session_types(state: &State<AppState>, deprecated: Option<bool>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT id, name, requires_trainer, cost, deprecated FROM session_type");
+    if let Some(deprecated) = deprecated {
+        qb.push(" WHERE deprecated = ");
+        qb.push_bind(deprecated);
+    }
+    qb.push(" ORDER BY requires_trainer DESC, name");
+
+    qb.build_query_as()
         .fetch_all(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))

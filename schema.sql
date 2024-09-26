@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS session_type (
 	name varchar(255) NOT NULL,
 	requires_trainer bool DEFAULT true NULL,
 	cost int2 DEFAULT 0 NULL,
+	deprecated bool DEFAULT false,
 	CONSTRAINT session_type_cost_check CHECK (cost >= 0),
 	CONSTRAINT session_type_name_key UNIQUE (name),
 	CONSTRAINT session_type_pkey PRIMARY KEY (id)

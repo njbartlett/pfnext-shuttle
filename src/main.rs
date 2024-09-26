@@ -163,7 +163,8 @@ pub struct SessionType {
     id: i32,
     name: String,
     requires_trainer: bool,
-    cost: i16
+    cost: i16,
+    deprecated: bool
 }
 
 impl SessionType {
