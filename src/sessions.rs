@@ -21,6 +21,7 @@ pub struct SessionFullRecord {
     location: Option<SessionLocation>,
     trainer: Option<SessionTrainer>,
     booked: bool,
+    attended: bool,
     booking_count: i64,
     max_booking_count: Option<i64>,
     attended_count: Option<i64>,
@@ -65,6 +66,7 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
             location,
             trainer,
             booked: row.try_get("booked").ok().unwrap_or(false),
+            attended: row.try_get("attended").ok().unwrap_or(false),
             booking_count: row.try_get("booking_count")?,
             max_booking_count: row.try_get("max_booking_count").ok(),
             attended_count: row.try_get("attended_count").ok(),
@@ -108,7 +110,6 @@ pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<
     }
     build_session_query(Some(claim.uid), from, to, trainer_id, attended, &mut qb)?;
     qb.push(" ORDER BY s.datetime ASC");
-    info!("build_session_query compiled SQL: {}", qb.sql());
 
     let sessions = qb.build_query_as()
         .fetch_all(&state.pool)
@@ -158,6 +159,10 @@ fn build_session_query(
         qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
         qb.push_bind(booking_person_id);
         qb.push(") THEN true ELSE false END AS booked");
+
+        qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.attended = true AND booking.person_id = ");
+        qb.push_bind(booking_person_id);
+        qb.push(") THEN true ELSE false END AS attended");
     }
 
     qb.push(" FROM session as s \
