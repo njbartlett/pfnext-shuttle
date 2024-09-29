@@ -24,14 +24,14 @@ const ACCESS_TOKEN_TTL_ADMIN: Duration = Duration::hours(3);
 const REFRESH_TOKEN_EXPIRATION: Duration = Duration::hours(24);
 
 const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
-    length: 10,
+    length: 8,
     numbers: true,
     lowercase_letters: false,
-    uppercase_letters: true,
+    uppercase_letters: false,
     symbols: false,
     spaces: false,
-    exclude_similar_characters: true,
-    strict: true
+    exclude_similar_characters: false,
+    strict: false
 };
 const INVALID_LOGIN_MESSAGE: &str = "incorrect username or password";
 const TEMP_PASSWORD_MINIMUM_RESEND_WAIT: Duration = Duration::minutes(-2);
