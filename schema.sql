@@ -163,3 +163,18 @@ CREATE TABLE IF NOT EXISTS blobs (
     created timestamptz NOT NULL,
     size int8 NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS poll (
+    id bigserial PRIMARY KEY,
+    question text NOT NULL,
+    limit_per_person int2 DEFAULT 1 NOT NULL,
+    open bool DEFAULT true NOT NULL,
+    description text NULL
+);
+
+CREATE TABLE IF NOT EXISTS vote (
+    id bigserial PRIMARY KEY,
+    person_id bigint NOT NULL REFERENCES person ON DELETE CASCADE,
+    poll_id bigint NOT NULL REFERENCES poll ON DELETE CASCADE,
+    value text NOT NULL
+);

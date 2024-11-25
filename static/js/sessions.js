@@ -28,6 +28,11 @@ const selected_session_feedback = ref({
 })
 const timer = ref(new Date())
 
+const polls_data = ref([])
+const unvoted_polls = computed(() => {
+    return polls_data.value.filter(poll => poll.votes.length == 0)
+})
+
 // ADMIN ONLY DATA
 const deleting_session = ref({
     id: null,
@@ -368,6 +373,8 @@ let app = createApp({
             bookSession, cancelBooking, setSessionPage,
             daysOfWeek, sessionsByTime,
             joinWaitlist, leaveWaitlist, waitlist_joined, openSessionFeedback, saveSessionFeedback, selected_session_feedback,
+            // Polls
+            unvoted_polls,
 
             // Misc callbacks and utility functions
             deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, resetPagination, displayDate, displayTime, displayDateCalendar, isAdmin, isTrainer, isUserTrainerOfSession, encodeLoginReturnUrl, renderStarRating, displayPercent,
@@ -378,7 +385,6 @@ let app = createApp({
 app.config.compilerOptions.delimiters = ['${', '}']
 app.mount('#app')
 let interval = setInterval(() => {
-    console.log("Updating timer")
     timer.value = new Date()
 }, 1000)
 app.onUnmount(() => {
@@ -414,6 +420,18 @@ watch(view_mode, (new_value) => {
 });
 
 loadSessions()
+
+function loadPollsWithVotes() {
+    let params = new URLSearchParams()
+    params.set("person_id", loggedin.value.id)
+    httpGetJson("/polls?" + params.toString(), json => {
+        polls_data.value = json
+    })
+}
+loadPollsWithVotes()
+window.addEventListener('pagereveal', (event) => {
+    loadPollsWithVotes()
+})
 
 // Create JavaScript Modals
 const feedbackModal = new bootstrap.Modal(document.getElementById('feedbackModal'), {

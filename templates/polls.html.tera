@@ -1,0 +1,76 @@
+{% extends "loggedin_layout" %}
+
+{% block loggedin_content %}
+<div class="container">
+
+    <!-- Page Title -->
+    <div class="my-2 mx-auto text-center">
+        <h1 class="display-4 fw-normal text-body-emphasis">{{page.title}}</h1>
+    </div>
+
+    <!-- Admin Only Card -->
+    <div v-if="isAdmin()" class="alert alert-warning my-3 position-relative">
+        <div class="position-absolute top-0 end-0"><i class="bi bi-lightning-fill" title="Admin Only"></i></div>
+        <form submit.prevent>
+            <input class="checkbox form-check-input" type="checkbox" id="admin_all_members" v-model="admin_controls.all_members">&nbsp;
+            <label class="form-label" for="admin_all_members">View Votes for All Members</label>
+        </form>
+    </div>    
+
+    <!-- Display "no polls" message if applicable -->
+    <div v-cloak class="alert alert-secondary" role="alert" v-if="polls_data.length == 0">
+        <em>No polls available at this time.</em>
+    </div>
+    
+    <!-- Poll Cards -->
+    <div v-cloak class="card border-primary mb-3" v-for="poll in polls_data" :id="'poll-' + poll.poll.id">
+        <h5 class="card-header text-bg-primary">${poll.poll.question}</h5>
+        <div class="card-body">
+            <p v-if="poll.poll.description">${poll.poll.description}</p>
+            <table class="table table-sm table-borderless mb-0 vertical-align-middle">
+                <thead>
+                    <tr>
+                        <th scope="col">Vote</th>
+                        <th scope="col" v-if="admin_controls.all_members">Voted By</th>
+                        <th scope="col"></th>
+                    </tr>
+                </thead>
+
+                <!-- All Votes -->
+                <tbody>
+                    <tr v-for="vote in poll.votes">
+                        <td><strong><i class="bi bi-check2-circle"></i>&nbsp;${vote.value}</strong></td>
+                        <td v-if="admin_controls.all_members">${vote.person_name}</td>
+                        <td><button type="button" class="btn btn-outline-danger btn-sm float-end" @click="removeVote(poll, vote)"><i class="bi bi-trash-fill"></i></button></td>
+                    </tr>
+                    <tr v-if="poll.votes.length == 0">
+                        <td><em>No votes submitted yet.</em></td>
+                    </tr>
+                </tbody>
+
+                <!-- Voting section, only when not viewing all members as admin -->
+                <tbody v-if="!admin_controls.all_members">
+                    <tr v-if="poll.votes.length < poll.poll.limit_per_person">
+                        <td colspan="2">
+                            <form @submit.prevent="submitVote(poll)">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" v-model="poll.new_vote" :placeholder="'Enter your vote, max ' + poll.poll.limit_per_person + ' vote(s) per member'" required>
+                                    <button class="btn btn-primary" type="submit" :disabled="!poll.new_vote">Submit Vote</button>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    <tr v-else>
+                        <td><em>You have reached the maximum number of votes for this poll, thank you!</em></td>
+                    </tr>
+                </tbody>
+
+            </table>
+        </div>
+        <div v-if="isAdmin() && admin_controls.all_members" class="card-footer bg-warning-subtle">
+            <button class="btn btn-outline-primary" type="button" @click="exportPollsCSV(poll)"><i class="bi bi-file-earmark-spreadsheet-fill"></i>&nbsp;Export Poll Data</button>
+        </div>
+    </div> <!-- End Poll Cards -->
+
+</div>
+{% endblock loggedin_content %}

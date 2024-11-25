@@ -5,7 +5,7 @@
 // import { createApp, onMounted, reactive, ref, watch } from '/static/js/vue.esm-browser.js'
 // {% endif %}
 
-const { createApp, onMounted, reactive, ref, watch } = Vue
+const { createApp, onMounted, reactive, ref, watch, computed } = Vue
 
 const SERVER_URL = '/api'
 const LOGIN_STORAGE_KEY = "anotherlevellogin"

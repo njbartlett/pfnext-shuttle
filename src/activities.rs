@@ -513,29 +513,7 @@ mod tests {
     use crate::config::Config;
     use crate::loginsession::{LoginSession, Roles};
     use crate::mock_chrono::set_timestamp_rfc3339;
-
-    const DUMMY_SESSION_ID: &str = "xxx";
-    
-    async fn find_person_id_by_name(pool: &PgPool, name: &str) -> i64 {
-        query_scalar("SELECT id FROM person WHERE name = $1")
-            .bind(name)
-            .fetch_one(pool)
-            .await
-            .expect(&format!("failed to find user with name {}", name))
-    }
-
-    async fn find_user_login_by_name(pool: &PgPool, name: &str, role: &str) -> LoginSession {
-        let uid = find_person_id_by_name(pool, name).await;
-        LoginSession {
-            sessionid: DUMMY_SESSION_ID.to_string(),
-            uid,
-            name: name.to_string(),
-            email: format!("{}@example.com", name),
-            roles: Roles::parse(role),
-            loggedin: None, loggedin_from: None,
-            expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
-        }
-    }
+    use crate::testcommon::{find_user_login_by_name, find_person_id_by_name};
 
     async fn find_challenge_by_name(pool: &PgPool, name: &str) -> i64 {
         query_scalar("SELECT id FROM challenge WHERE name = $1")

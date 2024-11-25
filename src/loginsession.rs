@@ -320,7 +320,6 @@ impl LoginSession {
         };
     }
 
-
 }
 
 async fn log_login(pool: &PgPool, email: &String, ipinfo: &Option<String>, success: bool) {

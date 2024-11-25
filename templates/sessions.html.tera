@@ -14,6 +14,11 @@
         <div v-if="user_data && (!user_data.emergency_name || !user_data.emergency_phone)" class="alert alert-warning" role="alert">
             <i class="bi bi-exclamation-triangle-fill"></i>&nbsp;Please <a href="/profile.html" class="alert-link">provide an emergency contact</a>.
         </div>
+        
+        <!-- Prompt on open polls -->
+        <div v-if="loggedin" v-for="poll in unvoted_polls" class="alert alert-info" role="alert">
+            <i class="bi bi-info-circle"></i>&nbsp;There is an open poll: <a :href="'polls.html#poll-' + poll.poll.id" class="alert-link">${poll.poll.question}</a>
+        </div>
     
         <!-- Weekly Pagination -->
         <div class="my-2 d-flex flex-wrap">

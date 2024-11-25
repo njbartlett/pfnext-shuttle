@@ -30,6 +30,11 @@ title = "Activities"
 url = "activities.html"
 nav = true
 
+[polls]
+title = "Polls"
+url = "/polls.html"
+nav = true
+
 [bookings]
 title = "Bookings"
 url = "/bookings.html"

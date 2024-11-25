@@ -33,8 +33,10 @@ mod transaction_log;
 mod loginsession;
 mod mock_chrono;
 mod notifications;
+mod polls;
 mod sessions;
 mod templates;
+mod testcommon;
 mod users;
 mod whereclause;
 
@@ -126,6 +128,7 @@ async fn launch() -> Rocket<Build> {
             sessions::routes(),
             users::routes(),
             transaction_log::routes(),
-            backup::routes()
+            backup::routes(),
+            polls::routes(),
         ].into_iter().flatten().collect::<Vec<Route>>())
 }
