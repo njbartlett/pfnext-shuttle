@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter, Write};
 use chrono::{Datelike, DateTime, Days, NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use rocket::futures::StreamExt;
@@ -13,6 +14,8 @@ use sqlx::postgres::{PgQueryResult, PgRow};
 
 use crate::{AppState, BigintRecord, parse_opt_date, SessionLocation, SessionType, UserLoginRecord};
 use crate::claims::Claims;
+use crate::log::append_log;
+use crate::sessions::{_get_session, get_session, SessionFullRecord};
 
 const ROLE_ADMIN: &str = "admin";
 const ROLE_FULL_MEMBER: &str = "member";
@@ -188,6 +191,44 @@ async fn user_is_admin_for_session(pool: &PgPool, claim: &Claims, session_id: i6
     return Ok(false);
 }
 
+#[derive(FromRow)]
+struct PersonSessionBookingDetails {
+    person_id: i64,
+    person_name: String,
+    datetime: DateTime<Utc>,
+    cost: i16,
+    session_type_name: String,
+    session_location_name: Option<String>,
+}
+
+impl Display for PersonSessionBookingDetails {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "person={}, type={}, datetime={}, location={}, cost={}",
+            self.person_name,
+            self.session_type_name,
+            self.datetime,
+            self.session_location_name.as_ref().unwrap_or(&"None".to_string()),
+            self.cost))
+    }
+}
+
+impl PersonSessionBookingDetails {
+    async fn load(pool: &PgPool, person_id: i64, session_id: i64) -> Result<PersonSessionBookingDetails, Custom<String>> {
+        query_as("SELECT p.id AS person_id, p.name AS person_name, s.datetime, s.cost, st.name AS session_type_name, l.name AS session_location_name \
+            FROM person AS p, session as s \
+            JOIN session_type AS st ON s.session_type = st.id \
+            LEFT JOIN location AS l ON s.location = l.id \
+            WHERE p.id = $1 \
+            AND s.id = $2")
+            .bind(person_id)
+            .bind(session_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+    }
+}
+
 async fn _create_booking(
     pool: &PgPool,
     timezone: &Tz, // Timezone of system, needed for checking bookings in same week for limited members
@@ -195,6 +236,9 @@ async fn _create_booking(
     booking: Json<SessionBooking>
 ) -> Result<Created<Json<SessionBooking>>, Custom<String>> {
     let mut credits_cost: i16 = 0;
+
+    // Load details of the booking person and session
+    let person_and_session = PersonSessionBookingDetails::load(pool, booking.person_id, booking.session_id).await?;
 
     // Admins can always make a booking for any user. Admin for a session includes the trainer of that session.
     if !user_is_admin_for_session(pool, claim, booking.session_id).await? {
@@ -205,9 +249,8 @@ async fn _create_booking(
         }
 
         // Non-admins can only book future sessions
-        let session_date_and_cost = get_session_date_and_cost(pool, &booking.session_id).await?;
-        if session_date_and_cost.datetime.lt(&Utc::now()) {
-            info!("person id {} attempted to book session in past (session id {}, date {}); denied: missing admin role", claim.uid, session_date_and_cost.id, session_date_and_cost.datetime);
+        if person_and_session.datetime.lt(&Utc::now()) {
+            info!("person id {} attempted to book session in past (session id {}, date {}); denied: missing admin role", claim.uid, booking.session_id, person_and_session.datetime);
             return Err(Custom(Status::Forbidden, "Cannot create booking in the past!".to_string()));
         }
 
@@ -216,9 +259,14 @@ async fn _create_booking(
         if claim.has_role(ROLE_FULL_MEMBER) {
             membership_check = Ok(());
         } else if claim.has_role(ROLE_LIMITED_MEMBER) {
-            membership_check = check_limited_member_has_no_bookings_in_same_week(pool, timezone, claim.uid, &session_date_and_cost).await;
+            // Can always book a zero-cost session even if you already have other bookings.
+            membership_check = if person_and_session.cost == 0 {
+                Ok(())
+            } else {
+                check_limited_member_has_no_bookings_in_same_week(pool, timezone, claim.uid, &person_and_session.datetime).await
+            }
         } else {
-            info!("person id {} attempted to book session id {} (cost {}) without active membership or PAYG credits", claim.uid, session_date_and_cost.id, session_date_and_cost.cost);
+            info!("person id {} attempted to book session id {} (cost {}) without active membership or PAYG credits", claim.uid, booking.session_id, person_and_session.cost);
             membership_check = Err(Custom(Status::Forbidden, "Missing or expired membership, and no PAYG credits.".to_string()));
         }
 
@@ -227,11 +275,11 @@ async fn _create_booking(
             let user_record = UserLoginRecord::load_by_id(pool, booking.person_id).await
                 .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
                 .ok_or(Custom(Status::Unauthorized, "missing user record".to_string()))?;
-            if user_record.credits >= session_date_and_cost.cost {
-                if booking.credits_used.unwrap_or(0) < session_date_and_cost.cost {
+            if user_record.credits >= person_and_session.cost {
+                if booking.credits_used.unwrap_or(0) < person_and_session.cost {
                     return Err(Custom(Status::PaymentRequired, "Opt in to use credits for booking.".to_string()));
                 } else {
-                    credits_cost = session_date_and_cost.cost;
+                    credits_cost = person_and_session.cost;
                 }
             } else {
                 membership_check?;
@@ -256,8 +304,6 @@ async fn _create_booking(
         None => book_session_no_max_bookings(pool, booking.person_id, booking.session_id, credits_cost).await
     }?;
 
-    info!("Created booking: {:?}", &booking);
-
     // Debit the credits used from the user if required
     if credits_cost > 0 {
         query_as("UPDATE person SET credits = credits - $1 WHERE id = $2 RETURNING id, credits")
@@ -267,14 +313,8 @@ async fn _create_booking(
             .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     }
 
+    append_log(pool, claim, "CREATED BOOKING".to_string(), format!("{}, credits_used={}", person_and_session, credits_cost)).await?;
     Ok(Created::new(format!("/bookings?sessionid={},person_id={}", booking.session_id, booking.person_id)))
-}
-
-#[derive(FromRow)]
-pub struct SessionDateAndCost {
-    id: i64,
-    datetime: DateTime<Utc>,
-    cost: i16
 }
 
 #[derive(FromRow, Debug)]
@@ -284,14 +324,9 @@ struct MemberExistingBooking {
     datetime: DateTime<Utc>
 }
 
-async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezone: &Tz, uid: i64, session_date_and_cost: &SessionDateAndCost) -> Result<(), Custom<String>> {
-    // Can always book a zero-cost session even if you already have other bookings.
-    if session_date_and_cost.cost == 0 {
-        return Ok(());
-    }
-
+async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezone: &Tz, uid: i64, session_datetime: &DateTime<Utc>) -> Result<(), Custom<String>> {
     // Get the date/time of the session and work out the start and end of the week that the session occurs in
-    let datetime_in_local = timezone.from_utc_datetime(&session_date_and_cost.datetime.naive_utc());
+    let datetime_in_local = timezone.from_utc_datetime(&session_datetime.naive_utc());
     let start_of_week_local = datetime_in_local
         .checked_sub_days(Days::new(datetime_in_local.weekday().num_days_from_monday() as u64)).unwrap()
         .with_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
@@ -369,15 +404,6 @@ async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_i
     Ok(())
 }
 
-async fn get_session_date_and_cost(pool: &PgPool, session_id: &i64) -> Result<SessionDateAndCost, Custom<String>> {
-    query_as("SELECT id, datetime, cost FROM session WHERE id = $1")
-        .bind(&session_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or(Custom(Status::NotFound, format!("no session with id {}", &session_id)))
-}
-
 #[delete("/bookings?<session_id>&<person_id>")]
 pub async fn delete_booking(state: &State<AppState>, claim: Claims, person_id: i64, session_id: i64) -> Result<Json<SessionBooking>, Custom<String>> {
     _delete_booking(&state.pool, &claim, person_id, session_id).await
@@ -389,7 +415,7 @@ async fn _delete_booking(pool: &PgPool, claim: &Claims, person_id: i64, session_
             return Err(Custom(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string()));
         }
         // Error if session is in the past
-        if get_session_date_and_cost(pool, &session_id).await?.datetime.lt(&Utc::now()) {
+        if PersonSessionBookingDetails::load(pool, person_id, session_id).await?.datetime.lt(&Utc::now()) {
             return Err(Custom(Status::Forbidden, "Cannot cancel past booking.".to_string()));
         }
     }
@@ -402,7 +428,8 @@ async fn _delete_booking(pool: &PgPool, claim: &Claims, person_id: i64, session_
         .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))?;
 
     // Restore the credits used for this booking
-    if booking_deleted.credits_used.unwrap_or(0) > 0 {
+    let credits_refund = booking_deleted.credits_used.unwrap_or(0);
+    if credits_refund > 0 {
         query_as("UPDATE person SET credits = credits + $1 WHERE id = $2 RETURNING id, credits")
             .bind(booking_deleted.credits_used)
             .bind(person_id)
@@ -410,6 +437,8 @@ async fn _delete_booking(pool: &PgPool, claim: &Claims, person_id: i64, session_
             .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     }
 
+    let log_record = PersonSessionBookingDetails::load(pool, booking_deleted.person_id, booking_deleted.session_id).await?;
+    append_log(pool, &claim, "DELETED BOOKING".to_string(), format!("{}, credits_refunded={}", log_record, credits_refund)).await?;
     Ok(Json(booking_deleted))
 }
 
@@ -516,8 +545,9 @@ mod tests {
     struct BigintRecord {
         id: i64
     }
-    async fn create_person(pool: &PgPool, email: &str, roles: &str, credits: i32) -> i64 {
-        let member_id: BigintRecord = query_as("insert into person (name, email, roles, credits) values ('Test User', $1, $2, $3) returning id")
+    async fn create_person(pool: &PgPool, name: &str, email: &str, roles: &str, credits: i32) -> i64 {
+        let member_id: BigintRecord = query_as("insert into person (name, email, roles, credits) values ($1, $2, $3, $4) returning id")
+            .bind(name)
             .bind(email)
             .bind(roles)
             .bind(credits)
@@ -577,14 +607,23 @@ mod tests {
         record.count
     }
 
+    async fn read_logged(pool: &PgPool) -> Vec<(String, String, String)> {
+        query_as("SELECT person, type, detail FROM eventlog")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+    }
+
     #[sqlx::test]
     async fn book_session_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_time = Utc::now().add(TimeDelta::days(1));
+
+        let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
+        let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member_id,
             session_id,
@@ -593,35 +632,40 @@ mod tests {
 
         // Create booking
         let timezone: Tz = "Europe/London".parse().unwrap();
-        let claim = Claims::create(admin_id, "admin@example.com", &Some("011111".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
+        let claim = Claims::create(admin_id, "Joe Admin", "admin@example.com", &Some("011111".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
         crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await.unwrap();
         assert_eq!(1, count_bookings(&pool).await);
+
+        assert_eq!(vec![("Joe Admin".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
     async fn cancel_booking_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_time = Utc::now().add(TimeDelta::days(1));
+        let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
+        let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
 
-        let claim = Claims::create(admin_id, "admin@example.com", &Some("011111".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
+        let claim = Claims::create(admin_id, "Admin User", "admin@example.com", &Some("011111".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
         _delete_booking(&pool, &claim, member_id, session_id).await.unwrap();
         assert_eq!(0, count_bookings(&pool).await);
+
+        assert_eq!(vec![("Admin User".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
     async fn book_session_non_admin_other_member(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member1_id = create_person(&pool, "member1@example.org", "member", 0).await;
-        let member2_id = create_person(&pool, "member2@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
+        let member1_id = create_person(&pool, "Test User", "member1@example.org", "member", 0).await;
+        let member2_id = create_person(&pool, "Test User", "member2@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member1_id,
@@ -631,52 +675,60 @@ mod tests {
 
         // Create booking
         let timezone: Tz = "Europe/London".parse().unwrap();
-        let claim = Claims::create(member2_id, "member2@example.com", &Some("011111".to_string()), &vec!["member".to_string()], Duration::minutes(1));
+        let claim = Claims::create(member2_id, "", "member2@example.com", &Some("011111".to_string()), &vec!["member".to_string()], Duration::minutes(1));
         let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await;
         assert_eq!(Err(Custom(Status::Forbidden, "Cannot create a booking for another user!".to_string())), result);
+
+        assert_eq!(0, read_logged(&pool).await.len());
     }
 
     #[sqlx::test]
     async fn cancel_booking_non_admin_same_member(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
+        let session_time = Utc::now().add(TimeDelta::days(1));
+        let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
 
-        let claim = Claims::create(member_id, "member@example.com", &Some("011111".to_string()), &vec!["member".to_string()], Duration::minutes(1));
+        let claim = Claims::create(member_id, "Member User", "member@example.com", &Some("011111".to_string()), &vec!["member".to_string()], Duration::minutes(1));
         _delete_booking(&pool, &claim, member_id, session_id).await.unwrap();
         assert_eq!(0, count_bookings(&pool).await);
+
+        assert_eq!(vec![("Member User".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
     async fn cancel_booking_non_admin_other_member(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member1_id = create_person(&pool, "member1@example.org", "member", 0).await;
-        let member2_id = create_person(&pool, "member2@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
+        let member1_id = create_person(&pool, "Test User", "member1@example.org", "member", 0).await;
+        let member2_id = create_person(&pool, "Test User", "member2@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member1_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
 
-        let claim = Claims::create(member2_id, "member2@example.com", &Some("011111".to_string()), &vec!["member".to_string()], Duration::minutes(1));
+        let claim = Claims::create(member2_id, "", "member2@example.com", &Some("011111".to_string()), &vec!["member".to_string()], Duration::minutes(1));
         let result = _delete_booking(&pool, &claim, member1_id, session_id).await;
         assert_eq!(Err(Custom(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string())), result);
+
+        assert_eq!(0, read_logged(&pool).await.len());
     }
 
     #[sqlx::test]
     async fn book_session_non_admin_trainer_of_session(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member1@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member1@example.org", "member", 0).await;
+        let session_time = Utc::now().add(TimeDelta::days(1));
+        let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member_id,
             session_id,
@@ -685,52 +737,59 @@ mod tests {
 
         // Create booking
         let timezone: Tz = "Europe/London".parse().unwrap();
-        let claim = Claims::create(trainer_id, "trainer@example.com", &Some("011111".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
+        let claim = Claims::create(trainer_id, "Trainer User", "trainer@example.com", &Some("011111".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
         crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await.unwrap();
         assert_eq!(1, count_bookings(&pool).await);
+
+        assert_eq!(vec![("Trainer User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
     async fn cancel_booking_non_admin_trainer_of_session(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member1@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member1@example.org", "member", 0).await;
+        let session_time = Utc::now().add(TimeDelta::days(1));
+        let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
 
-        let claim = Claims::create(trainer_id, "trainer@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
+        let claim = Claims::create(trainer_id, "Trainer User", "trainer@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
         _delete_booking(&pool, &claim, member_id, session_id).await.unwrap();
         assert_eq!(0, count_bookings(&pool).await);
+
+        assert_eq!(vec![("Trainer User".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
     async fn cancel_booking_non_admin_trainer_not_of_session(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer1_id = create_person(&pool, "trainer1@example.org", "member,trainer", 0).await;
-        let trainer2_id = create_person(&pool, "trainer2@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member1@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer1_id = create_person(&pool, "Test User", "trainer1@example.org", "member,trainer", 0).await;
+        let trainer2_id = create_person(&pool, "Test User", "trainer2@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member1@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
 
-        let claim = Claims::create(trainer2_id, "trainer2@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
+        let claim = Claims::create(trainer2_id, "", "trainer2@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
         let result = _delete_booking(&pool, &claim, member_id, session_id).await;
         assert_eq!(Err(Custom(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string())), result);
+
+        assert_eq!(0, read_logged(&pool).await.len());
     }
 
     #[sqlx::test]
     async fn book_session_non_admin_trainer_not_of_session(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer1_id = create_person(&pool, "trainer1@example.org", "member,trainer", 0).await;
-        let trainer2_id = create_person(&pool, "trainer2@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member1@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer1_id = create_person(&pool, "Test User", "trainer1@example.org", "member,trainer", 0).await;
+        let trainer2_id = create_person(&pool, "Test User", "trainer2@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member1@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member_id,
@@ -740,18 +799,21 @@ mod tests {
 
         // Create booking
         let timezone: Tz = "Europe/London".parse().unwrap();
-        let claim = Claims::create(trainer2_id, "trainer2@example.com", &Some("011111".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
+        let claim = Claims::create(trainer2_id, "", "trainer2@example.com", &Some("011111".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
         let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await;
         assert_eq!(Err(Custom(Status::Forbidden, "Cannot create a booking for another user!".to_string())), result);
+
+        assert_eq!(0, read_logged(&pool).await.len());
     }
 
     #[sqlx::test]
     async fn book_session_full_member(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
+        let session_time = Utc::now().add(TimeDelta::days(1));
+        let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member_id,
             session_id,
@@ -760,17 +822,19 @@ mod tests {
 
         // Create booking
         let timezone: Tz = "Europe/London".parse().unwrap();
-        let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec!["member".to_string()], Duration::minutes(1));
+        let claim = Claims::create(member_id, "Member User", "joe@example.com", &Some("011111".to_string()), &vec!["member".to_string()], Duration::minutes(1));
         crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await.unwrap();
         assert_eq!(1, count_bookings(&pool).await);
+
+        assert_eq!(vec![("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
     async fn book_session_non_member(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member_id,
@@ -780,21 +844,23 @@ mod tests {
 
         // Create booking
         let timezone: Tz = "Europe/London".parse().unwrap();
-        let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
+        let claim = Claims::create(member_id, "", "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
         let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await;
         assert!(result.is_err());
         assert_eq!(Custom(Status::Forbidden, "Missing or expired membership, and no PAYG credits.".to_string()), result.err().unwrap());
 
         // Postcondition: still zero bookings
         assert_eq!(0, count_bookings(&pool).await);
+
+        assert_eq!(0, read_logged(&pool).await.len());
     }
 
     #[sqlx::test]
     async fn book_session_limited_member_existing_session_same_week(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "limited-member", 0).await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member@example.org", "limited-member", 0).await;
         let datetime = Utc::now().add(TimeDelta::days(1));
         let session_id_1 = create_session(&pool, &datetime, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking_1 = SessionBooking {
@@ -814,14 +880,13 @@ mod tests {
         assert_eq!(0, count_bookings(&pool).await);
 
         // Create booking 1
-        let claim = Claims::create(member_id, "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
+        let claim = Claims::create(member_id, "Member User", "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
         crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking_1)).await.unwrap();
 
         // Postcondition 1: one booking
         assert_eq!(1, count_bookings(&pool).await);
 
         // Create booking 2: fails
-        let claim = Claims::create(member_id, "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
         let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking_2.clone())).await;
         assert!(result.is_err());
         assert_eq!(Custom(Status::Forbidden, "Cannot book session: member already has 1 booking(s) in this week.".to_string()), result.err().unwrap());
@@ -836,19 +901,24 @@ mod tests {
         assert_eq!(0, count_bookings(&pool).await);
 
         // Create booking 2: succeeds now
-        let claim = Claims::create(member_id, "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
         crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking_2)).await.unwrap();
 
         // Postcondition 4: one booking
         assert_eq!(1, count_bookings(&pool).await);
+
+        assert_eq!(vec![
+            ("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", datetime)),
+            ("Member User".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", datetime)),
+            ("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=On The Move, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", datetime))
+        ], read_logged(&pool).await);
     }
 
     #[sqlx::test]
     async fn book_session_limited_member_existing_session_next_week(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "limited-member", 0).await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member@example.org", "limited-member", 0).await;
         let tomorrow = Utc::now().add(TimeDelta::days(1));
         let next_week = tomorrow.add(TimeDelta::weeks(1));
         let session_id_1 = create_session(&pool, &tomorrow, trainer_id, "HIIT", "Oak Hill Park").await;
@@ -869,26 +939,30 @@ mod tests {
         assert_eq!(0, count_bookings(&pool).await);
 
         // Create booking 1
-        let claim = Claims::create(member_id, "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
+        let claim = Claims::create(member_id, "Member User", "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
         crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking_1)).await.unwrap();
 
         // Postcondition 1: one booking
         assert_eq!(1, count_bookings(&pool).await);
 
         // Create booking 2: succeeds because it's next week
-        let claim = Claims::create(member_id, "member@example.com", &Some("011111".to_string()), &vec!["limited-member".to_string()], Duration::minutes(1));
         crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking_2.clone())).await.unwrap();
 
         // Postcondition 2: two bookings
         assert_eq!(2, count_bookings(&pool).await);
+
+        assert_eq!(vec![
+            ("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", tomorrow)),
+            ("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=On The Move, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", next_week))
+        ], read_logged(&pool).await);
     }
 
     #[sqlx::test]
     async fn book_session_non_member_using_credit_not_opted_in(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 5).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 5).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member_id,
@@ -901,22 +975,24 @@ mod tests {
 
         // Create booking
         let timezone: Tz = "Europe/London".parse().unwrap();
-        let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
+        let claim = Claims::create(member_id, "", "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
         let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await;
         assert!(result.is_err());
         assert_eq!(Custom(Status::PaymentRequired, "Opt in to use credits for booking.".to_string()), result.err().unwrap());
 
         // Postcondition: still zero bookings
         assert_eq!(0, count_bookings(&pool).await);
+        assert_eq!(0, read_logged(&pool).await.len());
     }
 
     #[sqlx::test]
     async fn book_session_non_member_using_credit_opted_in(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "", 5).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "PAYG User", "member@example.org", "", 5).await;
+        let session_datetime = Utc::now().add(TimeDelta::days(1));
+        let session_id = create_session(&pool, &session_datetime, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = SessionBooking {
             person_id: member_id,
             session_id,
@@ -928,7 +1004,7 @@ mod tests {
 
         // Create booking
         let timezone: Tz = "Europe/London".parse().unwrap();
-        let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
+        let claim = Claims::create(member_id, "PAYG User", "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
         let result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await.unwrap();
 
         // Check that the booking has the used credits
@@ -956,14 +1032,19 @@ mod tests {
         let member_record = UserLoginRecord::load_by_id(&pool, member_id)
             .await.unwrap().unwrap();
         assert_eq!(5, member_record.credits);
+
+        assert_eq!(vec![
+            ("PAYG User".to_string(), "CREATED BOOKING".to_string(), format!("person=PAYG User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=1", session_datetime)),
+            ("PAYG User".to_string(), "DELETED BOOKING".to_string(), format!("person=PAYG User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=1", session_datetime))
+        ], read_logged(&pool).await);
     }
 
     #[sqlx::test]
     async fn book_session_non_member_using_credit_max_bookings_reached(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "", 5).await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "PAYG User", "member@example.org", "", 5).await;
         let session_id = create_session_max_bookings(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park", Some(0)).await;
         let booking = SessionBooking {
             person_id: member_id,
@@ -976,7 +1057,7 @@ mod tests {
 
         // Create booking: fail due to max bookings reached
         let timezone: Tz = "Europe/London".parse().unwrap();
-        let claim = Claims::create(member_id, "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
+        let claim = Claims::create(member_id, "PAYG User", "joe@example.com", &Some("011111".to_string()), &vec![], Duration::minutes(1));
         let booking_result = crate::bookings::_create_booking(&pool, &timezone, &claim, Json(booking)).await.err().unwrap();
         assert_eq!(Custom(Status::Conflict, "Session has reached it maximum number of bookings: 0.".to_string()), booking_result);
 
@@ -987,20 +1068,22 @@ mod tests {
         let member_record = UserLoginRecord::load_by_id(&pool, member_id)
             .await.unwrap().unwrap();
         assert_eq!(5, member_record.credits);
+
+        assert_eq!(0, read_logged(&pool).await.len());
     }
 
     #[sqlx::test]
     async fn list_bookings_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "member,trainer", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "member,trainer", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let timezone: Tz = "Europe/London".parse().unwrap();
         create_booking(&pool, member_id, session_id, None).await;
 
-        let claim = Claims::create(admin_id, "admin@example.com", &Some("0".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
+        let claim = Claims::create(admin_id, "", "admin@example.com", &Some("0".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
         let bookings = _list_bookings(&pool, &claim, Some(session_id), None, None, None).await.unwrap();
 
         assert_eq!(1,  bookings.len());
@@ -1010,13 +1093,13 @@ mod tests {
     async fn list_bookings_non_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let timezone: Tz = "Europe/London".parse().unwrap();
         create_booking(&pool, member_id, session_id, None).await;
 
-        let claim = Claims::create(member_id, "member@example.com", &Some("0".to_string()), &vec![], Duration::minutes(1));
+        let claim = Claims::create(member_id, "", "member@example.com", &Some("0".to_string()), &vec![], Duration::minutes(1));
         let result = _list_bookings(&pool, &claim, Some(session_id), None, None, None).await;
 
         assert_eq!(Err(Custom(Status::Forbidden, "user is not allowed to view bookings for selected person and/or session".to_string())), result);
@@ -1026,13 +1109,13 @@ mod tests {
     async fn list_bookings_non_admin_trainer_of_session(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer_id = create_person(&pool, "trainer@example.org", "member,trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let timezone: Tz = "Europe/London".parse().unwrap();
         create_booking(&pool, member_id, session_id, None).await;
 
-        let claim = Claims::create(trainer_id, "trainer@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
+        let claim = Claims::create(trainer_id, "", "trainer@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
         let bookings = _list_bookings(&pool, &claim, Some(session_id), None, None, None).await.unwrap();
 
         assert_eq!(1, bookings.len());
@@ -1042,14 +1125,14 @@ mod tests {
     async fn list_bookings_non_admin_trainer_not_of_session(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let trainer1_id = create_person(&pool, "trainer1@example.org", "trainer", 0).await;
-        let trainer2_id = create_person(&pool, "trainer2@example.org", "trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
+        let trainer1_id = create_person(&pool, "Test User", "trainer1@example.org", "trainer", 0).await;
+        let trainer2_id = create_person(&pool, "Test User", "trainer2@example.org", "trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
         let timezone: Tz = "Europe/London".parse().unwrap();
         create_booking(&pool, member_id, session_id, None).await;
 
-        let claim = Claims::create(trainer2_id, "trainer2@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
+        let claim = Claims::create(trainer2_id, "", "trainer2@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
         let result = _list_bookings(&pool, &claim, Some(session_id), None, None, None).await;
 
         assert_eq!(Err(Custom(Status::Forbidden, "user is not allowed to view bookings for selected person and/or session".to_string())), result);
@@ -1059,15 +1142,15 @@ mod tests {
     async fn mark_attendance_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let timezone: Tz = "Europe/London".parse().unwrap();
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
-        let claim = Claims::create(admin_id, "admin@example.com", &Some("0".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
+        let claim = Claims::create(admin_id, "", "admin@example.com", &Some("0".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
         _update_booking(&pool, &claim, member_id, session_id, true).await;
         assert_eq!(1, count_bookings_attended(&pool, true).await);
     }
@@ -1076,15 +1159,15 @@ mod tests {
     async fn mark_attendance_non_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let timezone: Tz = "Europe/London".parse().unwrap();
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
-        let claim = Claims::create(member_id, "member@example.com", &Some("0".to_string()), &vec!["member".to_string()], Duration::minutes(1));
+        let claim = Claims::create(member_id, "", "member@example.com", &Some("0".to_string()), &vec!["member".to_string()], Duration::minutes(1));
         let result = _update_booking(&pool, &claim, member_id, session_id, true).await;
         assert_eq!(Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
         assert_eq!(0, count_bookings_attended(&pool, true).await);
@@ -1094,15 +1177,15 @@ mod tests {
     async fn mark_attendance_non_admin_trainer_of_session(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer_id = create_person(&pool, "trainer@example.org", "trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let timezone: Tz = "Europe/London".parse().unwrap();
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
-        let claim = Claims::create(trainer_id, "trainer@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
+        let claim = Claims::create(trainer_id, "", "trainer@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
         _update_booking(&pool, &claim, member_id, session_id, true).await;
         assert_eq!(1, count_bookings_attended(&pool, true).await);
     }
@@ -1111,16 +1194,16 @@ mod tests {
     async fn mark_attendance_non_admin_trainer_not_of_session(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let admin_id = create_person(&pool, "admin@example.org", "admin", 0).await;
-        let trainer1_id = create_person(&pool, "trainer1@example.org", "trainer", 0).await;
-        let trainer2_id = create_person(&pool, "trainer2@example.org", "trainer", 0).await;
-        let member_id = create_person(&pool, "member@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer1_id = create_person(&pool, "Test User", "trainer1@example.org", "trainer", 0).await;
+        let trainer2_id = create_person(&pool, "Test User", "trainer2@example.org", "trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
         let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
         let timezone: Tz = "Europe/London".parse().unwrap();
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
-        let claim = Claims::create(trainer2_id, "traine2r@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
+        let claim = Claims::create(trainer2_id, "", "traine2r@example.com", &Some("0".to_string()), &vec!["trainer".to_string()], Duration::minutes(1));
         let result = _update_booking(&pool, &claim, member_id, session_id, true).await;
         assert_eq!(Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
         assert_eq!(0, count_bookings_attended(&pool, true).await);

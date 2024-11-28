@@ -165,7 +165,7 @@ mod tests {
             .fetch_one(&pool)
             .await.unwrap();
 
-        let claim = Claims::create(0, "admin@example.com", &Some("011111".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
+        let claim = Claims::create(0, "", "admin@example.com", &Some("011111".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
         let backup_result = crate::backup::_backup_all(&pool, &claim).await.unwrap().into_inner();
 
         assert_eq!("{\"session_type\":[{\"id\":1,\"name\":\"HIIT\",\"requires_trainer\":true,\"cost\":1,\"deprecated\":false},{\"id\":2,\"name\":\"Strong\",\"requires_trainer\":true,\"cost\":1,\"deprecated\":false},{\"id\":3,\"name\":\"On The Move\",\"requires_trainer\":true,\"cost\":1,\"deprecated\":false}],\"location\":[{\"id\":1,\"name\":\"Oak Hill Park\",\"address\":\"Oak Hill Park, Parkside Gardens, London EN4 8JP\"},{\"id\":2,\"name\":\"Trent Park\",\"address\":\"Trent Park, London EN4 0PS\"}],\"person\":[{\"id\":1,\"name\":\"Mr Test\",\"email\":\"test@example.com\",\"phone\":\"0111\",\"pwd\":\"\",\"roles\":\"member\",\"credits\":0}],\"session\":[{\"id\":1,\"datetime\":\"2024-01-01T08:00:00Z\",\"duration_mins\":60,\"session_type_name\":\"HIIT\",\"location_name\":\"Oak Hill Park\",\"trainer_email\":null,\"max_booking_count\":null,\"notes\":null,\"cost\":1}],\"booking\":[{\"person_email\":\"test@example.com\",\"session_datetime\":\"2024-01-01T08:00:00Z\",\"session_location_name\":\"Oak Hill Park\",\"session_trainer_email\":null}]}", serde_json::to_string(&backup_result).unwrap());

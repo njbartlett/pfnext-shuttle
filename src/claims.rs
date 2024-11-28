@@ -31,6 +31,7 @@ impl Display for AuthenticationError {
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Claims {
     pub(crate) uid: i64,
+    pub(crate) name: String,
     pub(crate) email: String,
     pub(crate) phone: Option<String>,
     pub(crate) roles: Vec<String>,
@@ -72,13 +73,14 @@ impl<'r> FromRequest<'r> for Claims {
 }
 
 impl Claims {
-    pub(crate) fn create(uid: i64, email: &str, phone: &Option<String>, roles: &Vec<String>, duration: Duration) -> Self {
+    pub(crate) fn create(uid: i64, name: &str, email: &str, phone: &Option<String>, roles: &Vec<String>, duration: Duration) -> Self {
         let now = Utc::now();
         let expiration = Utc::now().add(duration);
         info!("now={}, expiration={}", now, expiration);
         info!("Creating token with expiration {}", expiration);
         Self {
             uid,
+            name: name.to_string(),
             email: email.to_string(),
             phone: phone.clone(),
             roles: roles.to_owned(),
@@ -143,7 +145,7 @@ mod tests {
 
     #[test]
     fn to_token_and_back() {
-        let claim = Claims::create(1, "joe@example.com", &Some(String::from("010101")), &vec!("member".to_string()), Duration::minutes(1));
+        let claim = Claims::create(1, "Joe Member", "joe@example.com", &Some(String::from("010101")), &vec!("member".to_string()), Duration::minutes(1));
         let token = claim.into_token("let me in").unwrap();
         let token = format!("Bearer {token}");
 
@@ -154,7 +156,7 @@ mod tests {
 
     #[test]
     fn assert_roles_any() {
-        let claim = Claims::create(1, "joe@example.com", &Some(String::from("010101")), &vec!("member".to_string()), Duration::minutes(1));
+        let claim = Claims::create(1, "Joe Member", "joe@example.com", &Some(String::from("010101")), &vec!("member".to_string()), Duration::minutes(1));
         assert_eq!(claim.assert_roles_contains("member"), Ok(()));
         assert_eq!(claim.assert_roles_contains("admin"), Err(Custom(Status::Forbidden, "user is not allowed to perform this action".to_string())));
     }

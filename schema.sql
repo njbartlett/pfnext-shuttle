@@ -49,7 +49,7 @@ VALUES
     ('On The Move', 1)
 ON CONFLICT DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS session(
+CREATE TABLE IF NOT EXISTS session (
 	id bigserial PRIMARY KEY,
 	datetime timestamptz NOT NULL,
 	duration_mins int4 NOT NULL,
@@ -67,4 +67,12 @@ CREATE TABLE IF NOT EXISTS booking (
     attended bool DEFAULT false NOT NULL,
 	credits_used int2 DEFAULT 0 NULL CHECK ((credits_used >= 0)),
     PRIMARY KEY (person_id, session_id)
+);
+
+CREATE TABLE IF NOT EXISTS eventlog (
+    id bigserial PRIMARY KEY,
+    datetime timestamptz NOT NULL,
+    person text NOT NULL,
+    type text NOT NULL,
+    detail text NOT NULL DEFAULT ''
 );

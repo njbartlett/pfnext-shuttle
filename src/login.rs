@@ -513,10 +513,10 @@ fn build_login_response(
     let access_token_key = secrets.get("ACCESS_TOKEN_KEY")
         .ok_or(Custom(Status::InternalServerError, String::from("missing secret ACCESS_TOKEN_KEY")))?;
 
-    let access_token = Claims::create(login_record.id, &login_record.email, &login_record.phone, &roles, access_token_ttl).into_token(&access_token_key)?;
+    let access_token = Claims::create(login_record.id, &login_record.name, &login_record.email, &login_record.phone, &roles, access_token_ttl).into_token(&access_token_key)?;
     let refresh_token_key = secrets.get("REFRESH_TOKEN_KEY")
         .ok_or(Custom(Status::InternalServerError, String::from("missing secret REFRESH_TOKEN_KEY")))?;
-    let refresh_token: String = Claims::create(login_record.id, &login_record.email, &login_record.phone, &roles, REFRESH_TOKEN_EXPIRATION).into_token(&refresh_token_key)?;
+    let refresh_token: String = Claims::create(login_record.id, &login_record.name, &login_record.email, &login_record.phone, &roles, REFRESH_TOKEN_EXPIRATION).into_token(&refresh_token_key)?;
 
     // Build login response body
     let body = LoggedInUser {

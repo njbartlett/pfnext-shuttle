@@ -14,19 +14,19 @@ use crate::claims::Claims;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct SessionFullRecord {
-    id: i64,
-    datetime: DateTime<Utc>,
-    duration_mins: i32,
-    session_type: SessionType,
-    location: Option<SessionLocation>,
-    trainer: Option<SessionTrainer>,
-    booked: bool,
-    attended: bool,
-    booking_count: i64,
-    max_booking_count: Option<i64>,
-    attended_count: Option<i64>,
-    notes: Option<String>,
-    cost: i16
+    pub id: i64,
+    pub datetime: DateTime<Utc>,
+    pub duration_mins: i32,
+    pub session_type: SessionType,
+    pub location: Option<SessionLocation>,
+    pub trainer: Option<SessionTrainer>,
+    pub booked: bool,
+    pub attended: bool,
+    pub booking_count: i64,
+    pub max_booking_count: Option<i64>,
+    pub attended_count: Option<i64>,
+    pub notes: Option<String>,
+    pub cost: i16
 }
 
 impl FromRow<'_, PgRow> for SessionFullRecord {
@@ -120,17 +120,19 @@ pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<
 
 #[get("/sessions/<session_id>?<attended>")]
 pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64, attended: bool) -> Result<Json<SessionFullRecord>, Custom<String>> {
-    let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
     if attended && !claim.has_role("admin") {
         return Err(Custom(Status::Forbidden, "attendance data only available to admins".to_string()));
     }
+    _get_session(&state.pool, &claim, session_id, attended).await
+}
+pub async fn _get_session(pool: &PgPool, claim: &Claims, session_id: i64, attended: bool) -> Result<Json<SessionFullRecord>, Custom<String>> {
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
     build_session_query(Some(claim.uid), None, None, None, attended, &mut qb)?;
     qb.push(" WHERE s.id = ");
     qb.push_bind(session_id);
-    info!("build_session_query compiled SQL: {}", qb.sql());
 
     qb.build_query_as()
-        .fetch_optional(&state.pool)
+        .fetch_optional(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or_else(|| Custom(Status::NotFound, format!("session with id {} not found", session_id)))
