@@ -24,7 +24,7 @@ const ACCESS_TOKEN_TTL_ADMIN: Duration = Duration::hours(3);
 const REFRESH_TOKEN_EXPIRATION: Duration = Duration::hours(24);
 
 const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
-    length: 8,
+    length: 6,
     numbers: true,
     lowercase_letters: false,
     uppercase_letters: false,

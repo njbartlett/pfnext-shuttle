@@ -103,16 +103,22 @@ impl NewSession {
 }
 
 #[get("/sessions?<from>&<to>&<trainer_id>&<attended>")]
-pub async fn list_sessions(state: &State<AppState>, claim: Claims, from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
+pub async fn list_sessions(state: &State<AppState>, claim: Option<Claims>, from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
+    _list_sessions(&state.pool, claim, from, to, trainer_id, attended).await
+}
+async fn _list_sessions(pool: &PgPool, claim: Option<Claims>, from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
-    if attended && !claim.has_role("admin") {
+    let is_admin = claim.as_ref().map_or(false, |c| c.has_role("admin"));
+    let uid: Option<i64> = claim.as_ref().map(|c| c.uid);
+
+    if attended && !is_admin {
         return Err(Custom(Status::Forbidden, "attendance data only available to admins".to_string()));
     }
-    build_session_query(Some(claim.uid), from, to, trainer_id, attended, &mut qb)?;
+    build_session_query(uid, from, to, trainer_id, attended, &mut qb)?;
     qb.push(" ORDER BY s.datetime ASC");
 
     let sessions = qb.build_query_as()
-        .fetch_all(&state.pool)
+        .fetch_all(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     Ok(Json(sessions))
@@ -335,4 +341,26 @@ pub async fn list_session_types(state: &State<AppState>, deprecated: Option<bool
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
         .map(|v| Json(v))
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::{query_as, Executor, FromRow, PgPool};
+    use crate::sessions::_list_sessions;
+
+    #[derive(FromRow)]
+    struct BigintRecord {
+        id: i64
+    }
+
+    #[sqlx::test]
+    async fn browse_sessions_not_logged_in(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let session_id: BigintRecord = query_as("insert into session (datetime, duration_mins, session_type) values ('2025-01-01 00:00:00+0', 60, 1) returning id")
+            .fetch_one(&pool)
+            .await.unwrap();
+        let sessions = _list_sessions(&pool, None, None, None, None, false).await.unwrap();
+        assert_eq!(1, sessions.len());
+    }
+
 }

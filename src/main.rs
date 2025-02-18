@@ -41,14 +41,15 @@ struct Config {
 impl ::std::default::Default for Config {
     fn default() -> Self {
         Self {
-            branding: String::from("unbranded"),
-            email_sender_name: String::from("Unknown"),
-            email_sender_address: String::from("unknown@example.com"),
-            email_replyto_name: String::from("Unknown"),
-            email_replyto_address: String::from("unknown@example.com"),
-            email_admin_notifications: String::from("admin@anotherlevelfitness.uk"),
+            branding: String::from("Another Level"),
+            email_sender_name: String::from("Another Level Community Fitness"),
+            email_sender_address: String::from("admin@anotherlevelfitness.uk"),
+            email_replyto_name: String::from("Another Level Community Fitness"),
+            email_replyto_address: String::from("admin@anotherlevelfitness.uk"),
+            email_admin_notifications: String::from("notifications@anotherlevelfitness.uk"),
             timezone_name: String::from("Europe/London"),
-            cors_allowed: String::from("^http://localhost")
+            cors_allowed: String::from("^https?://(\\w*\\.)?anotherlevelfitness.uk")
+            //cors_allowed: String::from("^http://localhost:")
         }
     }
 }
@@ -91,12 +92,9 @@ async fn rocket(
         .await
         .map_err(CustomError::new)?;
 
-    // Load config
-    let mut config_path = env::current_dir()?;
-    config_path.push("Config.properties");
-    info!("Config path is {}", &config_path.display());
-    let config: Config = confy::load_path(config_path).map_err(CustomError::new)?;
-    info!("Loaded config: {:?}", config);
+    // Init config
+    let config: Config = Config::default();
+    info!("Initialized config: {:?}", config);
 
     // Configure CORS
     let allow_domain = [&config.cors_allowed];
