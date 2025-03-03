@@ -511,8 +511,7 @@ pub async fn get_attendance_stats(state: &State<AppState>, claim: Claims, from: 
 
     qb.push(") AS attended_count \
         FROM person AS p \
-        ORDER BY attended_count DESC, name \
-        LIMIT 10");
+        ORDER BY attended_count DESC, name");
     info!("fetching: {}", qb.sql());
 
     let stats = qb.build_query_as()
