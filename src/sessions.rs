@@ -38,6 +38,7 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
                 id,
                 name: row.try_get("trainer_name")?,
                 email: row.try_get("trainer_email")?,
+                url: row.try_get("trainer_url")?,
             }),
             None => None
         };
@@ -47,7 +48,8 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
             Some(id) => Some(SessionLocation{
                 id,
                 name: row.try_get("location_name")?,
-                address: row.try_get("location_address")?
+                address: row.try_get("location_address")?,
+                url: row.try_get("location_url")?
             }),
             None => None
         };
@@ -155,8 +157,8 @@ fn build_session_query(
 ) -> Result<(), Custom<String>> {
     qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, s.cost, \
         t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated, \
-        loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, \
-        trainer.id AS trainer_id, trainer.name AS trainer_name, trainer.email AS trainer_email, \
+        loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, loc.url AS location_url, \
+        trainer.id AS trainer_id, trainer.name AS trainer_name, trainer.email AS trainer_email, trainer.url AS trainer_url, \
         (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count, s.max_booking_count AS max_booking_count");
 
     if show_attended {
@@ -320,7 +322,7 @@ pub async fn update_session(
 
 #[get("/locations")]
 pub async fn list_locations(state: &State<AppState>) -> Result<Json<Vec<SessionLocation>>, Custom<String>> {
-    query_as("SELECT id, name, address FROM location")
+    query_as("SELECT id, name, address, url FROM location")
         .fetch_all(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))

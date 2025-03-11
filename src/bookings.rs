@@ -51,6 +51,7 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
                 id,
                 name: row.try_get("session_location_name")?,
                 address: row.try_get("session_location_address")?,
+                url: row.try_get("session_location_url")?,
             }),
             None => None
         };
@@ -123,7 +124,7 @@ async fn _list_bookings(
 
     // Build the Query
     let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, b.credits_used, \
-                s.datetime AS session_datetime, s.duration_mins AS session_duration_mins, s.location AS session_location_id, l.name AS session_location_name, l.address AS session_location_address, \
+                s.datetime AS session_datetime, s.duration_mins AS session_duration_mins, s.location AS session_location_id, l.name AS session_location_name, l.address AS session_location_address, l.url AS session_location_url, \
                 s.session_type AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated, b.attended \
             FROM booking as b \
             JOIN person AS p ON b.person_id = p.id \

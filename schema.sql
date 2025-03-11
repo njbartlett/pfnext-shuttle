@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS person (
     phone text,
     pwd text,
     roles text,
-    credits int2 DEFAULT 0 NOT NULL CHECK (credits >= 0)
+    credits int2 DEFAULT 0 NOT NULL CHECK (credits >= 0),
+    url text NULL
 );
 CREATE TABLE IF NOT EXISTS temp_password (
     person_id bigint UNIQUE NOT NULL REFERENCES person ON DELETE CASCADE,
@@ -21,7 +22,8 @@ CREATE TABLE IF NOT EXISTS temp_password (
 CREATE TABLE IF NOT EXISTS location (
     id serial PRIMARY KEY,
     name varchar(255) UNIQUE NOT NULL,
-    address varchar(1023)
+    address varchar(1023),
+    url text NULL
 );
 INSERT INTO location
     (name, address)
@@ -37,6 +39,7 @@ CREATE TABLE IF NOT EXISTS session_type (
 	requires_trainer bool DEFAULT true NULL,
 	cost int2 DEFAULT 0 NULL,
 	deprecated bool DEFAULT false,
+	url text NULL,
 	CONSTRAINT session_type_cost_check CHECK (cost >= 0),
 	CONSTRAINT session_type_name_key UNIQUE (name),
 	CONSTRAINT session_type_pkey PRIMARY KEY (id)

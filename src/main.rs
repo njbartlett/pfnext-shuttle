@@ -181,14 +181,16 @@ impl SessionType {
 pub struct SessionTrainer {
     id: i64,
     name: String,
-    email: String
+    email: String,
+    url: Option<String>
 }
 
 #[derive(FromRow, Serialize, Clone, Debug, PartialEq)]
 pub struct SessionLocation {
     id: i32,
     name: String,
-    address: String
+    address: String,
+    url: Option<String>
 }
 
 #[derive(FromRow, Debug)]
