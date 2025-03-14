@@ -351,7 +351,8 @@ pub struct UserListingEntry {
     email: String,
     phone: Option<String>,
     roles: Vec<String>,
-    credits: i16
+    credits: i16,
+    pwd_defined: bool
 }
 
 impl FromRow<'_, PgRow> for UserListingEntry {
@@ -362,7 +363,8 @@ impl FromRow<'_, PgRow> for UserListingEntry {
             email: row.try_get("email")?,
             phone: row.try_get("phone").ok(),
             roles: parse_roles(row.try_get("roles")?),
-            credits: row.try_get("credits")?
+            credits: row.try_get("credits")?,
+            pwd_defined: row.try_get("pwd_defined")?
         })
     }
 }
@@ -386,7 +388,11 @@ pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<Str
         return Err(Custom(Status::Forbidden, "admin only".to_string()));
     }
 
-    let mut users: Vec<UserListingEntry> = query_as("SELECT id, name, email, phone, roles, credits FROM person ORDER BY name")
+    let mut users: Vec<UserListingEntry> = query_as(
+            "SELECT id, name, email, phone, roles, credits, \
+            (CASE WHEN pwd IS NULL THEN false ELSE true END) AS pwd_defined \
+            FROM person \
+            ORDER BY name")
         .fetch_all(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
