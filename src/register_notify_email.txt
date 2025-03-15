@@ -1,5 +1,12 @@
 A new user has just registered as follows:
 
 Name: {}
+
 E-Mail: {}
+
 Phone: {}
+
+Emergency Contact: {} {}
+
+Medical Info:
+{}

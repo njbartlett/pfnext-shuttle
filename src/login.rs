@@ -16,7 +16,7 @@ use sqlx::{Error, FromRow, PgPool, query_as, raw_sql, Row};
 use sqlx::postgres::PgRow;
 use urlencoding::encode;
 
-use crate::{AppState, CountResult, UserLoginRecord};
+use crate::{AppState, BigintRecord, CountResult, UserLoginRecord};
 use crate::claims::Claims;
 
 const ACCESS_TOKEN_TTL: Duration = Duration::hours(6);
@@ -127,6 +127,9 @@ pub struct NewUserRequest {
     name: String,
     email: String,
     phone: Option<String>,
+    emergency_name: Option<String>,
+    emergency_phone: Option<String>,
+    medical_info: Option<String>,
     website_url: String,
     reset_url: String
 }
@@ -195,10 +198,13 @@ pub async fn register_user(
     }
 
     // Create user record with null password (must use password reset)
-    let user_updated: UserUpdated = query_as("INSERT INTO person (name, email, phone, credits, roles) VALUES ($1, $2, $3, 1, '') RETURNING id")
+    let user_updated: UserUpdated = query_as("INSERT INTO person (name, email, phone, emergency_name, emergency_phone, medical_info, credits, roles) VALUES ($1, $2, $3, $4, $5, $6, 1, '') RETURNING id")
         .bind(&new_user.name)
         .bind(&new_user.email)
         .bind(&new_user.phone)
+        .bind(&new_user.emergency_name)
+        .bind(&new_user.emergency_phone)
+        .bind(&new_user.medical_info)
         .fetch_one(&state.pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
@@ -228,7 +234,10 @@ pub async fn register_user(
         .text_body(format!(include_str!("register_notify_email.txt"),
             &new_user.name,
             &new_user.email,
-            &new_user.phone.as_ref().unwrap_or(&"<unspecified>".to_string())
+            &new_user.phone.as_ref().unwrap_or(&"<unspecified>".to_string()),
+            &new_user.emergency_name.as_ref().unwrap_or(&"<unspecified>".to_string()),
+            &new_user.emergency_phone.as_ref().unwrap_or(&"<unspecified>".to_string()),
+            &new_user.medical_info.as_ref().unwrap_or(&"None provided".to_string())
         ))
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
@@ -350,6 +359,9 @@ pub struct UserListingEntry {
     name: String,
     email: String,
     phone: Option<String>,
+    emergency_name: Option<String>,
+    emergency_phone: Option<String>,
+    medical_info: Option<String>,
     roles: Vec<String>,
     credits: i16,
     pwd_defined: bool
@@ -362,6 +374,9 @@ impl FromRow<'_, PgRow> for UserListingEntry {
             name: row.try_get("name")?,
             email: row.try_get("email")?,
             phone: row.try_get("phone").ok(),
+            emergency_name: row.try_get("emergency_name").ok(),
+            emergency_phone: row.try_get("emergency_phone").ok(),
+            medical_info: row.try_get("medical_info").ok(),
             roles: parse_roles(row.try_get("roles")?),
             credits: row.try_get("credits")?,
             pwd_defined: row.try_get("pwd_defined")?
@@ -374,7 +389,7 @@ pub async fn get_user(state: &State<AppState>, claim: Claims, user_id: i64) -> R
     if !claim.has_role("admin") && !claim.uid == user_id {
         return Err(Custom(Status::Forbidden, "cannot view user record for other users".to_string()));
     }
-    let user: Option<UserListingEntry> = query_as("SELECT id, name, email, phone, roles, credits FROM person WHERE id = $1")
+    let user: Option<UserListingEntry> = query_as("SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits FROM person WHERE id = $1")
         .bind(user_id)
         .fetch_optional(&state.pool)
         .await
@@ -389,7 +404,7 @@ pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<Str
     }
 
     let mut users: Vec<UserListingEntry> = query_as(
-            "SELECT id, name, email, phone, roles, credits, \
+            "SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits, \
             (CASE WHEN pwd IS NULL THEN false ELSE true END) AS pwd_defined \
             FROM person \
             ORDER BY name")
@@ -457,23 +472,55 @@ pub struct UserUpdate {
     name: String,
     email: String,
     phone: Option<String>,
+    emergency_name: Option<String>,
+    emergency_phone: Option<String>,
+    medical_info: Option<String>,
     roles: Vec<String>,
     credits: i32
 }
 
 #[put("/users/<user_id>", data="<update>")]
 pub async fn update_user(state: &State<AppState>, claims: Claims, user_id: i64, update: Json<UserUpdate>) -> Result<Accepted<String>, Custom<String>> {
-    if !claims.uid == user_id {
-        let _ = claims.assert_roles_contains("admin")?;
+    if !claims.has_role("admin") && !claims.uid == user_id {
+        return Err(Custom(Status::Forbidden, "cannot edit user record for other users".to_string()));
     }
 
     let roles_str = &update.roles.join(",");
-    let _: UserLoginRecord = query_as("UPDATE person SET name = $1, email = $2, phone = $3, roles = $4, credits = $5 WHERE id = $6 RETURNING id, name, email, phone, pwd, roles, credits")
+    let _: UserLoginRecord = query_as("UPDATE person SET name = $1, email = $2, phone = $3, emergency_name = $4, emergency_phone = $5, medical_info = $6, roles = $7, credits = $8 WHERE id = $9 RETURNING id, name, email, phone, pwd, roles, credits")
         .bind(&update.name)
         .bind(&update.email)
         .bind(&update.phone)
+        .bind(&update.emergency_name)
+        .bind(&update.emergency_phone)
+        .bind(&update.medical_info)
         .bind(roles_str)
         .bind(&update.credits)
+        .bind(user_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+
+    Ok(Accepted(String::from("user updated")))
+}
+
+#[derive(Deserialize)]
+pub struct UserPatch {
+    phone: Option<String>,
+    emergency_name: Option<String>,
+    emergency_phone: Option<String>,
+    medical_info: Option<String>
+}
+#[patch("/users/<user_id>", data="<patch>")]
+pub async fn patch_user(state: &State<AppState>, claims: Claims, user_id: i64, patch: Json<UserPatch>) -> Result<Accepted<String>, Custom<String>> {
+    if !claims.uid == user_id {
+        claims.assert_roles_contains("admin")?;
+    }
+
+    let _: BigintRecord = query_as("UPDATE person SET phone = $1, emergency_name = $2, emergency_phone = $3, medical_info = $4 WHERE id = $5 RETURNING id")
+        .bind(&patch.phone)
+        .bind(&patch.emergency_name)
+        .bind(&patch.emergency_phone)
+        .bind(&patch.medical_info)
         .bind(user_id)
         .fetch_one(&state.pool)
         .await
