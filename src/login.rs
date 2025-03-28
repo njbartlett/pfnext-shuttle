@@ -8,11 +8,11 @@ use mail_send::{Credentials, SmtpClientBuilder};
 use password_auth::{generate_hash, verify_password};
 use passwords::PasswordGenerator;
 use rocket::http::{Header, Status};
-use rocket::response::status::{Accepted, Custom, NoContent};
+use rocket::response::status::{Accepted, Custom, NoContent, NotFound};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::serde::json::Json;
 use rocket::State;
-use sqlx::{Error, FromRow, PgPool, query_as, raw_sql, Row};
+use sqlx::{Error, FromRow, PgPool, query_as, raw_sql, Row, QueryBuilder, Postgres};
 use sqlx::postgres::PgRow;
 use urlencoding::encode;
 
@@ -353,7 +353,7 @@ pub async fn reset_pwd(
     Ok(Accepted(format!("Updated password for user with email {}", &user_record.email)))
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq)]
 pub struct UserListingEntry {
     id: i64,
     name: String,
@@ -384,33 +384,53 @@ impl FromRow<'_, PgRow> for UserListingEntry {
     }
 }
 
+async fn query_users(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<UserListingEntry>, Custom<String>> {
+    let mut qb: QueryBuilder<Postgres> = Default::default();
+    qb.push("SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits, \
+            (CASE WHEN pwd IS NULL THEN false ELSE true END) AS pwd_defined \
+            FROM person");
+
+    if let Some(user_id) = user_id {
+        qb.push(" WHERE id = ");
+        qb.push_bind(user_id);
+    }
+    qb.push(" ORDER BY name");
+
+    qb.build_query_as()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            error!("Failed to fetch user listing: {}", e);
+            Custom(Status::InternalServerError, e.to_string())
+        })
+}
+
 #[get("/users/<user_id>")]
-pub async fn get_user(state: &State<AppState>, claim: Claims, user_id: i64) -> Result<Json<Option<UserListingEntry>>, Custom<String>> {
+pub async fn get_user(state: &State<AppState>, claim: Claims, user_id: i64) -> Result<Json<UserListingEntry>, Custom<String>> {
+    _get_user(&state.pool, &claim, user_id).await
+}
+async fn _get_user(pool: &PgPool, claim: &Claims, user_id: i64) -> Result<Json<UserListingEntry>, Custom<String>> {
     if !claim.has_role("admin") && !claim.uid == user_id {
         return Err(Custom(Status::Forbidden, "cannot view user record for other users".to_string()));
     }
-    let user: Option<UserListingEntry> = query_as("SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits FROM person WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    Ok(Json(user))
+    let res = query_users(pool, Some(user_id))
+        .await?
+        .into_iter().next()
+        .ok_or(Custom(Status::NotFound, format!("no user found for id {}", user_id)))?;
+    Ok(Json(res))
 }
 
 #[get("/users/list?<role>")]
 pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<String>) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
+    _list_users(&state.pool, &claim, &role).await
+}
+
+async fn _list_users(pool: &PgPool, claim: &Claims, role: &Option<String>) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
     if !claim.has_role("admin") && !claim.has_role("trainer") {
         return Err(Custom(Status::Forbidden, "admin only".to_string()));
     }
 
-    let mut users: Vec<UserListingEntry> = query_as(
-            "SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits, \
-            (CASE WHEN pwd IS NULL THEN false ELSE true END) AS pwd_defined \
-            FROM person \
-            ORDER BY name")
-        .fetch_all(&state.pool)
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    let mut users = query_users(pool, None).await?;
     if let Some(filter_role) = role {
         users = users.into_iter()
             .filter(|u| u.roles.contains(&filter_role))
@@ -623,18 +643,21 @@ async fn send_email<'x>(
 }
 
 mod tests {
+    use chrono::Duration;
     use rocket::http::Status;
     use rocket::response::status::Custom;
     use sqlx::{Executor, FromRow, PgPool, query_as};
+    use crate::claims::Claims;
+    use crate::login::{_get_user, _list_users};
 
     const DEFAULT_PASSWORD: &str = "password";
-    const DEFAULT_PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$X6SS0kJdO6uW3snBe7t1hA$gcYt1rDiSi+f1Rh0tQK+xzgF6ou7zzEbY/2XW33z3YE";
+    const DEFAULT_PASSWORD_HASH: Option<&str> = Some("$argon2id$v=19$m=19456,t=2,p=1$X6SS0kJdO6uW3snBe7t1hA$gcYt1rDiSi+f1Rh0tQK+xzgF6ou7zzEbY/2XW33z3YE");
 
     #[derive(FromRow)]
     struct BigintRecord {
         id: i64
     }
-    async fn create_person(pool: &PgPool, email: &str, pwd: &str, roles: &str, credits: i32) -> i64 {
+    async fn create_person(pool: &PgPool, email: &str, pwd: Option<&str>, roles: &str, credits: i32) -> i64 {
         let member_id: BigintRecord = query_as("insert into person (name, email, pwd, roles, credits) values ('Test User', $1, $2, $3, $4) returning id")
             .bind(email)
             .bind(pwd)
@@ -670,6 +693,33 @@ mod tests {
         let person_id = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
         let verify_result = crate::login::verify_user_by_id(&pool, person_id, "wrong").await;
         assert_eq!(Custom(Status::Unauthorized, "incorrect username or password".to_string()), verify_result.err().unwrap());
+    }
+
+    #[sqlx::test]
+    async fn get_users(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let pid1 = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
+        let pid2 = create_person(&pool, "bob@example.com", Option::None, "member", 0).await;
+
+        let claim = Claims::create(0, "", "admin@example.org", &None, &vec!["admin".to_string()], Duration::minutes(1));
+        assert_eq!("joe@example.com", _get_user(&pool, &claim, pid1).await.unwrap().email);
+        assert_eq!("bob@example.com", _get_user(&pool, &claim, pid2).await.unwrap().email);
+        assert_eq!(Err(Custom(Status::NotFound, "no user found for id -1".to_string())), _get_user(&pool, &claim, -1).await);
+    }
+
+    #[sqlx::test]
+    async fn list_users_with_pwd_defined_as_admin(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
+        create_person(&pool, "bob@example.com", None, "member", 0).await;
+
+        let claim = Claims::create(0, "", "admin@example.org", &None, &vec!["admin".to_string()], Duration::minutes(1));
+        let result = _list_users(&pool, &claim, &None).await.unwrap();
+
+        println!("{:?}", result);
+        assert_eq!(2, result.len());
+        assert_eq!(true, result.get(0).unwrap().pwd_defined);
+        assert_eq!(false, result.get(1).unwrap().pwd_defined);
     }
 
 }
