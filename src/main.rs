@@ -3,10 +3,8 @@
 extern crate rocket;
 
 use std::env;
-use std::error::Error;
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, FixedOffset};
-use chrono_tz::Tz;
 
 use rocket::Request;
 use rocket::fs::NamedFile;
@@ -19,58 +17,15 @@ use serde::Deserialize;
 use shuttle_runtime::CustomError;
 use sqlx::{Executor, FromRow, PgPool, query_as};
 use crate::claims::AuthenticationError;
+use crate::config::{AppEnv, Config};
 
 mod claims;
+mod config;
 mod sessions;
 mod login;
 mod bookings;
 mod backup;
 mod log;
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Config {
-    branding: String,
-    email_sender_name: String,
-    email_sender_address: String,
-    email_replyto_name: String,
-    email_replyto_address: String,
-    email_admin_notifications: String,
-    timezone_name: String,
-    cors_allowed: String
-}
-impl ::std::default::Default for Config {
-    fn default() -> Self {
-        Self {
-            branding: String::from("Another Level"),
-            email_sender_name: String::from("Another Level Community Fitness"),
-            email_sender_address: String::from("admin@anotherlevelfitness.uk"),
-            email_replyto_name: String::from("Another Level Community Fitness"),
-            email_replyto_address: String::from("admin@anotherlevelfitness.uk"),
-            email_admin_notifications: String::from("notifications@anotherlevelfitness.uk"),
-            timezone_name: String::from("Europe/London"),
-            cors_allowed: String::from("^https?://(\\w*\\.)?anotherlevelfitness.uk")
-            //cors_allowed: String::from("^http://localhost:")
-        }
-    }
-}
-
-struct AppState {
-    pool: PgPool,
-    secrets: shuttle_runtime::SecretStore,
-    config: Config,
-    timezone: Tz
-}
-
-#[rocket::get("/<path..>")]
-pub async fn static_files(path: PathBuf) -> Option<NamedFile> {
-    //path.set_extension("html");
-    let mut path = Path::new(relative!("assets")).join(path);
-    if path.is_dir() {
-        path.push("index.html");
-    }
-
-    NamedFile::open(path).await.ok()
-}
 
 #[catch(403)]
 pub fn forbidden(request: &Request) -> Custom<String> {
@@ -95,9 +50,18 @@ async fn rocket(
     // Init config
     let config: Config = Config::default();
     info!("Initialized config: {:?}", config);
+    let app_env: AppEnv = AppEnv {
+        database_url: secrets.get("DATABASE_URL").unwrap(),
+        access_token_key: secrets.get("ACCESS_TOKEN_KEY").unwrap(),
+        refresh_token_key: secrets.get("REFRESH_TOKEN_KEY").unwrap(),
+        smtp_username: secrets.get("SMTP_USERNAME").unwrap(),
+        smtp_password: secrets.get("SMTP_PASSWORD").unwrap(),
+        cors_allowed: secrets.get("CORS_ALLOWED").unwrap(),
+        static_path: secrets.get("STATIC_PATH").unwrap()
+    };
 
     // Configure CORS
-    let allow_domain = [&config.cors_allowed];
+    let allow_domain = [&app_env.cors_allowed];
     let allowed_origins = AllowedOrigins::some_regex(&allow_domain);
     let cors = rocket_cors::CorsOptions {
         allowed_origins,
@@ -108,21 +72,20 @@ async fn rocket(
     }.to_cors().map_err(CustomError::new)?;
 
     // Configure Rocket
-    let timezone = config.timezone_name.as_str().parse().unwrap();
-    let state = AppState { pool, secrets, config, timezone };
     let rocket = rocket::build()
         .attach(cors)
+        .manage(config)
+        .manage(app_env)
+        .manage(pool)
         .register("/", catchers![forbidden])
         .mount("/", routes![
-            static_files,
             login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::get_user, login::list_users, login::delete_user, login::update_user, login::patch_user,
             sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session,
             sessions::list_locations, sessions::list_session_types, sessions::update_session,
             bookings::list_bookings, bookings::create_booking, bookings::delete_booking, bookings::update_booking, bookings::get_attendance_stats,
             log::read_log,
             backup::backup_all
-        ])
-        .manage(state);
+        ]);
 
     Ok(rocket.into())
 }

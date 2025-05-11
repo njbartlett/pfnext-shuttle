@@ -1,3 +1,4 @@
+use std::env;
 use std::ops::Add;
 
 use chrono::{DateTime, Duration, Utc};
@@ -8,7 +9,7 @@ use mail_send::{Credentials, SmtpClientBuilder};
 use password_auth::{generate_hash, verify_password};
 use passwords::PasswordGenerator;
 use rocket::http::{Header, Status};
-use rocket::response::status::{Accepted, Custom, NoContent, NotFound};
+use rocket::response::status::{Accepted, Custom, NoContent};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::serde::json::Json;
 use rocket::State;
@@ -16,8 +17,9 @@ use sqlx::{Error, FromRow, PgPool, query_as, raw_sql, Row, QueryBuilder, Postgre
 use sqlx::postgres::PgRow;
 use urlencoding::encode;
 
-use crate::{AppState, BigintRecord, CountResult, UserLoginRecord};
+use crate::{BigintRecord, CountResult, UserLoginRecord};
 use crate::claims::Claims;
+use crate::config::{Config, AppEnv};
 
 const ACCESS_TOKEN_TTL: Duration = Duration::hours(6);
 const ACCESS_TOKEN_TTL_ADMIN: Duration = Duration::hours(3);
@@ -85,9 +87,13 @@ fn verify_user(login_record: UserLoginRecord, password: &str) -> Result<UserLogi
 }
 
 #[post("/login", data = "<login>")]
-pub async fn login(state: &State<AppState>, login: Json<LoginRequest>) -> Result<LoginResponse, Custom<String>> {
-    let login_record = verify_user_by_email(&state.pool, &login.email, &login.password).await?;
-    build_login_response(login_record, &state.secrets)
+pub async fn login(
+    pool: &State<PgPool>,
+    app_env: &State<AppEnv>,
+    login: Json<LoginRequest>
+) -> Result<LoginResponse, Custom<String>> {
+    let login_record = verify_user_by_email(&pool.inner(), &login.email, &login.password).await?;
+    build_login_response(login_record, app_env)
 }
 
 #[get("/validate_login")]
@@ -104,22 +110,26 @@ pub struct UpdatePasswordRequest {
 }
 
 #[post("/change_password", data = "<password_update>")]
-pub async fn change_password(state: &State<AppState>, password_update: Json<UpdatePasswordRequest>) -> Result<LoginResponse, Custom<String>> {
-    let login_record = verify_user_by_email(&state.pool, &password_update.username, &password_update.current_password).await?;
+pub async fn change_password(
+    state: &State<PgPool>,
+    app_env: &State<AppEnv>,
+    password_update: Json<UpdatePasswordRequest>
+) -> Result<LoginResponse, Custom<String>> {
+    let login_record = verify_user_by_email(state.inner(), &password_update.username, &password_update.current_password).await?;
 
     verify_suitable_password(&password_update.new_password, &password_update.current_password)?;
 
     // Update to new password and set must_change_pwd to false
     let pwd_hash = generate_hash(&password_update.new_password);
-    query_as("UPDATE person SET pwd = $1, must_change_pwd = FALSE WHERE email = $2 RETURNING id")
+    let _: BigintRecord = query_as("UPDATE person SET pwd = $1, must_change_pwd = FALSE WHERE email = $2 RETURNING id")
         .bind(pwd_hash)
         .bind(&password_update.username)
-        .fetch_optional(&state.pool)
+        .fetch_optional(state.inner())
         .await
         .map_err(|_| Custom(Status::Unauthorized, "Failed to update password".to_string()))?
         .ok_or(Custom(Status::NotFound, "No user updated".to_string()))?;
 
-    build_login_response(login_record, &state.secrets)
+    build_login_response(login_record, app_env)
 }
 
 #[derive(Deserialize, Debug)]
@@ -148,10 +158,11 @@ pub struct PasswordResetRequest {
 
 #[post("/request_pwd_reset", data="<reset_request>")]
 pub async fn request_pwd_reset(
-    state: &State<AppState>,
+    state: &State<PgPool>,
+    config: &State<Config>,
     reset_request: Json<PasswordResetRequest>
 ) -> Result<Accepted<String>, Custom<String>> {
-    let user_record = UserLoginRecord::load_by_email(&state.pool, &reset_request.email)
+    let user_record = UserLoginRecord::load_by_email(state.inner(), &reset_request.email)
         .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::BadRequest, format!("user does not exist: {}", reset_request.email)))?;
 
@@ -160,7 +171,7 @@ pub async fn request_pwd_reset(
     let latest_previous_sent_count: CountResult = query_as("SELECT count(*) FROM temp_password WHERE person_id = $1 AND sent > $2")
         .bind(&user_record.id)
         .bind(latest_previous_sent_time)
-        .fetch_one(&state.pool)
+        .fetch_one(state.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     if latest_previous_sent_count.count > 0 {
@@ -168,30 +179,31 @@ pub async fn request_pwd_reset(
     }
 
     // Create temp password and send
-    let temp_password = create_temp_password(&state.pool, user_record.id).await?;
+    let temp_password = create_temp_password(state.inner(), user_record.id).await?;
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &reset_request.reset_url, encode(&user_record.email), encode(&temp_password));
     let text = format!(include_str!("reset_email.txt"), &reset_request.website_url, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
-    let sender = Address::new_address(Some(&state.config.email_sender_name), &state.config.email_sender_address);
+    let sender = Address::new_address(Some(&config.inner().email_sender_name), &config.inner().email_sender_address);
     let message = MessageBuilder::new()
         .from(sender.clone())
         .reply_to(sender)
         .to(Address::new_address(Some(&user_record.name), &user_record.email))
-        .subject(format!("Password Reset for {}", &state.config.branding))
+        .subject(format!("Password Reset for {}", &config.inner().branding))
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    send_email(message, &state.secrets).await?;
+    send_email(message, config).await?;
 
     Ok(Accepted(format!("Password reset email sent to {}. Please check your spam folder if not received!", &user_record.email)))
 }
 
 #[post("/register_user", data="<new_user>")]
 pub async fn register_user(
-    state: &State<AppState>,
+    state: &State<PgPool>,
+    config: &State<Config>,
     new_user: Json<NewUserRequest>
 ) -> Result<Accepted<String>, Custom<String>> {
     // Error if already existing record for the specified email
-    let existing_user_record = UserLoginRecord::load_by_email(&state.pool, &new_user.email)
+    let existing_user_record = UserLoginRecord::load_by_email(state.inner(), &new_user.email)
         .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     if let Some(_existing) = existing_user_record {
         return Err(Custom(Status::Conflict, "User already exists with this email address".to_string()));
@@ -205,32 +217,32 @@ pub async fn register_user(
         .bind(&new_user.emergency_name)
         .bind(&new_user.emergency_phone)
         .bind(&new_user.medical_info)
-        .fetch_one(&state.pool)
+        .fetch_one(state.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     info!("Created new user id {} for {:?}", user_updated.id, &new_user);
 
     // Create temp password and send to email
-    let temp_password = create_temp_password(&state.pool, user_updated.id).await?;
+    let temp_password = create_temp_password(state.inner(), user_updated.id).await?;
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &new_user.reset_url, encode(&new_user.email), encode(&temp_password));
     let text = format!(include_str!("register_email.txt"), &new_user.website_url, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
-    let sender = Address::new_address(Some(&state.config.email_sender_name), &state.config.email_sender_address);
+    let sender = Address::new_address(Some(&config.email_sender_name), &config.email_sender_address);
     let message = MessageBuilder::new()
         .from(sender.clone())
         .reply_to(sender.clone())
         .to(Address::new_address(Some(&new_user.name), &new_user.email))
-        .subject(format!("New User Registration for {}", &state.config.branding))
+        .subject(format!("New User Registration for {}", &config.branding))
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    send_email(message, &state.secrets).await?;
+    send_email(message, config).await?;
 
     // Send notification email to admin
     let notification_message = MessageBuilder::new()
         .from(sender.clone())
         .reply_to(sender.clone())
-        .to(state.config.email_admin_notifications.as_str())
-        .subject(format!("New User Registration for {}", &state.config.branding))
+        .to(config.email_admin_notifications.as_str())
+        .subject(format!("New User Registration for {}", &config.branding))
         .text_body(format!(include_str!("register_notify_email.txt"),
             &new_user.name,
             &new_user.email,
@@ -241,7 +253,7 @@ pub async fn register_user(
         ))
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    send_email(notification_message, &state.secrets).await?;
+    send_email(notification_message, config).await?;
 
     Ok(Accepted(format!("New user instructions email sent to {}. Please check your spam folder if not received!", &new_user.email)))
 }
@@ -292,29 +304,32 @@ pub struct UserPasswordReset {
 
 #[derive(FromRow)]
 struct TempPasswordRecord {
-    person_id: i64,
     pwd: String,
     expiry: DateTime<Utc>
 }
 
 #[post("/reset_pwd", data="<user_pwd_reset>")]
 pub async fn reset_pwd(
-    state: &State<AppState>,
+    state: &State<PgPool>,
+    config: &State<Config>,
     user_pwd_reset: Json<UserPasswordReset>
 ) -> Result<Accepted<String>, Custom<String>> {
     verify_suitable_password(&user_pwd_reset.new_password, &user_pwd_reset.temp_password)?;
 
     // Get the user => error if not found
-    let user_record = UserLoginRecord::load_by_email(&state.pool, &user_pwd_reset.email)
+    let user_record = UserLoginRecord::load_by_email(state.inner(), &user_pwd_reset.email)
         .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::BadRequest, format!("User does not exist with email address {}", &user_pwd_reset.email)))?;
 
     // Get the temporary password record and verify against user input
     let temp_pwd_record: TempPasswordRecord = query_as("SELECT person_id, pwd, expiry FROM temp_password WHERE person_id = $1")
         .bind(&user_record.id)
-        .fetch_one(&state.pool)
+        .fetch_one(state.inner())
         .await
         .map_err(|_e| Custom(Status::Forbidden, "Password reset has not been requested, or it has expired.".to_string()))?;
+    if temp_pwd_record.expiry.lt(&Utc::now()) {
+        return Err(Custom(Status::Forbidden, "Password reset has expired.".to_string()))
+    }
     verify_password(&user_pwd_reset.temp_password, &temp_pwd_record.pwd)
         .map_err(|_e| Custom(Status::Forbidden, INVALID_LOGIN_MESSAGE.to_string()))?;
 
@@ -322,7 +337,7 @@ pub async fn reset_pwd(
     let updated_user: UserUpdated = query_as("UPDATE person SET pwd = $1 WHERE id = $2 RETURNING id")
         .bind(generate_hash(&user_pwd_reset.new_password))
         .bind(user_record.id)
-        .fetch_one(&state.pool)
+        .fetch_one(state.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     info!("Updated password for user id {}", updated_user.id);
@@ -330,23 +345,23 @@ pub async fn reset_pwd(
     // Clean up the temporary password record
     let _ = query_as("DELETE FROM temp_password WHERE person_id = $1 RETURNING person_id AS id")
         .bind(&user_record.id)
-        .fetch_one(&state.pool)
+        .fetch_one(state.inner())
         .await
         .map(|user_updated: UserUpdated| info!("Deleted temporary password for user {}", user_updated.id))
         .inspect_err(|e| error!("Failed to delete temporary password for user {}: {}", &user_record.email, e));
 
     // Send acknowledgement email
     let text = format!(include_str!("post_reset_email.txt"), &user_record.name, &user_record.email, &user_pwd_reset.website_url);
-    let sender = Address::new_address(Some(&state.config.email_sender_name), &state.config.email_sender_address);
+    let sender = Address::new_address(Some(&config.email_sender_name), &config.email_sender_address);
     let message = MessageBuilder::new()
         .from(sender.clone())
         .reply_to(sender)
         .to(Address::new_address(Some(&user_record.name), &user_record.email))
-        .subject(format!("Password Changed for {}", &state.config.branding))
+        .subject(format!("Password Changed for {}", &config.branding))
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    let _ = send_email(message, &state.secrets)
+    let _ = send_email(message, config)
         .await
         .inspect_err(|e| error!("Failed to send password change email to {}: {:?}", &user_record.email, e));
 
@@ -406,8 +421,8 @@ async fn query_users(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<UserList
 }
 
 #[get("/users/<user_id>")]
-pub async fn get_user(state: &State<AppState>, claim: Claims, user_id: i64) -> Result<Json<UserListingEntry>, Custom<String>> {
-    _get_user(&state.pool, &claim, user_id).await
+pub async fn get_user(state: &State<PgPool>, claim: Claims, user_id: i64) -> Result<Json<UserListingEntry>, Custom<String>> {
+    _get_user(state.inner(), &claim, user_id).await
 }
 async fn _get_user(pool: &PgPool, claim: &Claims, user_id: i64) -> Result<Json<UserListingEntry>, Custom<String>> {
     if !claim.has_role("admin") && !claim.uid == user_id {
@@ -421,8 +436,12 @@ async fn _get_user(pool: &PgPool, claim: &Claims, user_id: i64) -> Result<Json<U
 }
 
 #[get("/users/list?<role>")]
-pub async fn list_users(state: &State<AppState>, claim: Claims, role: Option<String>) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
-    _list_users(&state.pool, &claim, &role).await
+pub async fn list_users(
+    state: &State<PgPool>,
+    claim: Claims,
+    role: Option<String>
+) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
+    _list_users(state.inner(), &claim, &role).await
 }
 
 async fn _list_users(pool: &PgPool, claim: &Claims, role: &Option<String>) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
@@ -441,15 +460,21 @@ async fn _list_users(pool: &PgPool, claim: &Claims, role: &Option<String>) -> Re
 }
 
 #[derive(Deserialize)]
-pub struct UserDelete {
+pub struct UserDeletionRequest {
     password: Option<String>,
     website_url: String
 }
 
 #[delete("/users/<user_id>", data="<deletion>")]
-pub async fn delete_user(state: &State<AppState>, claims: Claims, user_id: i64, deletion: Json<UserDelete>) -> Result<NoContent, Custom<String>> {
+pub async fn delete_user(
+    state: &State<PgPool>,
+    config: &State<Config>,
+    claims: Claims,
+    user_id: i64,
+    deletion: Json<UserDeletionRequest>
+) -> Result<NoContent, Custom<String>> {
     // Load the user record
-    let mut login_record = UserLoginRecord::load_by_id(&state.pool, user_id)
+    let mut login_record = UserLoginRecord::load_by_id(state.inner(), user_id)
         .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::NotFound, format!("user id not found: {}", user_id)))?;
 
@@ -463,24 +488,24 @@ pub async fn delete_user(state: &State<AppState>, claims: Claims, user_id: i64, 
     }
 
     // Actually delete the data. Related records in bookings are removed by DELETE CASCADE
-    let _ = query_as("DELETE FROM person WHERE id = $1 RETURNING id")
+    let _: BigintRecord = query_as("DELETE FROM person WHERE id = $1 RETURNING id")
         .bind(user_id)
-        .fetch_one(&state.pool)
+        .fetch_one(state.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 
     // Send an email to the user confirming their account has been deleted
     let text = format!(include_str!("post_delete_profile_email.txt"), &login_record.email, &deletion.website_url);
-    let sender = Address::new_address(Some(&state.config.email_sender_name), &state.config.email_sender_address);
+    let sender = Address::new_address(Some(&config.email_sender_name), &config.email_sender_address);
     let message = MessageBuilder::new()
         .from(sender.clone())
         .reply_to(sender)
         .to(Address::new_address(Some(&login_record.name), &login_record.email))
-        .subject(format!("User Profile Deleted for {}", &state.config.branding))
+        .subject(format!("User Profile Deleted for {}", &config.branding))
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    let _ = send_email(message, &state.secrets)
+    let _ = send_email(message, config)
         .await
         .inspect_err(|e| error!("Failed to send deletion email to {}: {:?}", &login_record.email, e));
 
@@ -500,7 +525,7 @@ pub struct UserUpdate {
 }
 
 #[put("/users/<user_id>", data="<update>")]
-pub async fn update_user(state: &State<AppState>, claims: Claims, user_id: i64, update: Json<UserUpdate>) -> Result<Accepted<String>, Custom<String>> {
+pub async fn update_user(state: &State<PgPool>, claims: Claims, user_id: i64, update: Json<UserUpdate>) -> Result<Accepted<String>, Custom<String>> {
     if !claims.has_role("admin") && !claims.uid == user_id {
         return Err(Custom(Status::Forbidden, "cannot edit user record for other users".to_string()));
     }
@@ -516,7 +541,7 @@ pub async fn update_user(state: &State<AppState>, claims: Claims, user_id: i64, 
         .bind(roles_str)
         .bind(&update.credits)
         .bind(user_id)
-        .fetch_one(&state.pool)
+        .fetch_one(state.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 
@@ -531,7 +556,7 @@ pub struct UserPatch {
     medical_info: Option<String>
 }
 #[patch("/users/<user_id>", data="<patch>")]
-pub async fn patch_user(state: &State<AppState>, claims: Claims, user_id: i64, patch: Json<UserPatch>) -> Result<Accepted<String>, Custom<String>> {
+pub async fn patch_user(state: &State<PgPool>, claims: Claims, user_id: i64, patch: Json<UserPatch>) -> Result<Accepted<String>, Custom<String>> {
     if !claims.uid == user_id {
         claims.assert_roles_contains("admin")?;
     }
@@ -542,7 +567,7 @@ pub async fn patch_user(state: &State<AppState>, claims: Claims, user_id: i64, p
         .bind(&patch.emergency_phone)
         .bind(&patch.medical_info)
         .bind(user_id)
-        .fetch_one(&state.pool)
+        .fetch_one(state.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 
@@ -575,7 +600,7 @@ fn parse_roles(roles_str: &str) -> Vec<String> {
 
 fn build_login_response(
     login_record: UserLoginRecord,
-    secrets: &shuttle_runtime::SecretStore
+    app_env: &AppEnv
 ) -> Result<LoginResponse, Custom<String>> {
     // Create access and refresh tokens
     let roles = parse_roles(&login_record.roles);
@@ -583,13 +608,8 @@ fn build_login_response(
         true => ACCESS_TOKEN_TTL_ADMIN,
         false => ACCESS_TOKEN_TTL
     };
-    let access_token_key = secrets.get("ACCESS_TOKEN_KEY")
-        .ok_or(Custom(Status::InternalServerError, String::from("missing secret ACCESS_TOKEN_KEY")))?;
-
-    let access_token = Claims::create(login_record.id, &login_record.name, &login_record.email, &login_record.phone, &roles, access_token_ttl).into_token(&access_token_key)?;
-    let refresh_token_key = secrets.get("REFRESH_TOKEN_KEY")
-        .ok_or(Custom(Status::InternalServerError, String::from("missing secret REFRESH_TOKEN_KEY")))?;
-    let refresh_token: String = Claims::create(login_record.id, &login_record.name, &login_record.email, &login_record.phone, &roles, REFRESH_TOKEN_EXPIRATION).into_token(&refresh_token_key)?;
+    let access_token = Claims::create(login_record.id, &login_record.name, &login_record.email, &login_record.phone, &roles, access_token_ttl).into_token(&app_env.access_token_key)?;
+    let refresh_token: String = Claims::create(login_record.id, &login_record.name, &login_record.email, &login_record.phone, &roles, REFRESH_TOKEN_EXPIRATION).into_token(&app_env.refresh_token_key)?;
 
     // Build login response body
     let body = LoggedInUser {
@@ -611,25 +631,26 @@ fn build_login_response(
 
 async fn send_email<'x>(
     message: Message<'x>,
-    secrets: &shuttle_runtime::SecretStore
+    config: &Config
 ) -> Result<(), Custom<String>> {
     // Make sure we have credentials to login
-    let smtp_username = secrets.get("SMTP_USERNAME")
-        .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
-    let smtp_password = secrets.get("SMTP_PASSWORD")
-        .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
-    let smtp_host = secrets.get("SMTP_HOST")
-        .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
-    let smtp_port: u16 = secrets.get("SMTP_HOST_PORT")
-        .ok_or(Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?
-        .parse::<u16>()
-        .map_err(|e| Custom(Status::InternalServerError, format!("Failed to read SMTP port: {}", e.to_string())))?;
+    let smtp_username = env::var("SMTP_USERNAME")
+        .map_err(|e| Custom(Status::InternalServerError, format!("SMTP credentials not found: {}", e)))?;
+    let smtp_password = env::var("SMTP_PASSWORD")
+        .map_err(|e| Custom(Status::InternalServerError, format!("SMTP credentials not found: {}", e)))?;
+
+    // let smtp_host = env::var("SMTP_HOST")
+    //     .map_err(|e| Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
+    // let smtp_port: u16 = env::var("SMTP_HOST_PORT")
+    //     .map_err(|e| Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?
+    //     .parse::<u16>()
+    //     .map_err(|e| Custom(Status::InternalServerError, format!("Failed to read SMTP port: {}", e.to_string())))?;
 
     // Open the client
-    info!("Connecting to SMTP server at {}:{}...", smtp_host, smtp_port);
-    let mut client = SmtpClientBuilder::new(smtp_host, smtp_port)
+    info!("Connecting to SMTP server at {}:{}...", &config.smtp_host, &config.smtp_port);
+    let mut client = SmtpClientBuilder::new(&config.smtp_host, config.smtp_port)
         .implicit_tls(true)
-        .credentials(Credentials::new(smtp_username, smtp_password))
+        .credentials(Credentials::new(&smtp_username, &smtp_password))
         .connect()
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
@@ -646,7 +667,7 @@ mod tests {
     use chrono::Duration;
     use rocket::http::Status;
     use rocket::response::status::Custom;
-    use sqlx::{Executor, FromRow, PgPool, query_as};
+    use sqlx::{FromRow, PgPool, query_as, Executor};
     use crate::claims::Claims;
     use crate::login::{_get_user, _list_users};
 

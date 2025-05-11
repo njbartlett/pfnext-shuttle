@@ -3,9 +3,10 @@ use std::fmt::{Display, Formatter};
 use std::ops::Add;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{errors::ErrorKind, DecodingKey, EncodingKey, Header, Validation, Algorithm};
-use rocket::{http::Status, request::{FromRequest, Outcome}, response::status::Custom};
+use rocket::{http::Status, request::{FromRequest, Outcome}, response::status::Custom, Request};
 use serde::{Deserialize, Serialize};
-use crate::AppState;
+
+use crate::config::AppEnv;
 
 const BEARER: &str = "Bearer ";
 const AUTHORIZATION: &str = "Authorization";
@@ -28,7 +29,7 @@ impl Display for AuthenticationError {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct Claims {
     pub(crate) uid: i64,
     pub(crate) name: String,
@@ -41,9 +42,10 @@ pub(crate) struct Claims {
 // Rocket specific request guard implementation
 #[rocket::async_trait]
 impl<'r> FromRequest<'r> for Claims {
+
     type Error = AuthenticationError;
 
-    async fn from_request(request: &'r rocket::Request<'_>) -> Outcome<Self, Self::Error> {
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         let auth_header = request.headers().get_one(AUTHORIZATION);
         match auth_header {
             None => {
@@ -53,7 +55,7 @@ impl<'r> FromRequest<'r> for Claims {
             Some(value) => {
                 // Get the secret encoding/decoding key from the Rocket state
                 let secret: Option<String> = request.rocket().state()
-                    .and_then(|s: &AppState| s.secrets.get("ACCESS_TOKEN_KEY"));
+                    .map(|s: &AppEnv| s.access_token_key.clone());
                 if secret.is_none() {
                     return Outcome::Error((Status::InternalServerError, AuthenticationError::Decoding("Missing app state".to_string())));
                 }
@@ -67,7 +69,7 @@ impl<'r> FromRequest<'r> for Claims {
                         Outcome::Success(claims)
                     },
                 }
-            },
+            }
         }
     }
 }

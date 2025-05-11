@@ -9,7 +9,7 @@ use serde::Serialize;
 use sqlx::{Error, FromRow, PgPool, Postgres, query_as, QueryBuilder, Row};
 use sqlx::postgres::PgRow;
 
-use crate::{AppState, BigintRecord, parse_opt_date, SessionLocation, SessionTrainer, SessionType};
+use crate::{BigintRecord, parse_opt_date, SessionLocation, SessionTrainer, SessionType};
 use crate::claims::Claims;
 
 #[derive(Serialize, Clone, Debug)]
@@ -105,10 +105,11 @@ impl NewSession {
 }
 
 #[get("/sessions?<from>&<to>&<trainer_id>&<attended>")]
-pub async fn list_sessions(state: &State<AppState>, claim: Option<Claims>, from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
-    _list_sessions(&state.pool, claim, from, to, trainer_id, attended).await
-}
-async fn _list_sessions(pool: &PgPool, claim: Option<Claims>, from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
+pub async fn list_sessions(
+    pool: &State<PgPool>,
+    claim: Option<Claims>,
+    from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool
+) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
     let is_admin = claim.as_ref().map_or(false, |c| c.has_role("admin"));
     let uid: Option<i64> = claim.as_ref().map(|c| c.uid);
@@ -120,27 +121,27 @@ async fn _list_sessions(pool: &PgPool, claim: Option<Claims>, from: Option<Strin
     qb.push(" ORDER BY s.datetime ASC");
 
     let sessions = qb.build_query_as()
-        .fetch_all(pool)
+        .fetch_all(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     Ok(Json(sessions))
 }
 
 #[get("/sessions/<session_id>?<attended>")]
-pub async fn get_session(state: &State<AppState>, claim: Claims, session_id: i64, attended: bool) -> Result<Json<SessionFullRecord>, Custom<String>> {
-    if attended && !claim.has_role("admin") {
+pub async fn get_session(
+    pool: &State<PgPool>, claims: Claims,
+    session_id: i64, attended: bool
+) -> Result<Json<SessionFullRecord>, Custom<String>> {
+    if attended && !claims.has_role("admin") {
         return Err(Custom(Status::Forbidden, "attendance data only available to admins".to_string()));
     }
-    _get_session(&state.pool, &claim, session_id, attended).await
-}
-pub async fn _get_session(pool: &PgPool, claim: &Claims, session_id: i64, attended: bool) -> Result<Json<SessionFullRecord>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
-    build_session_query(Some(claim.uid), None, None, None, attended, &mut qb)?;
+    build_session_query(Some(claims.uid), None, None, None, attended, &mut qb)?;
     qb.push(" WHERE s.id = ");
     qb.push_bind(session_id);
 
     qb.build_query_as()
-        .fetch_optional(pool)
+        .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or_else(|| Custom(Status::NotFound, format!("session with id {} not found", session_id)))
@@ -202,7 +203,7 @@ fn build_session_query(
 
 #[post("/sessions", data="<new_session>")]
 pub async fn create_session(
-    state:  &State<AppState>,
+    pool:  &State<PgPool>,
     claims: Claims,
     new_session: Json<NewSession>
 ) -> Result<Created<Json<BigintRecord>>, Custom<String>> {
@@ -218,7 +219,7 @@ pub async fn create_session(
         }
     }
 
-    new_session.validate(&state.pool)
+    new_session.validate(pool)
         .await
         .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 
@@ -231,7 +232,7 @@ pub async fn create_session(
         .bind(&new_session.max_bookings)
         .bind(&new_session.notes)
         .bind(&new_session.cost)
-        .fetch_optional(&state.pool)
+        .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or_else(|| Custom(Status::Conflict, "no new record created".to_string()))?;
@@ -240,7 +241,7 @@ pub async fn create_session(
 }
 
 #[delete("/sessions/<session_id>")]
-pub async fn delete_session(state: &State<AppState>, claims: Claims, session_id: i64) -> Result<NoContent, Custom<String>> {
+pub async fn delete_session(pool: &State<PgPool>, claims: Claims, session_id: i64) -> Result<NoContent, Custom<String>> {
     let mut qb = QueryBuilder::new("DELETE FROM session WHERE id = ");
     qb.push_bind(session_id);
 
@@ -254,7 +255,7 @@ pub async fn delete_session(state: &State<AppState>, claims: Claims, session_id:
     }
     qb.push(" RETURNING id");
     let id_record: BigintRecord= qb.build_query_as()
-        .fetch_optional(&state.pool)
+        .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not deletable by current user", session_id)))?;
@@ -265,7 +266,7 @@ pub async fn delete_session(state: &State<AppState>, claims: Claims, session_id:
 
 #[put("/sessions/<session_id>", data="<new_session>")]
 pub async fn update_session(
-    state: &State<AppState>,
+    pool: &State<PgPool>,
     claims: Claims,
     session_id: i64,
     new_session: Json<NewSession>
@@ -307,12 +308,12 @@ pub async fn update_session(
     }
     qb.push(" RETURNING id");
 
-    new_session.validate(&state.pool)
+    new_session.validate(pool)
         .await
         .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 
     let id_record: BigintRecord = qb.build_query_as()
-        .fetch_optional(&state.pool)
+        .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not updatable by current user", session_id)))?;
@@ -321,16 +322,16 @@ pub async fn update_session(
 }
 
 #[get("/locations")]
-pub async fn list_locations(state: &State<AppState>) -> Result<Json<Vec<SessionLocation>>, Custom<String>> {
+pub async fn list_locations(pool: &State<PgPool>) -> Result<Json<Vec<SessionLocation>>, Custom<String>> {
     query_as("SELECT id, name, address, url FROM location")
-        .fetch_all(&state.pool)
+        .fetch_all(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
         .map(|v| Json(v))
 }
 
 #[get("/session_types?<deprecated>")]
-pub async fn list_session_types(state: &State<AppState>, deprecated: Option<bool>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
+pub async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT id, name, requires_trainer, cost, deprecated FROM session_type");
     if let Some(deprecated) = deprecated {
         qb.push(" WHERE deprecated = ");
@@ -339,7 +340,7 @@ pub async fn list_session_types(state: &State<AppState>, deprecated: Option<bool
     qb.push(" ORDER BY requires_trainer DESC, name");
 
     qb.build_query_as()
-        .fetch_all(&state.pool)
+        .fetch_all(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
         .map(|v| Json(v))
@@ -347,8 +348,9 @@ pub async fn list_session_types(state: &State<AppState>, deprecated: Option<bool
 
 #[cfg(test)]
 mod tests {
+    use rocket::State;
     use sqlx::{query_as, Executor, FromRow, PgPool};
-    use crate::sessions::_list_sessions;
+    use crate::sessions::list_sessions;
 
     #[derive(FromRow)]
     struct BigintRecord {
@@ -358,10 +360,10 @@ mod tests {
     #[sqlx::test]
     async fn browse_sessions_not_logged_in(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
-        let session_id: BigintRecord = query_as("insert into session (datetime, duration_mins, session_type) values ('2025-01-01 00:00:00+0', 60, 1) returning id")
+        let _session_id: BigintRecord = query_as("insert into session (datetime, duration_mins, session_type) values ('2025-01-01 00:00:00+0', 60, 1) returning id")
             .fetch_one(&pool)
             .await.unwrap();
-        let sessions = _list_sessions(&pool, None, None, None, None, false).await.unwrap();
+        let sessions = list_sessions(State::from(&pool), None, None, None, None, false).await.unwrap();
         assert_eq!(1, sessions.len());
     }
 

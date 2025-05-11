@@ -5,7 +5,6 @@ use rocket::serde::json::Json;
 use rocket::State;
 use serde::Serialize;
 use sqlx::{FromRow, PgPool, query_as};
-use crate::AppState;
 use crate::claims::Claims;
 
 #[derive(FromRow, Serialize, Debug)]
@@ -67,10 +66,7 @@ pub struct AllTables {
 }
 
 #[get("/backup")]
-pub async fn backup_all(state: &State<AppState>, claim: Claims) -> Result<Json<AllTables>, Custom<String>> {
-    _backup_all(&state.pool, &claim).await
-}
-async fn _backup_all(pool: &PgPool, claim: &Claims) -> Result<Json<AllTables>, Custom<String>> {
+pub async fn backup_all(pool: &State<PgPool>, claim: Claims) -> Result<Json<AllTables>, Custom<String>> {
     claim.assert_roles_contains("admin")?;
     Ok(Json(AllTables{
         session_type: session_type_table(pool).await?,
@@ -130,6 +126,7 @@ async fn booking_table(pool: &PgPool) -> Result<Vec<BookingRow>, Custom<String>>
 mod tests {
     use chrono::Duration;
     use rocket::serde::json::serde_json;
+    use rocket::State;
     use sqlx::{Executor, FromRow, PgPool, query_as};
     use crate::claims::Claims;
 
@@ -160,14 +157,14 @@ mod tests {
             .bind(location_id.id)
             .fetch_one(&pool)
             .await.unwrap();
-        let booking_session_id: BigintRecord = query_as("INSERT INTO booking (person_id, session_id, credits_used) VALUES ($1, $2, 1) RETURNING session_id AS id")
+        let _booking_session_id: BigintRecord = query_as("INSERT INTO booking (person_id, session_id, credits_used) VALUES ($1, $2, 1) RETURNING session_id AS id")
             .bind(person_id.id)
             .bind(session_id.id)
             .fetch_one(&pool)
             .await.unwrap();
 
         let claim = Claims::create(0, "", "admin@example.com", &Some("011111".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
-        let backup_result = crate::backup::_backup_all(&pool, &claim).await.unwrap().into_inner();
+        let backup_result = crate::backup::backup_all(State::from(&pool), claim).await.unwrap().into_inner();
 
         assert_eq!("{\"session_type\":[{\"id\":1,\"name\":\"HIIT\",\"requires_trainer\":true,\"cost\":1,\"deprecated\":false},{\"id\":2,\"name\":\"Strong\",\"requires_trainer\":true,\"cost\":1,\"deprecated\":false},{\"id\":3,\"name\":\"On The Move\",\"requires_trainer\":true,\"cost\":1,\"deprecated\":false}],\"location\":[{\"id\":1,\"name\":\"Oak Hill Park\",\"address\":\"Oak Hill Park, Parkside Gardens, London EN4 8JP\",\"url\":null},{\"id\":2,\"name\":\"Trent Park\",\"address\":\"Trent Park, London EN4 0PS\",\"url\":null}],\"person\":[{\"id\":1,\"name\":\"Mr Test\",\"email\":\"test@example.com\",\"phone\":\"0111\",\"pwd\":\"\",\"roles\":\"member\",\"credits\":0}],\"session\":[{\"id\":1,\"datetime\":\"2024-01-01T08:00:00Z\",\"duration_mins\":60,\"session_type_name\":\"HIIT\",\"location_name\":\"Oak Hill Park\",\"trainer_email\":null,\"max_booking_count\":null,\"notes\":null,\"cost\":1}],\"booking\":[{\"person_email\":\"test@example.com\",\"session_datetime\":\"2024-01-01T08:00:00Z\",\"session_location_name\":\"Oak Hill Park\",\"session_trainer_email\":null}]}", serde_json::to_string(&backup_result).unwrap());
     }
