@@ -2,6 +2,7 @@
 #[macro_use]
 extern crate rocket;
 
+use std::collections::HashSet;
 use chrono::{DateTime, FixedOffset};
 
 use rocket::Request;
@@ -21,6 +22,9 @@ mod login;
 mod bookings;
 mod backup;
 mod log;
+mod activities;
+mod whereclause;
+mod mock_chrono;
 
 #[catch(403)]
 pub fn forbidden(request: &Request) -> Custom<String> {
@@ -65,6 +69,7 @@ async fn rocket(
         allowed_origins,
         allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete, Method::Put, Method::Patch].into_iter().map(From::from).collect(),
         allowed_headers: AllowedHeaders::All,
+        expose_headers: HashSet::from(["Location".to_string()]),
         allow_credentials: true,
         ..Default::default()
     }.to_cors().map_err(CustomError::new)?;
@@ -81,6 +86,7 @@ async fn rocket(
             sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session,
             sessions::list_locations, sessions::list_session_types, sessions::update_session,
             bookings::list_bookings, bookings::create_booking, bookings::delete_booking, bookings::update_booking, bookings::get_attendance_stats,
+            activities::list_activity_types, activities::list_challenges, activities::get_challenge, activities::get_activity, activities::list_activities, activities::create_activity, activities::delete_activity,
             log::read_log,
             backup::backup_all
         ]);
@@ -114,7 +120,7 @@ impl UserLoginRecord {
     }
 }
 
-#[derive(FromRow, Serialize)]
+#[derive(FromRow, Serialize, Debug)]
 struct BigintRecord {
     id: i64
 }
@@ -164,7 +170,5 @@ fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, 
         return Ok(None);
     }
     let parsed = DateTime::parse_from_rfc3339(str.as_ref().unwrap());
-    println!("Parsed input {:?} to {:?}", &str, parsed);
-    //.map_err(|e| BadRequest(e.to_string()))?;
     Ok(Some(parsed.map_err(|e| Custom(Status::UnprocessableEntity, e.to_string()))?))
 }

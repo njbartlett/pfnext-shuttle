@@ -423,14 +423,15 @@ async fn query_users(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<UserList
 }
 
 #[get("/users/<user_id>")]
-pub async fn get_user(state: &State<PgPool>, claim: Claims, user_id: i64) -> Result<Json<UserListingEntry>, Custom<String>> {
-    _get_user(state.inner(), &claim, user_id).await
-}
-async fn _get_user(pool: &PgPool, claim: &Claims, user_id: i64) -> Result<Json<UserListingEntry>, Custom<String>> {
+pub async fn get_user(
+    pool: &State<PgPool>,
+    claim: Claims,
+    user_id: i64
+) -> Result<Json<UserListingEntry>, Custom<String>> {
     if !claim.has_role("admin") && !claim.uid == user_id {
         return Err(Custom(Status::Forbidden, "cannot view user record for other users".to_string()));
     }
-    let res = query_users(pool, Some(user_id))
+    let res = query_users(pool.inner(), Some(user_id))
         .await?
         .into_iter().next()
         .ok_or(Custom(Status::NotFound, format!("no user found for id {}", user_id)))?;
@@ -439,19 +440,18 @@ async fn _get_user(pool: &PgPool, claim: &Claims, user_id: i64) -> Result<Json<U
 
 #[get("/users/list?<role>")]
 pub async fn list_users(
-    state: &State<PgPool>,
+    pool: &State<PgPool>,
     claim: Claims,
     role: Option<String>
 ) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
-    _list_users(state.inner(), &claim, &role).await
-}
+    // If the user is not admin or trainer, list only returns the user
+    let query_person_id = if claim.has_role("admin") || claim.has_role("trainer") {
+        None
+    } else {
+        Some(claim.uid)
+    };
 
-async fn _list_users(pool: &PgPool, claim: &Claims, role: &Option<String>) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
-    if !claim.has_role("admin") && !claim.has_role("trainer") {
-        return Err(Custom(Status::Forbidden, "admin only".to_string()));
-    }
-
-    let mut users = query_users(pool, None).await?;
+    let mut users = query_users(pool.inner(), query_person_id).await?;
     if let Some(filter_role) = role {
         users = users.into_iter()
             .filter(|u| u.roles.contains(&filter_role))
@@ -700,9 +700,10 @@ mod tests {
     use chrono::Duration;
     use rocket::http::Status;
     use rocket::response::status::Custom;
+    use rocket::State;
     use sqlx::{FromRow, PgPool, query_as, Executor};
     use crate::claims::Claims;
-    use crate::login::{_get_user, _list_users};
+    use crate::login::{get_user, list_users};
 
     const DEFAULT_PASSWORD: &str = "password";
     const DEFAULT_PASSWORD_HASH: Option<&str> = Some("$argon2id$v=19$m=19456,t=2,p=1$X6SS0kJdO6uW3snBe7t1hA$gcYt1rDiSi+f1Rh0tQK+xzgF6ou7zzEbY/2XW33z3YE");
@@ -756,9 +757,34 @@ mod tests {
         let pid2 = create_person(&pool, "bob@example.com", Option::None, "member", 0).await;
 
         let claim = Claims::create(0, "", "admin@example.org", &None, &vec!["admin".to_string()], Duration::minutes(1));
-        assert_eq!("joe@example.com", _get_user(&pool, &claim, pid1).await.unwrap().email);
-        assert_eq!("bob@example.com", _get_user(&pool, &claim, pid2).await.unwrap().email);
-        assert_eq!(Err(Custom(Status::NotFound, "no user found for id -1".to_string())), _get_user(&pool, &claim, -1).await);
+        assert_eq!("joe@example.com", get_user(State::from(&pool), claim.clone(), pid1).await.unwrap().email);
+        assert_eq!("bob@example.com", get_user(State::from(&pool), claim.clone(), pid2).await.unwrap().email);
+        assert_eq!(Err(Custom(Status::NotFound, "no user found for id -1".to_string())), get_user(State::from(&pool), claim.clone(), -1).await);
+    }
+
+    #[sqlx::test]
+    async fn list_users_admin(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        create_person(&pool, "joe@example.com", None, "member", 0).await;
+        create_person(&pool, "bob@example.com", None, "member", 0).await;
+
+        let claim = Claims::create(0, "", "admin@example.org", &None, &vec!["admin".to_string()], Duration::minutes(1));
+        let result = list_users(State::from(&pool), claim, None).await.unwrap();
+
+        assert_eq!(2, result.len());
+    }
+
+    #[sqlx::test]
+    async fn list_users_nonadmin(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let user1 = create_person(&pool, "joe@example.com", None, "member", 0).await;
+        let user2 = create_person(&pool, "bob@example.com", None, "member", 0).await;
+
+        let claim = Claims::create(user1, "", "joe@example.com", &None, &vec!["member".to_string()], Duration::minutes(1));
+        let result = list_users(State::from(&pool), claim, None).await.unwrap();
+
+        assert_eq!(1, result.len());
+        assert_eq!("joe@example.com", result[0].email);
     }
 
     #[sqlx::test]
@@ -768,12 +794,10 @@ mod tests {
         create_person(&pool, "bob@example.com", None, "member", 0).await;
 
         let claim = Claims::create(0, "", "admin@example.org", &None, &vec!["admin".to_string()], Duration::minutes(1));
-        let result = _list_users(&pool, &claim, &None).await.unwrap();
+        let result = list_users(State::from(&pool), claim, None).await.unwrap();
 
-        println!("{:?}", result);
         assert_eq!(2, result.len());
         assert_eq!(true, result.get(0).unwrap().pwd_defined);
         assert_eq!(false, result.get(1).unwrap().pwd_defined);
     }
-
 }

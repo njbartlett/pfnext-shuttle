@@ -343,7 +343,7 @@ pub async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) 
         .fetch_all(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-        .map(|v| Json(v))
+        .map(Json::from)
 }
 
 #[cfg(test)]

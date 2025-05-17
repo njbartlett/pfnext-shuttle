@@ -82,3 +82,39 @@ CREATE TABLE IF NOT EXISTS eventlog (
     type text NOT NULL,
     detail text NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS activity_type (
+    id serial PRIMARY KEY,
+    name text NOT NULL UNIQUE,
+    units text NOT NULL,
+    step_size real NOT NULL
+);
+
+INSERT INTO activity_type
+    (name, units, step_size)
+VALUES
+    ('Hiking', 'km', 0.01),
+    ('Running', 'km', 0.01),
+    ('Cycling', 'km', 0.01),
+    ('Swimming', 'm', 1),
+    ('Burpees', 'reps', 1),
+    ('Steps', 'steps', 1)
+ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS challenge (
+    id bigserial PRIMARY KEY,
+    name text NOT NULL UNIQUE,
+    start date NOT NULL,
+    finish date NOT NULL,
+    activity_type int NOT NULL REFERENCES activity_type,
+    goal real NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS activity (
+    id bigserial PRIMARY KEY,
+    person_id bigint NOT NULL REFERENCES person ON DELETE CASCADE,
+    challenge_id bigint NOT NULL REFERENCES challenge,
+    date date NOT NULL,
+    amount real NOT NULL
+);
+

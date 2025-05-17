@@ -28,7 +28,7 @@ pub(crate) struct Config {
     pub(crate) email_replyto_name: String,
     pub(crate) email_replyto_address: String,
     pub(crate) email_admin_notifications: String,
-    timezone_name: String
+    pub(crate) timezone_name: String
 }
 
 impl Default for Config {
