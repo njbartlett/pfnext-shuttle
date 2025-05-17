@@ -512,7 +512,7 @@ pub async fn delete_user(
     Ok(NoContent)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct UserUpdate {
     name: String,
     email: String,
@@ -548,26 +548,68 @@ pub async fn update_user(state: &State<PgPool>, claims: Claims, user_id: i64, up
     Ok(Accepted(String::from("user updated")))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct UserPatch {
+    name: Option<String>,
     phone: Option<String>,
     emergency_name: Option<String>,
     emergency_phone: Option<String>,
     medical_info: Option<String>
 }
 #[patch("/users/<user_id>", data="<patch>")]
-pub async fn patch_user(state: &State<PgPool>, claims: Claims, user_id: i64, patch: Json<UserPatch>) -> Result<Accepted<String>, Custom<String>> {
+pub async fn patch_user(
+    pool: &State<PgPool>,
+    claims: Claims,
+    user_id: i64,
+    patch: Json<UserPatch>
+) -> Result<Accepted<String>, Custom<String>> {
     if !claims.uid == user_id {
         claims.assert_roles_contains("admin")?;
     }
 
-    let _: BigintRecord = query_as("UPDATE person SET phone = $1, emergency_name = $2, emergency_phone = $3, medical_info = $4 WHERE id = $5 RETURNING id")
-        .bind(&patch.phone)
-        .bind(&patch.emergency_name)
-        .bind(&patch.emergency_phone)
-        .bind(&patch.medical_info)
-        .bind(user_id)
-        .fetch_one(state.inner())
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("UPDATE person");
+    let mut operator = " SET ";
+    if let Some(name) = &patch.name {
+        qb.push(operator);
+        qb.push("name = ");
+        qb.push_bind(name);
+        operator = ", ";
+    }
+    if let Some(phone) = &patch.phone {
+        qb.push(operator);
+        qb.push("phone = ");
+        qb.push_bind(phone);
+        operator = ", ";
+    }
+    if let Some(emergency_name) = &patch.emergency_name {
+        qb.push(operator);
+        qb.push("emergency_name = ");
+        qb.push_bind(emergency_name);
+        operator = ", ";
+    }
+    if let Some(emergency_phone) = &patch.emergency_phone {
+        qb.push(operator);
+        qb.push("emergency_phone = ");
+        qb.push_bind(emergency_phone);
+        operator = ", ";
+    }
+    if let Some(medical_info) = &patch.medical_info {
+        qb.push(operator);
+        qb.push("medical_info = ");
+        qb.push_bind(medical_info);
+        operator = ", ";
+    }
+    qb.push(" WHERE id = ");
+    qb.push_bind(user_id);
+    qb.push(" RETURNING id");
+
+    if " SET ".eq(operator) {
+        // No fields were set, don't execute the SQL
+        return Ok(Accepted(String::from("no changes to user data")));
+    }
+
+    let _: BigintRecord = qb.build_query_as()
+        .fetch_one(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 
