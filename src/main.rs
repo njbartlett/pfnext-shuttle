@@ -2,18 +2,13 @@
 #[macro_use]
 extern crate rocket;
 
-use std::env;
-use std::path::{Path, PathBuf};
 use chrono::{DateTime, FixedOffset};
 
 use rocket::Request;
-use rocket::fs::NamedFile;
-use rocket::fs::relative;
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
 use rocket::serde::Serialize;
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
-use serde::Deserialize;
 use shuttle_runtime::CustomError;
 use sqlx::{Executor, FromRow, PgPool, query_as};
 use crate::claims::AuthenticationError;
@@ -54,6 +49,8 @@ async fn rocket(
         database_url: secrets.get("DATABASE_URL").unwrap(),
         access_token_key: secrets.get("ACCESS_TOKEN_KEY").unwrap(),
         refresh_token_key: secrets.get("REFRESH_TOKEN_KEY").unwrap(),
+        smtp_host: secrets.get("SMTP_HOST").unwrap(),
+        smtp_port: secrets.get("SMTP_PORT").unwrap().parse().unwrap(),
         smtp_username: secrets.get("SMTP_USERNAME").unwrap(),
         smtp_password: secrets.get("SMTP_PASSWORD").unwrap(),
         cors_allowed: secrets.get("CORS_ALLOWED").unwrap(),

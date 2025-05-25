@@ -1,4 +1,3 @@
-use std::env;
 use std::ops::Add;
 
 use chrono::{DateTime, Duration, Utc};
@@ -160,6 +159,7 @@ pub struct PasswordResetRequest {
 pub async fn request_pwd_reset(
     state: &State<PgPool>,
     config: &State<Config>,
+    app_env: &State<AppEnv>,
     reset_request: Json<PasswordResetRequest>
 ) -> Result<Accepted<String>, Custom<String>> {
     let user_record = UserLoginRecord::load_by_email(state.inner(), &reset_request.email)
@@ -191,7 +191,7 @@ pub async fn request_pwd_reset(
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    send_email(message, config).await?;
+    send_email(message, config, app_env).await?;
 
     Ok(Accepted(format!("Password reset email sent to {}. Please check your spam folder if not received!", &user_record.email)))
 }
@@ -200,6 +200,7 @@ pub async fn request_pwd_reset(
 pub async fn register_user(
     state: &State<PgPool>,
     config: &State<Config>,
+    app_env: &State<AppEnv>,
     new_user: Json<NewUserRequest>
 ) -> Result<Accepted<String>, Custom<String>> {
     // Error if already existing record for the specified email
@@ -235,7 +236,7 @@ pub async fn register_user(
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    send_email(message, config).await?;
+    send_email(message, config, app_env).await?;
 
     // Send notification email to admin
     let notification_message = MessageBuilder::new()
@@ -253,7 +254,7 @@ pub async fn register_user(
         ))
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    send_email(notification_message, config).await?;
+    send_email(notification_message, config, app_env).await?;
 
     Ok(Accepted(format!("New user instructions email sent to {}. Please check your spam folder if not received!", &new_user.email)))
 }
@@ -312,6 +313,7 @@ struct TempPasswordRecord {
 pub async fn reset_pwd(
     state: &State<PgPool>,
     config: &State<Config>,
+    app_env: &State<AppEnv>,
     user_pwd_reset: Json<UserPasswordReset>
 ) -> Result<Accepted<String>, Custom<String>> {
     verify_suitable_password(&user_pwd_reset.new_password, &user_pwd_reset.temp_password)?;
@@ -361,7 +363,7 @@ pub async fn reset_pwd(
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    let _ = send_email(message, config)
+    let _ = send_email(message, config, app_env)
         .await
         .inspect_err(|e| error!("Failed to send password change email to {}: {:?}", &user_record.email, e));
 
@@ -469,6 +471,7 @@ pub struct UserDeletionRequest {
 pub async fn delete_user(
     state: &State<PgPool>,
     config: &State<Config>,
+    app_env: &State<AppEnv>,
     claims: Claims,
     user_id: i64,
     deletion: Json<UserDeletionRequest>
@@ -505,7 +508,7 @@ pub async fn delete_user(
         .text_body(text)
         .into_message()
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    let _ = send_email(message, config)
+    let _ = send_email(message, config, app_env)
         .await
         .inspect_err(|e| error!("Failed to send deletion email to {}: {:?}", &login_record.email, e));
 
@@ -673,26 +676,14 @@ fn build_login_response(
 
 async fn send_email<'x>(
     message: Message<'x>,
-    config: &Config
+    config: &Config,
+    app_env: &AppEnv
 ) -> Result<(), Custom<String>> {
-    // Make sure we have credentials to login
-    let smtp_username = env::var("SMTP_USERNAME")
-        .map_err(|e| Custom(Status::InternalServerError, format!("SMTP credentials not found: {}", e)))?;
-    let smtp_password = env::var("SMTP_PASSWORD")
-        .map_err(|e| Custom(Status::InternalServerError, format!("SMTP credentials not found: {}", e)))?;
-
-    // let smtp_host = env::var("SMTP_HOST")
-    //     .map_err(|e| Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?;
-    // let smtp_port: u16 = env::var("SMTP_HOST_PORT")
-    //     .map_err(|e| Custom(Status::InternalServerError, "SMTP credentials not found".to_string()))?
-    //     .parse::<u16>()
-    //     .map_err(|e| Custom(Status::InternalServerError, format!("Failed to read SMTP port: {}", e.to_string())))?;
-
     // Open the client
-    info!("Connecting to SMTP server at {}:{}...", &config.smtp_host, &config.smtp_port);
-    let mut client = SmtpClientBuilder::new(&config.smtp_host, config.smtp_port)
+    info!("Connecting to SMTP server at {}:{}...", &app_env.smtp_host, &app_env.smtp_port);
+    let mut client = SmtpClientBuilder::new(&app_env.smtp_host, app_env.smtp_port)
         .implicit_tls(true)
-        .credentials(Credentials::new(&smtp_username, &smtp_password))
+        .credentials(Credentials::new(&app_env.smtp_username, &app_env.smtp_password))
         .connect()
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;

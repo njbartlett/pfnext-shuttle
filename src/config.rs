@@ -1,5 +1,6 @@
 use std::env;
 use std::fmt::{Display, Formatter};
+use std::num::ParseIntError;
 
 use chrono_tz::Tz;
 
@@ -22,8 +23,6 @@ impl Display for ConfigError {
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct Config {
     pub(crate) branding: String,
-    pub(crate) smtp_host: String,
-    pub(crate) smtp_port: u16,
     pub(crate) email_sender_name: String,
     pub(crate) email_sender_address: String,
     pub(crate) email_replyto_name: String,
@@ -36,8 +35,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             branding: String::from("Another Level"),
-            smtp_host: String::from("localhost"),
-            smtp_port: 465,
             email_sender_name: String::from("Another Level Community Fitness"),
             email_sender_address: String::from("admin@anotherlevelfitness.uk"),
             email_replyto_name: String::from("Another Level Community Fitness"),
@@ -72,6 +69,8 @@ pub(crate) struct AppEnv {
     pub(crate) database_url: String,
     pub(crate) access_token_key: String,
     pub(crate) refresh_token_key: String,
+    pub(crate) smtp_host: String,
+    pub(crate) smtp_port: u16,
     pub(crate) smtp_username: String,
     pub(crate) smtp_password: String,
     pub(crate) cors_allowed: String,
@@ -93,6 +92,8 @@ impl AppEnv {
             database_url: field_from_env("DATABASE_URL")?,
             access_token_key: field_from_env("ACCESS_TOKEN_KEY")?,
             refresh_token_key: field_from_env("REFRESH_TOKEN_KEY")?,
+            smtp_host: field_from_env("SMTP_HOST")?,
+            smtp_port: field_from_env("SMTP_PORT")?.parse().map_err(|e: ParseIntError| e.to_string())?,
             smtp_username: field_from_env("SMTP_USERNAME")?,
             smtp_password: field_from_env("SMTP_PASSWORD")?,
             cors_allowed: field_from_env("CORS_ALLOWED")?,
