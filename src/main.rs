@@ -58,6 +58,7 @@ async fn rocket(
     };
 
     // Configure CORS
+    info!("Initializing CORS with allowed origin regex: {}", &app_env.cors_allowed);
     let allow_domain = [&app_env.cors_allowed];
     let allowed_origins = AllowedOrigins::some_regex(&allow_domain);
     let cors = rocket_cors::CorsOptions {
