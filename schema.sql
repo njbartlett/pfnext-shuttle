@@ -107,7 +107,8 @@ CREATE TABLE IF NOT EXISTS challenge (
     start date NOT NULL,
     finish date NOT NULL,
     activity_type int NOT NULL REFERENCES activity_type,
-    goal real NOT NULL
+    goal real NOT NULL,
+    individual_goal real NULL
 );
 
 CREATE TABLE IF NOT EXISTS activity (

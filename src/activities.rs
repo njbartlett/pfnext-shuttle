@@ -46,6 +46,7 @@ struct ChallengeRecord {
     finish: NaiveDate,
     activity_type: ActivityType,
     goal: f32,
+    individual_goal: Option<f32>,
     total_all: f32,
     total_for_person: f32
 }
@@ -56,7 +57,7 @@ impl ChallengeRecord {
         person_id: Option<i64>,
     ) -> QueryBuilder<'a, Postgres> {
         let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT \
-                c.id, c.name, c.start, c.finish, c.goal, \
+                c.id, c.name, c.start, c.finish, c.goal, c.individual_goal, \
                 a.id AS activity_type_id, a.name AS activity_type_name, a.units AS activity_type_units, a.step_size AS activity_type_step_size, \
                 (SELECT COALESCE(SUM(amount), 0) FROM activity WHERE challenge_id = c.id) AS activity_total_all"
         );
@@ -99,6 +100,7 @@ impl FromRow<'_, PgRow> for ChallengeRecord {
             start: row.try_get("start")?,
             finish: row.try_get("finish")?,
             goal: row.try_get("goal")?,
+            individual_goal: row.try_get("individual_goal")?,
             total_all: row.try_get("activity_total_all")?,
             total_for_person: row.try_get("activity_total_for_person").unwrap_or(0.0),
             activity_type: ActivityType {
@@ -146,6 +148,7 @@ pub struct ChallengeFull {
     finish: NaiveDate,
     activity_type: ActivityType,
     goal: f32,
+    individual_goal: Option<f32>,
     total_all: f32,
     total_for_person: f32,
     member_summaries: Vec<MemberActivitySummary>
@@ -160,6 +163,7 @@ impl ChallengeFull {
             finish: record.finish.clone(),
             activity_type: record.activity_type.clone(),
             goal: record.goal,
+            individual_goal: record.individual_goal,
             total_all: record.total_all,
             total_for_person: record.total_for_person,
             member_summaries: vec![]
