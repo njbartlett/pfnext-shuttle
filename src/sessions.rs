@@ -9,8 +9,8 @@ use serde::Serialize;
 use sqlx::{Error, FromRow, PgPool, Postgres, query_as, QueryBuilder, Row};
 use sqlx::postgres::PgRow;
 
+use crate::loginsession::LoginSession;
 use crate::{BigintRecord, parse_opt_date, SessionLocation, SessionTrainer, SessionType};
-use crate::claims::Claims;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct SessionFullRecord {
@@ -107,12 +107,12 @@ impl NewSession {
 #[get("/sessions?<from>&<to>&<trainer_id>&<attended>")]
 pub async fn list_sessions(
     pool: &State<PgPool>,
-    claim: Option<Claims>,
+    login: Option<LoginSession>,
     from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool
 ) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
-    let is_admin = claim.as_ref().map_or(false, |c| c.has_role("admin"));
-    let uid: Option<i64> = claim.as_ref().map(|c| c.uid);
+    let is_admin = login.as_ref().map_or(false, |c| c.has_role("admin"));
+    let uid: Option<i64> = login.as_ref().map(|c| c.uid);
 
     if attended && !is_admin {
         return Err(Custom(Status::Forbidden, "attendance data only available to admins".to_string()));
@@ -129,14 +129,14 @@ pub async fn list_sessions(
 
 #[get("/sessions/<session_id>?<attended>")]
 pub async fn get_session(
-    pool: &State<PgPool>, claims: Claims,
+    pool: &State<PgPool>, login: LoginSession,
     session_id: i64, attended: bool
 ) -> Result<Json<SessionFullRecord>, Custom<String>> {
-    if attended && !claims.has_role("admin") {
+    if attended && !login.has_role("admin") {
         return Err(Custom(Status::Forbidden, "attendance data only available to admins".to_string()));
     }
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
-    build_session_query(Some(claims.uid), None, None, None, attended, &mut qb)?;
+    build_session_query(Some(login.uid), None, None, None, attended, &mut qb)?;
     qb.push(" WHERE s.id = ");
     qb.push_bind(session_id);
 
@@ -204,14 +204,14 @@ fn build_session_query(
 #[post("/sessions", data="<new_session>")]
 pub async fn create_session(
     pool:  &State<PgPool>,
-    claims: Claims,
+    login: LoginSession,
     new_session: Json<NewSession>
 ) -> Result<Created<Json<BigintRecord>>, Custom<String>> {
     // Admins can create any session. Trainers can only create sessions with themselves as the trainer.
     // Nobody else can create sessions.
-    if !claims.has_role("admin") {
-        if claims.has_role("trainer") {
-            if !Some(claims.uid).eq(&new_session.trainer_id) {
+    if !login.has_role("admin") {
+        if login.has_role("trainer") {
+            if !Some(login.uid).eq(&new_session.trainer_id) {
                 return Err(Custom(Status::Forbidden, "trainers can only create sessions for themselves".to_string()));
             }
         } else {
@@ -241,14 +241,14 @@ pub async fn create_session(
 }
 
 #[delete("/sessions/<session_id>")]
-pub async fn delete_session(pool: &State<PgPool>, claims: Claims, session_id: i64) -> Result<NoContent, Custom<String>> {
+pub async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_id: i64) -> Result<NoContent, Custom<String>> {
     let mut qb = QueryBuilder::new("DELETE FROM session WHERE id = ");
     qb.push_bind(session_id);
 
-    if !claims.roles.contains(&"admin".to_string()) {
-        if claims.roles.contains(&"trainer".to_string()) {
+    if !login.roles.contains(&"admin".to_string()) {
+        if login.roles.contains(&"trainer".to_string()) {
             qb.push(" AND trainer = ");
-            qb.push_bind(claims.uid);
+            qb.push_bind(login.uid);
         } else {
             return Err(Custom(Status::Forbidden, "only admins and trainers can delete sessions".to_string()));
         }
@@ -267,7 +267,7 @@ pub async fn delete_session(pool: &State<PgPool>, claims: Claims, session_id: i6
 #[put("/sessions/<session_id>", data="<new_session>")]
 pub async fn update_session(
     pool: &State<PgPool>,
-    claims: Claims,
+    login: LoginSession,
     session_id: i64,
     new_session: Json<NewSession>
 ) -> Result<NoContent, Custom<String>> {
@@ -298,10 +298,10 @@ pub async fn update_session(
     qb.push(" WHERE id = ");
     qb.push_bind(session_id);
 
-    if !claims.has_role("admin") {
-        if claims.has_role("trainer") {
+    if !login.has_role("admin") {
+        if login.has_role("trainer") {
             qb.push(" AND trainer = ");
-            qb.push_bind(claims.uid);
+            qb.push_bind(login.uid);
         } else {
             return Err(Custom(Status::NotFound, "only admins and trainers can update sessions".to_string()));
         }

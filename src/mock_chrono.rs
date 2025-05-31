@@ -19,3 +19,7 @@ impl Utc {
 pub fn set_timestamp(timestamp: i64) {
     TIMESTAMP.with(|ts| ts.set(timestamp));
 }
+
+pub fn set_timestamp_rfc3339(date_str: &str) {
+    set_timestamp(DateTime::parse_from_rfc3339(date_str).expect("invalid date-time").timestamp());
+}

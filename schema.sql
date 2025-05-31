@@ -20,6 +20,12 @@ CREATE TABLE IF NOT EXISTS temp_password (
     sent timestamp with time zone NOT NULL,
     expiry timestamp with time zone NOT NULL
 );
+CREATE TABLE IF NOT EXISTS loginsession (
+    id text PRIMARY KEY,
+    uid bigint NOT NULL REFERENCES person ON DELETE CASCADE,
+    expiry timestamptz NOT NULL,
+    ipinfo text
+);
 
 -- location table and data
 CREATE TABLE IF NOT EXISTS location (

@@ -1,4 +1,5 @@
 use std::ops::Add;
+use std::time;
 
 use chrono::{DateTime, Duration, Utc};
 use mail_send::mail_builder::headers::address::Address;
@@ -16,8 +17,8 @@ use sqlx::{Error, FromRow, PgPool, query_as, raw_sql, Row, QueryBuilder, Postgre
 use sqlx::postgres::PgRow;
 use urlencoding::encode;
 
+use crate::loginsession::LoginSession;
 use crate::{BigintRecord, CountResult, UserLoginRecord};
-use crate::claims::Claims;
 use crate::config::{Config, AppEnv};
 
 const ACCESS_TOKEN_TTL: Duration = Duration::hours(6);
@@ -56,7 +57,6 @@ pub struct LoggedInUser {
     id: i64,
     name: String,
     email: String,
-    phone: Option<String>,
     roles: Vec<String>,
     access_token: String
 }
@@ -85,50 +85,11 @@ fn verify_user(login_record: UserLoginRecord, password: &str) -> Result<UserLogi
     Ok(login_record)
 }
 
-#[post("/login", data = "<login>")]
-pub async fn login(
-    pool: &State<PgPool>,
-    app_env: &State<AppEnv>,
-    login: Json<LoginRequest>
-) -> Result<LoginResponse, Custom<String>> {
-    let login_record = verify_user_by_email(&pool.inner(), &login.email, &login.password).await?;
-    build_login_response(login_record, app_env)
-}
-
-#[get("/validate_login")]
-pub async fn validate_login(claims: Claims) -> Result<NoContent, Custom<String>> {
-    info!("Validated user login for user id {}, email {}", claims.uid, claims.email);
-    Ok(NoContent)
-}
-
 #[derive(Deserialize)]
 pub struct UpdatePasswordRequest {
     username: String,
     current_password: String,
     new_password: String
-}
-
-#[post("/change_password", data = "<password_update>")]
-pub async fn change_password(
-    state: &State<PgPool>,
-    app_env: &State<AppEnv>,
-    password_update: Json<UpdatePasswordRequest>
-) -> Result<LoginResponse, Custom<String>> {
-    let login_record = verify_user_by_email(state.inner(), &password_update.username, &password_update.current_password).await?;
-
-    verify_suitable_password(&password_update.new_password, &password_update.current_password)?;
-
-    // Update to new password and set must_change_pwd to false
-    let pwd_hash = generate_hash(&password_update.new_password);
-    let _: BigintRecord = query_as("UPDATE person SET pwd = $1, must_change_pwd = FALSE WHERE email = $2 RETURNING id")
-        .bind(pwd_hash)
-        .bind(&password_update.username)
-        .fetch_optional(state.inner())
-        .await
-        .map_err(|_| Custom(Status::Unauthorized, "Failed to update password".to_string()))?
-        .ok_or(Custom(Status::NotFound, "No user updated".to_string()))?;
-
-    build_login_response(login_record, app_env)
 }
 
 #[derive(Deserialize, Debug)]
@@ -425,10 +386,10 @@ async fn query_users(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<UserList
 #[get("/users/<user_id>")]
 pub async fn get_user(
     pool: &State<PgPool>,
-    claim: Claims,
+    login: LoginSession,
     user_id: i64
 ) -> Result<Json<UserListingEntry>, Custom<String>> {
-    if !claim.has_role("admin") && !claim.uid == user_id {
+    if !login.is_admin() && !login.uid == user_id {
         return Err(Custom(Status::Forbidden, "cannot view user record for other users".to_string()));
     }
     let res = query_users(pool.inner(), Some(user_id))
@@ -441,14 +402,14 @@ pub async fn get_user(
 #[get("/users/list?<role>")]
 pub async fn list_users(
     pool: &State<PgPool>,
-    claim: Claims,
+    login: LoginSession,
     role: Option<String>
 ) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
     // If the user is not admin or trainer, list only returns the user
-    let query_person_id = if claim.has_role("admin") || claim.has_role("trainer") {
+    let query_person_id = if login.is_admin() || login.has_role("trainer") {
         None
     } else {
-        Some(claim.uid)
+        Some(login.uid)
     };
 
     let mut users = query_users(pool.inner(), query_person_id).await?;
@@ -472,7 +433,7 @@ pub async fn delete_user(
     state: &State<PgPool>,
     config: &State<Config>,
     app_env: &State<AppEnv>,
-    claims: Claims,
+    login: LoginSession,
     user_id: i64,
     deletion: Json<UserDeletionRequest>
 ) -> Result<NoContent, Custom<String>> {
@@ -481,13 +442,15 @@ pub async fn delete_user(
         .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or(Custom(Status::NotFound, format!("user id not found: {}", user_id)))?;
 
-    if user_id == claims.uid {
+    if user_id == login.uid {
         // If this is the current user, require correct password even if the user is an admin
         let password = deletion.password.as_ref().ok_or(Custom(Status::Forbidden, "password is required to delete profile".to_string()))?;
         login_record = verify_user(login_record, password)?;
     } else {
         // Not the current user, only admins can perform
-        claims.assert_roles_contains("admin")?;
+        if !login.is_admin() {
+            return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        }
     }
 
     // Actually delete the data. Related records in bookings are removed by DELETE CASCADE
@@ -528,8 +491,13 @@ pub struct UserUpdate {
 }
 
 #[put("/users/<user_id>", data="<update>")]
-pub async fn update_user(state: &State<PgPool>, claims: Claims, user_id: i64, update: Json<UserUpdate>) -> Result<Accepted<String>, Custom<String>> {
-    if !claims.has_role("admin") && !claims.uid == user_id {
+pub async fn update_user(
+    state: &State<PgPool>,
+    login: LoginSession,
+    user_id: i64,
+    update: Json<UserUpdate>
+) -> Result<Accepted<String>, Custom<String>> {
+    if !login.is_admin() && !login.uid == user_id {
         return Err(Custom(Status::Forbidden, "cannot edit user record for other users".to_string()));
     }
 
@@ -562,12 +530,12 @@ pub struct UserPatch {
 #[patch("/users/<user_id>", data="<patch>")]
 pub async fn patch_user(
     pool: &State<PgPool>,
-    claims: Claims,
+    login: LoginSession,
     user_id: i64,
     patch: Json<UserPatch>
 ) -> Result<Accepted<String>, Custom<String>> {
-    if !claims.uid == user_id {
-        claims.assert_roles_contains("admin")?;
+    if !login.uid == user_id && !login.is_admin() {
+        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
     }
 
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("UPDATE person");
@@ -643,37 +611,6 @@ fn parse_roles(roles_str: &str) -> Vec<String> {
     }
 }
 
-fn build_login_response(
-    login_record: UserLoginRecord,
-    app_env: &AppEnv
-) -> Result<LoginResponse, Custom<String>> {
-    // Create access and refresh tokens
-    let roles = parse_roles(&login_record.roles);
-    let access_token_ttl: Duration = match roles.iter().any(|r| r == "admin") {
-        true => ACCESS_TOKEN_TTL_ADMIN,
-        false => ACCESS_TOKEN_TTL
-    };
-    let access_token = Claims::create(login_record.id, &login_record.name, &login_record.email, &login_record.phone, &roles, access_token_ttl).into_token(&app_env.access_token_key)?;
-    let refresh_token: String = Claims::create(login_record.id, &login_record.name, &login_record.email, &login_record.phone, &roles, REFRESH_TOKEN_EXPIRATION).into_token(&app_env.refresh_token_key)?;
-
-    // Build login response body
-    let body = LoggedInUser {
-        id: login_record.id,
-        name: login_record.name,
-        email: login_record.email,
-        phone: login_record.phone,
-        roles,
-        access_token
-    };
-
-    // Build overall response with refresh token as cookie
-    let cookie_expiry = Utc::now().add(REFRESH_TOKEN_EXPIRATION);
-    Ok(LoginResponse {
-        inner: Json(body),
-        cookie: Header::new("Set-Cookie", format!("refresh_token={};HttpOnly;Expires={}", refresh_token, cookie_expiry.to_rfc2822()))
-    })
-}
-
 async fn send_email<'x>(
     message: Message<'x>,
     config: &Config,
@@ -697,13 +634,13 @@ async fn send_email<'x>(
 }
 
 mod tests {
-    use chrono::Duration;
+    use chrono::{Days, Duration, Utc};
     use rocket::http::Status;
     use rocket::response::status::Custom;
     use rocket::State;
     use sqlx::{FromRow, PgPool, query_as, Executor};
-    use crate::claims::Claims;
-    use crate::login::{get_user, list_users};
+    use crate::users::{get_user, list_users};
+    use crate::loginsession::LoginSession;
 
     const DEFAULT_PASSWORD: &str = "password";
     const DEFAULT_PASSWORD_HASH: Option<&str> = Some("$argon2id$v=19$m=19456,t=2,p=1$X6SS0kJdO6uW3snBe7t1hA$gcYt1rDiSi+f1Rh0tQK+xzgF6ou7zzEbY/2XW33z3YE");
@@ -723,12 +660,23 @@ mod tests {
         member_id.id
     }
 
+    fn create_login(name: &str, role: &str) -> LoginSession {
+        LoginSession {
+            sessionid: "xxx".to_string(),
+            uid: 0,
+            name: name.to_string(),
+            email: format!("{}@example.com", name),
+            roles: vec![role.to_string()],
+            expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
+        }
+    }
+
     #[sqlx::test]
     async fn verify_user_by_email(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
         let person_id = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
-        let verify_result = crate::login::verify_user_by_email(&pool, "joe@example.com", DEFAULT_PASSWORD).await.unwrap();
+        let verify_result = crate::users::verify_user_by_email(&pool, "joe@example.com", DEFAULT_PASSWORD).await.unwrap();
         assert_eq!(person_id, verify_result.id);
     }
 
@@ -737,7 +685,7 @@ mod tests {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
         let person_id = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
-        let verify_result = crate::login::verify_user_by_id(&pool, person_id, DEFAULT_PASSWORD).await.unwrap();
+        let verify_result = crate::users::verify_user_by_id(&pool, person_id, DEFAULT_PASSWORD).await.unwrap();
         assert_eq!("joe@example.com", verify_result.email);
     }
 
@@ -746,7 +694,7 @@ mod tests {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
         let person_id = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
-        let verify_result = crate::login::verify_user_by_id(&pool, person_id, "wrong").await;
+        let verify_result = crate::users::verify_user_by_id(&pool, person_id, "wrong").await;
         assert_eq!(Custom(Status::Unauthorized, "incorrect username or password".to_string()), verify_result.err().unwrap());
     }
 
@@ -756,7 +704,7 @@ mod tests {
         let pid1 = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
         let pid2 = create_person(&pool, "bob@example.com", Option::None, "member", 0).await;
 
-        let claim = Claims::create(0, "", "admin@example.org", &None, &vec!["admin".to_string()], Duration::minutes(1));
+        let claim = create_login("admin", "admin");
         assert_eq!("joe@example.com", get_user(State::from(&pool), claim.clone(), pid1).await.unwrap().email);
         assert_eq!("bob@example.com", get_user(State::from(&pool), claim.clone(), pid2).await.unwrap().email);
         assert_eq!(Err(Custom(Status::NotFound, "no user found for id -1".to_string())), get_user(State::from(&pool), claim.clone(), -1).await);
@@ -768,8 +716,7 @@ mod tests {
         create_person(&pool, "joe@example.com", None, "member", 0).await;
         create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        let claim = Claims::create(0, "", "admin@example.org", &None, &vec!["admin".to_string()], Duration::minutes(1));
-        let result = list_users(State::from(&pool), claim, None).await.unwrap();
+        let result = list_users(State::from(&pool), create_login("admin", "admin"), None).await.unwrap();
 
         assert_eq!(2, result.len());
     }
@@ -780,8 +727,8 @@ mod tests {
         let user1 = create_person(&pool, "joe@example.com", None, "member", 0).await;
         let user2 = create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        let claim = Claims::create(user1, "", "joe@example.com", &None, &vec!["member".to_string()], Duration::minutes(1));
-        let result = list_users(State::from(&pool), claim, None).await.unwrap();
+        let claim = create_login("member", "member");
+        let result = list_users(State::from(&pool), create_login("member", "member"), None).await.unwrap();
 
         assert_eq!(1, result.len());
         assert_eq!("joe@example.com", result[0].email);
@@ -793,8 +740,7 @@ mod tests {
         create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
         create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        let claim = Claims::create(0, "", "admin@example.org", &None, &vec!["admin".to_string()], Duration::minutes(1));
-        let result = list_users(State::from(&pool), claim, None).await.unwrap();
+        let result = list_users(State::from(&pool), create_login("admin", "admin"), None).await.unwrap();
 
         assert_eq!(2, result.len());
         assert_eq!(true, result.get(0).unwrap().pwd_defined);

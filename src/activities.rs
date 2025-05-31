@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::{query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 use sqlx::postgres::PgRow;
 
+use crate::loginsession::LoginSession;
 use crate::whereclause::WhereClause;
 use crate::whereclause::Operator::Equal;
 use crate::{BigintRecord, Config};
-use crate::claims::Claims;
 
 #[cfg(test)]
 use crate::mock_chrono::Utc;
@@ -285,11 +285,11 @@ impl Activity {
 #[get("/activities?<challenge_id>&<person_id>")]
 pub async fn list_activities(
     pool: &State<PgPool>,
-    claim: Claims,
+    login: LoginSession,
     challenge_id: Option<i64>,
     person_id: Option<i64>
 ) -> Result<Json<Vec<Activity>>, Custom<String>> {
-    if !claim.has_role("admin") && Some(claim.uid) != person_id {
+    if !login.is_admin() && Some(login.uid) != person_id {
         return Err(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()));
     }
     Activity::query(pool, challenge_id, person_id)
@@ -298,9 +298,9 @@ pub async fn list_activities(
         .map(Json::from)
 }
 
-fn check_challenge_permission(claims: &Claims, person_id: &Option<i64>) -> Result<(), Custom<String>> {
+fn check_challenge_permission(login: &LoginSession, person_id: &Option<i64>) -> Result<(), Custom<String>> {
     if let Some(person_id) = person_id {
-        if !claims.has_role("admin") && claims.uid != person_id.clone() {
+        if !login.is_admin() && login.uid != person_id.clone() {
             return Err(Custom(Status::Forbidden, "admin role required to view other user challenge totals".to_string()));
         }
     }
@@ -311,12 +311,12 @@ fn check_challenge_permission(claims: &Claims, person_id: &Option<i64>) -> Resul
 pub async fn list_challenges(
     pool: &State<PgPool>,
     config: &State<Config>,
-    claims: Claims,
+    login: LoginSession,
     person_id: Option<i64>,
     date_today: Option<String>,
     leaderboard_limit: Option<i32>
 ) -> Result<Json<Vec<ChallengeFull>>, Custom<String>> {
-    check_challenge_permission(&claims, &person_id)?;
+    check_challenge_permission(&login, &person_id)?;
     
     // Set date_now to the current time clock if not specified as a parameter
     let today = if let Some(date_today) = date_today {
@@ -348,12 +348,12 @@ async fn expand_record_if_active(pool: &PgPool, r: &ChallengeRecord, today: &Nai
 #[get("/challenges/<id>?<person_id>&<leaderboard_limit>")]
 pub async fn get_challenge(
     pool: &State<PgPool>,
-    claims: Claims,
+    login: LoginSession,
     id: i64,
     person_id: Option<i64>,
     leaderboard_limit: Option<i32>
 ) -> Result<Json<ChallengeFull>, Custom<String>> {
-    check_challenge_permission(&claims, &person_id)?;
+    check_challenge_permission(&login, &person_id)?;
     let simple_record: ChallengeRecord = ChallengeRecord::query_by_id(pool, id, person_id)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
@@ -367,13 +367,13 @@ pub async fn get_challenge(
 #[get("/activities/<activity_id>")]
 pub async fn get_activity(
     pool: &State<PgPool>,
-    claim: Claims,
+    login: LoginSession,
     activity_id: i64
 ) -> Result<Json<Activity>, Custom<String>> {
     let activity = Activity::query_by_id(pool, activity_id).await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
         .and_then(|o: Option<Activity>| o.ok_or(Custom(Status::NotFound, "activity not found".to_string())))?;
-    if claim.uid != activity.person_id && !claim.has_role("admin") {
+    if !login.is_admin() && login.uid != activity.person_id {
         return Err(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()));
     }
 
@@ -383,10 +383,10 @@ pub async fn get_activity(
 #[post("/activities", data = "<activity>")]
 pub async fn create_activity(
     pool: &State<PgPool>,
-    claim: Claims,
+    login: LoginSession,
     activity: Json<NewActivity>
 ) -> Result<Created<&'static str>, Custom<String>> {
-    if !claim.has_role("admin") && activity.person_id != claim.uid {
+    if !login.is_admin() && activity.person_id != login.uid {
         return Err(Custom(Status::Forbidden, "admin role required to create activities for other users".to_owned()));
     }
     let activity_id = activity.save(pool).await
@@ -397,15 +397,15 @@ pub async fn create_activity(
 #[delete("/activities/<activity_id>")]
 pub async fn delete_activity(
     pool: &State<PgPool>,
-    claims: Claims,
+    login: LoginSession,
     activity_id: i64
 ) -> Result<NoContent, Custom<String>> {
     let mut qb = QueryBuilder::new("DELETE FROM activity");
     let mut wc = WhereClause::init();
     
     wc.append_to(&mut qb, "id", Equal, activity_id);
-    if !claims.has_role("admin") {
-        wc.append_to(&mut qb, "person_id", Equal, claims.uid);
+    if !login.is_admin() {
+        wc.append_to(&mut qb, "person_id", Equal, login.uid);
     }
     qb.push(" RETURNING id");
 
@@ -419,7 +419,7 @@ pub async fn delete_activity(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Duration, NaiveDate};
+    use chrono::{Days, NaiveDate, Utc};
     use rocket::http::Status;
     use rocket::response::status::Custom;
     use rocket::serde::json::Json;
@@ -427,9 +427,11 @@ mod tests {
     use sqlx::{query_as, PgPool};
 
     use crate::activities::{Activity, ChallengeFull, NewActivity};
+    use crate::loginsession::LoginSession;
     use crate::{BigintRecord, Config};
-    use crate::claims::Claims;
-    use crate::mock_chrono::set_timestamp;
+    use crate::mock_chrono::set_timestamp_rfc3339;
+
+    const DUMMY_SESSION_ID: &str = "xxx";
     
     async fn find_person_id_by_name(pool: &PgPool, name: &str) -> i64 {
         query_as("SELECT id FROM person WHERE name = $1")
@@ -439,9 +441,16 @@ mod tests {
             .map(|r: BigintRecord| r.id)
             .expect(&format!("failed to find user with name {}", name))
     }
-    async fn find_user_claim_by_name(pool: &PgPool, name: &str, role: &str) -> Claims {
+    async fn find_user_login_by_name(pool: &PgPool, name: &str, role: &str) -> LoginSession {
         let uid = find_person_id_by_name(pool, name).await;
-        Claims::create(uid, name, &format!("{}@example.com", name), &None, &vec![role.to_string()], Duration::days(1))
+        LoginSession {
+            sessionid: DUMMY_SESSION_ID.to_string(),
+            uid,
+            name: name.to_string(),
+            email: format!("{}@example.com", name),
+            roles: vec![role.to_string()],
+            expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
+        }
     }
 
     async fn find_challenge_by_name(pool: &PgPool, name: &str) -> i64 {
@@ -473,7 +482,7 @@ mod tests {
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&Config::default()),
-            find_user_claim_by_name(&pool, "admin", "admin").await,
+            find_user_login_by_name(&pool, "admin", "admin").await,
             None,
             Some("2025-05-15".to_string()),
             None
@@ -496,7 +505,7 @@ mod tests {
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&Config::default()),
-            find_user_claim_by_name(&pool, "user1", "member").await,
+            find_user_login_by_name(&pool, "user1", "member").await,
             None,
             Some("2025-04-15".to_string()),
             None
@@ -519,7 +528,7 @@ mod tests {
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&Config::default()),
-            find_user_claim_by_name(&pool, "user1", "member").await,
+            find_user_login_by_name(&pool, "user1", "member").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             Some("2025-04-15".to_string()),
             None
@@ -542,7 +551,7 @@ mod tests {
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&Config::default()),
-            find_user_claim_by_name(&pool, "admin", "admin").await,
+            find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             Some("2025-04-15".to_string()),
             None
@@ -562,12 +571,12 @@ mod tests {
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_list_challenges_system_date_before(pool: PgPool) {
-        set_timestamp(DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z").unwrap().timestamp());
+        set_timestamp_rfc3339("1970-01-01T00:00:00Z");
 
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&Config::default()),
-            find_user_claim_by_name(&pool, "admin", "admin").await,
+            find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,
             None
@@ -581,12 +590,12 @@ mod tests {
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_list_challenges_system_date_after(pool: PgPool) {
-        set_timestamp(DateTime::parse_from_rfc3339("2040-01-01T00:00:00Z").unwrap().timestamp());
+        set_timestamp_rfc3339("2040-01-01T00:00:00Z");
 
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&Config::default()),
-            find_user_claim_by_name(&pool, "admin", "admin").await,
+            find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,
             None
@@ -600,12 +609,12 @@ mod tests {
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_list_challenges_limit_leaderboard(pool: PgPool) {
-        set_timestamp(DateTime::parse_from_rfc3339("2040-01-01T00:00:00Z").unwrap().timestamp());
+        set_timestamp_rfc3339("2040-01-01T00:00:00Z");
 
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&Config::default()),
-            find_user_claim_by_name(&pool, "admin", "admin").await,
+            find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,
             Some(1)
@@ -630,12 +639,12 @@ mod tests {
         config.timezone_name = "America/New_York".to_string();
 
         // Set current time to 00:00 on 1 April 2025 in UTC, which is 20:00 on 31 March in New York
-        set_timestamp(DateTime::parse_from_rfc3339("2025-04-01T00:00:00Z").unwrap().timestamp());
+        set_timestamp_rfc3339("2025-04-01T00:00:00Z");
 
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&config),
-            find_user_claim_by_name(&pool, "admin", "admin").await,
+            find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,
             None
@@ -655,12 +664,12 @@ mod tests {
         config.timezone_name = "Europe/London".to_string();
 
         // Set current time to 23:00 on 31 March 2025 in UTC, which is 00:00 on 1 April in London (BST)
-        set_timestamp(DateTime::parse_from_rfc3339("2025-03-31T23:00:00Z").unwrap().timestamp());
+        set_timestamp_rfc3339("2025-03-31T23:00:00Z");
 
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&config),
-            find_user_claim_by_name(&pool, "admin", "admin").await,
+            find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,
             None
@@ -677,7 +686,7 @@ mod tests {
         let err = crate::activities::list_challenges(
             State::from(&pool),
             State::from(&Config::default()),
-            find_user_claim_by_name(&pool, "user2", "member").await,
+            find_user_login_by_name(&pool, "user2", "member").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,
             None
@@ -689,8 +698,8 @@ mod tests {
     async fn test_get_challenge(pool: PgPool) {
         let challenge_id = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user1 = find_person_id_by_name(&pool, "user1").await;
-        let claim = Claims::create(-1, "admin", "admin@example.com", &None, &vec!["admin".to_string()], Duration::days(1));
-        let challenge = crate::activities::get_challenge(State::from(&pool), claim, challenge_id, Some(user1)).await.unwrap();
+        let login = find_user_login_by_name(&pool, "admin", "admin").await;
+        let challenge = crate::activities::get_challenge(State::from(&pool), login, challenge_id, Some(user1), None).await.unwrap();
 
         assert_eq!("April 2025 Hikes", challenge.name);
         assert_eq!("Hiking", challenge.activity_type.name);
@@ -701,15 +710,15 @@ mod tests {
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_get_activity_self(pool: PgPool) {
-        let claim = find_user_claim_by_name(&pool, "user1", "member").await;
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let activity_id_record: BigintRecord = query_as("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
-            .bind(claim.uid).bind(challenge)
+            .bind(login.uid).bind(challenge)
             .fetch_one(&pool)
             .await
             .unwrap();
 
-        let activity = crate::activities::get_activity(State::from(&pool), claim, activity_id_record.id).await.unwrap().0;
+        let activity = crate::activities::get_activity(State::from(&pool), login, activity_id_record.id).await.unwrap().0;
         assert_eq!(100.0, activity.amount);
     }
 
@@ -723,8 +732,8 @@ mod tests {
             .await
             .unwrap();
 
-        let claim = find_user_claim_by_name(&pool, "admin", "admin").await;
-        let activity = crate::activities::get_activity(State::from(&pool), claim, activity_id_record.id).await.unwrap().0;
+        let login = find_user_login_by_name(&pool, "admin", "admin").await;
+        let activity = crate::activities::get_activity(State::from(&pool), login, activity_id_record.id).await.unwrap().0;
         assert_eq!(100.0, activity.amount);
     }
 
@@ -738,8 +747,8 @@ mod tests {
             .await
             .unwrap();
 
-        let claim = find_user_claim_by_name(&pool, "user2", "member").await;
-        let err = crate::activities::get_activity(State::from(&pool), claim, activity_id_record.id).await.unwrap_err();
+        let login = find_user_login_by_name(&pool, "user2", "member").await;
+        let err = crate::activities::get_activity(State::from(&pool), login, activity_id_record.id).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
@@ -748,8 +757,8 @@ mod tests {
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user1 = find_person_id_by_name(&pool, "user1").await;
 
-        let claim = Claims::create(user1, "user1", "user1@example.com", &None, &vec!["member".to_string()], Duration::days(1));
-        let list = crate::activities::list_activities(State::from(&pool), claim, Some(challenge), Some(user1)).await.unwrap();
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
+        let list = crate::activities::list_activities(State::from(&pool), login, Some(challenge), Some(user1)).await.unwrap();
         assert_eq!(2, list.len());
         assert_eq!("Hiking", list[0].activity_type.name);
         assert_eq!("user1", list[0].person_name);
@@ -759,9 +768,9 @@ mod tests {
     async fn test_list_activities_other_admin(pool: PgPool) {
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user1 = find_person_id_by_name(&pool, "user1").await;
-        let admin_claim = find_user_claim_by_name(&pool, "admin", "admin").await;
+        let admin_login = find_user_login_by_name(&pool, "admin", "admin").await;
 
-        let list = crate::activities::list_activities(State::from(&pool), admin_claim, Some(challenge), Some(user1)).await.unwrap();
+        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), Some(user1)).await.unwrap();
         assert_eq!(2, list.len());
         assert_eq!("Hiking", list[0].activity_type.name);
         assert_eq!("user1", list[0].person_name);
@@ -770,9 +779,9 @@ mod tests {
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_list_activities_allusers_admin(pool: PgPool) {
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
-        let admin_claim = find_user_claim_by_name(&pool, "admin", "admin").await;
+        let admin_login = find_user_login_by_name(&pool, "admin", "admin").await;
 
-        let list = crate::activities::list_activities(State::from(&pool), admin_claim, Some(challenge), None).await.unwrap();
+        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), None).await.unwrap();
         assert_eq!(3, list.len());
     }
 
@@ -780,18 +789,18 @@ mod tests {
     async fn test_list_activities_other_nonadmin(pool: PgPool) {
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user1 = find_person_id_by_name(&pool, "user1").await;
-        let nonadmin_claim = find_user_claim_by_name(&pool, "user2", "member").await;
+        let nonadmin_login = find_user_login_by_name(&pool, "user2", "member").await;
 
-        let err = crate::activities::list_activities(State::from(&pool), nonadmin_claim, Some(challenge), Some(user1)).await.unwrap_err();
+        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), Some(user1)).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_list_activities_allusers_nonadmin(pool: PgPool) {
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
-        let nonadmin_claim = find_user_claim_by_name(&pool, "user2", "member").await;
+        let nonadmin_login = find_user_login_by_name(&pool, "user2", "member").await;
 
-        let err = crate::activities::list_activities(State::from(&pool), nonadmin_claim, Some(challenge), None).await.unwrap_err();
+        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), None).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
@@ -805,9 +814,9 @@ mod tests {
             amount: 0.0
         };
 
-        let claim = Claims::create(user, "user1", "user1@example.com", &None, &vec!["member".to_string()], Duration::days(1));
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
         assert_eq!(0, count_activities(&pool).await);
-        crate::activities::create_activity(State::from(&pool), claim, Json(activity)).await.expect("Failed to create activity");
+        crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.expect("Failed to create activity");
         assert_eq!(1, count_activities(&pool).await);
     }
 
@@ -820,9 +829,9 @@ mod tests {
             amount: 0.0
         };
 
-        let claim = Claims::create(find_person_id_by_name(&pool, "user2").await, "user2", "user2@example.com", &None, &vec!["member".to_string()], Duration::days(1));
+        let login = find_user_login_by_name(&pool, "user2", "member").await;
         assert_eq!(0, count_activities(&pool).await);
-        let error = crate::activities::create_activity(State::from(&pool), claim, Json(activity)).await.unwrap_err();
+        let error = crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to create activities for other users".to_string()), error);
         assert_eq!(0, count_activities(&pool).await);
     }
@@ -836,9 +845,9 @@ mod tests {
             amount: 0.0
         };
 
-        let claim = Claims::create(find_person_id_by_name(&pool, "admin").await, "admin", "admin@example.com", &None, &vec!["admin".to_string()], Duration::days(1));
+        let login = find_user_login_by_name(&pool, "admin", "admin").await;
         assert_eq!(0, count_activities(&pool).await);
-        crate::activities::create_activity(State::from(&pool), claim, Json(activity)).await.unwrap();
+        crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.unwrap();
         assert_eq!(1, count_activities(&pool).await);
     }
 
@@ -850,9 +859,9 @@ mod tests {
         let activities = Activity::query(&pool, Some(challenge_id), Some(user_id)).await.unwrap();
         assert_eq!(2, activities.len());
 
-        let claim = Claims::create(user_id, "user1", "user1@example.com", &None, &vec!["member".to_string()], Duration::days(1));
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
         assert_eq!(4, count_activities(&pool).await);
-        crate::activities::delete_activity(State::from(&pool), claim, activities.first().unwrap().id).await.unwrap();
+        crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap();
         assert_eq!(3, count_activities(&pool).await);
     }
 
@@ -864,9 +873,9 @@ mod tests {
         let activities = Activity::query(&pool, Some(challenge_id), Some(user_id)).await.unwrap();
         assert_eq!(2, activities.len());
 
-        let claim = Claims::create(find_person_id_by_name(&pool, "admin").await, "admin", "admin@example.com", &None, &vec!["admin".to_string()], Duration::days(1));
+        let login = find_user_login_by_name(&pool, "admin", "admin").await;
         assert_eq!(4, count_activities(&pool).await);
-        crate::activities::delete_activity(State::from(&pool), claim, activities.first().unwrap().id).await.unwrap();
+        crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap();
         assert_eq!(3, count_activities(&pool).await);
     }
 
@@ -878,9 +887,9 @@ mod tests {
         let activities = Activity::query(&pool, Some(challenge_id), Some(user_id)).await.unwrap();
         assert_eq!(2, activities.len());
 
-        let claim = Claims::create(find_person_id_by_name(&pool, "user2").await, "user2", "user2@example.com", &None, &vec!["member".to_string()], Duration::days(1));
+        let login = find_user_login_by_name(&pool, "user2", "member").await;
         assert_eq!(4, count_activities(&pool).await);
-        let error = crate::activities::delete_activity(State::from(&pool), claim, activities.first().unwrap().id).await.unwrap_err();
+        let error = crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap_err();
         assert_eq!(Custom(Status::NotFound, "activity not found or user not allowed to delete".to_string()), error);
         assert_eq!(4, count_activities(&pool).await);
     }

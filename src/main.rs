@@ -12,28 +12,38 @@ use rocket::serde::Serialize;
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
 use shuttle_runtime::CustomError;
 use sqlx::{Executor, FromRow, PgPool, query_as};
-use crate::claims::AuthenticationError;
+use user_agent_parser::UserAgentParser;
 use crate::config::{AppEnv, Config};
+use crate::loginsession::AuthenticationError;
 
-mod claims;
 mod config;
 mod sessions;
-mod login;
+mod users;
 mod bookings;
 mod backup;
 mod log;
 mod activities;
 mod whereclause;
+mod loginsession;
 mod mock_chrono;
 
-#[catch(403)]
-pub fn forbidden(request: &Request) -> Custom<String> {
+#[catch(401)]
+pub fn unauthorized(request: &Request) -> Custom<String> {
     let auth_error = request.local_cache::<Option<AuthenticationError>, _>(|| None);
-    let message = match auth_error {
-        Some(msg) => msg.to_string(),
-        None      => "NOT AUTH".to_string()
-    };
-    Custom(Status::Forbidden, message)
+    info!("### Intercepted 401 return, auth error: {:?}", auth_error);
+    match auth_error {
+        Some(err) => match err {
+            AuthenticationError::MissingSession => Custom(Status::Unauthorized, "Your login session has expired".to_string()),
+            AuthenticationError::MissingDatabase => Custom(Status::InternalServerError, "Failed to validate session".to_string()),
+            AuthenticationError::DatabaseError(err) => Custom(Status::InternalServerError, err.to_string()),
+        },
+        None => Custom(Status::InternalServerError, "Failed to authenticate user".to_string())
+    }
+}
+
+#[catch(404)]
+pub fn notfound(request: &Request) -> Custom<String> {
+    Custom(Status::NotFound, "not found".to_string())
 }
 
 #[shuttle_runtime::main]
@@ -74,21 +84,27 @@ async fn rocket(
         ..Default::default()
     }.to_cors().map_err(CustomError::new)?;
 
+    let user_agent_parser = UserAgentParser::from_path("user_agents.yaml").expect("Missing user agents config");
+
     // Configure Rocket
     let rocket = rocket::build()
         .attach(cors)
         .manage(config)
         .manage(app_env)
         .manage(pool)
-        .register("/", catchers![forbidden])
+        .manage(user_agent_parser)
+        .register("/", catchers![unauthorized, notfound]) // TODO forbidden
         .mount("/", routes![
-            login::login, login::validate_login, login::change_password, login::register_user, login::request_pwd_reset, login::reset_pwd, login::get_user, login::list_users, login::delete_user, login::update_user, login::patch_user,
-            sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session,
-            sessions::list_locations, sessions::list_session_types, sessions::update_session,
+            loginsession::login, loginsession::logout, loginsession::verify_session,
+
+            users::register_user, users::request_pwd_reset, users::reset_pwd, users::get_user, users::list_users, users::delete_user, users::update_user, users::patch_user,
+
+            sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session, sessions::list_locations, sessions::list_session_types, sessions::update_session,
             bookings::list_bookings, bookings::create_booking, bookings::delete_booking, bookings::update_booking, bookings::get_attendance_stats,
+
             activities::list_activity_types, activities::list_challenges, activities::get_challenge, activities::get_activity, activities::list_activities, activities::create_activity, activities::delete_activity,
-            log::read_log,
-            backup::backup_all
+
+            log::read_log, backup::backup_all
         ]);
 
     Ok(rocket.into())

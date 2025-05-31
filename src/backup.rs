@@ -5,7 +5,8 @@ use rocket::serde::json::Json;
 use rocket::State;
 use serde::Serialize;
 use sqlx::{FromRow, PgPool, query_as};
-use crate::claims::Claims;
+
+use crate::loginsession::LoginSession;
 
 #[derive(FromRow, Serialize, Debug)]
 pub struct PersonRow {
@@ -66,8 +67,10 @@ pub struct AllTables {
 }
 
 #[get("/backup")]
-pub async fn backup_all(pool: &State<PgPool>, claim: Claims) -> Result<Json<AllTables>, Custom<String>> {
-    claim.assert_roles_contains("admin")?;
+pub async fn backup_all(pool: &State<PgPool>, login: LoginSession) -> Result<Json<AllTables>, Custom<String>> {
+    if !login.is_admin() {
+        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+    }
     Ok(Json(AllTables{
         session_type: session_type_table(pool).await?,
         location: location_table(pool).await?,
@@ -124,48 +127,56 @@ async fn booking_table(pool: &PgPool) -> Result<Vec<BookingRow>, Custom<String>>
 
 #[cfg(test)]
 mod tests {
-    use chrono::Duration;
+    use chrono::{Days, Utc};
     use rocket::serde::json::serde_json;
     use rocket::State;
-    use sqlx::{Executor, FromRow, PgPool, query_as};
-    use crate::claims::Claims;
+    use sqlx::{query, Executor, PgPool, Row};
 
-    #[derive(FromRow)]
-    struct IntRecord {
-        id: i32
-    }
-    #[derive(FromRow)]
-    struct BigintRecord {
-        id: i64
+    use crate::loginsession::LoginSession;
+
+    fn create_login(name: &str, role: &str) -> LoginSession {
+        LoginSession {
+            sessionid: "xxx".to_string(),
+            uid: 0,
+            name: name.to_string(),
+            email: format!("{}@example.com", name),
+            roles: vec![role.to_string()],
+            expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
+        }
     }
 
     #[sqlx::test]
     async fn backup_all(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let person_id: BigintRecord = query_as("INSERT INTO person (name, email, phone, pwd, roles, credits) VALUES ('Mr Test', 'test@example.com', '0111', '', 'member', 0) RETURNING id")
+        let person_id: i64 = query("INSERT INTO person (name, email, phone, pwd, roles, credits) VALUES ('Mr Test', 'test@example.com', '0111', '', 'member', 0) RETURNING id")
             .fetch_one(&pool)
-            .await.unwrap();
-        let session_type_id: IntRecord = query_as("SELECT id FROM session_type WHERE name = 'HIIT'")
+            .await.unwrap()
+            .try_get("id").unwrap();
+        let session_type_id: i32 = query("SELECT id FROM session_type WHERE name = 'HIIT'")
             .fetch_one(&pool)
-            .await.unwrap();
-        let location_id: IntRecord = query_as("SELECT id FROM location WHERE name = 'Oak Hill Park'")
+            .await.unwrap()
+            .try_get("id").unwrap();
+        let location_id: i32 = query("SELECT id FROM location WHERE name = 'Oak Hill Park'")
             .fetch_one(&pool)
-            .await.unwrap();
-        let session_id: BigintRecord = query_as("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost) VALUES ('2024-01-01 08:00:00Z', 60, $1, $2, null, null, null, 1) RETURNING id")
-            .bind(session_type_id.id)
-            .bind(location_id.id)
+            .await.unwrap()
+            .try_get("id").unwrap();
+        let session_id: i64 = query("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost) VALUES ('2024-01-01 08:00:00Z', 60, $1, $2, null, null, null, 1) RETURNING id")
+            .bind(session_type_id)
+            .bind(location_id)
             .fetch_one(&pool)
-            .await.unwrap();
-        let _booking_session_id: BigintRecord = query_as("INSERT INTO booking (person_id, session_id, credits_used) VALUES ($1, $2, 1) RETURNING session_id AS id")
-            .bind(person_id.id)
-            .bind(session_id.id)
+            .await.unwrap()
+            .try_get("id").unwrap();
+        let _booking_session_id: i64 = query("INSERT INTO booking (person_id, session_id, credits_used) VALUES ($1, $2, 1) RETURNING session_id AS id")
+            .bind(person_id)
+            .bind(session_id)
             .fetch_one(&pool)
-            .await.unwrap();
+            .await.unwrap()
+            .try_get("id").unwrap();
 
-        let claim = Claims::create(0, "", "admin@example.com", &Some("011111".to_string()), &vec!["admin".to_string()], Duration::minutes(1));
-        let backup_result = crate::backup::backup_all(State::from(&pool), claim).await.unwrap().into_inner();
+        let backup_result = crate::backup::backup_all(State::from(&pool), create_login("admin", "admin")).await.unwrap().into_inner();
 
         assert_eq!("{\"session_type\":[{\"id\":1,\"name\":\"HIIT\",\"requires_trainer\":true,\"cost\":1,\"deprecated\":false},{\"id\":2,\"name\":\"Strong\",\"requires_trainer\":true,\"cost\":1,\"deprecated\":false},{\"id\":3,\"name\":\"On The Move\",\"requires_trainer\":true,\"cost\":1,\"deprecated\":false}],\"location\":[{\"id\":1,\"name\":\"Oak Hill Park\",\"address\":\"Oak Hill Park, Parkside Gardens, London EN4 8JP\",\"url\":null},{\"id\":2,\"name\":\"Trent Park\",\"address\":\"Trent Park, London EN4 0PS\",\"url\":null}],\"person\":[{\"id\":1,\"name\":\"Mr Test\",\"email\":\"test@example.com\",\"phone\":\"0111\",\"pwd\":\"\",\"roles\":\"member\",\"credits\":0}],\"session\":[{\"id\":1,\"datetime\":\"2024-01-01T08:00:00Z\",\"duration_mins\":60,\"session_type_name\":\"HIIT\",\"location_name\":\"Oak Hill Park\",\"trainer_email\":null,\"max_booking_count\":null,\"notes\":null,\"cost\":1}],\"booking\":[{\"person_email\":\"test@example.com\",\"session_datetime\":\"2024-01-01T08:00:00Z\",\"session_location_name\":\"Oak Hill Park\",\"session_trainer_email\":null}]}", serde_json::to_string(&backup_result).unwrap());
     }
+
 }
