@@ -116,13 +116,13 @@ impl FromRow<'_, PgRow> for ChallengeRecord {
 
 #[derive(Serialize, Clone, FromRow, Debug)]
 pub struct MemberActivitySummary {
-    id: i64,
-    name: String,
+    id: Option<i64>,
+    name: Option<String>,
     total_amount: f32
 }
 
 impl MemberActivitySummary {
-    async fn query(pool: &PgPool, challenge_id: i64, limit: Option<i32>) -> Result<Vec<MemberActivitySummary>, Error> {
+    async fn query(pool: &PgPool, challenge_id: i64, limit: &Option<i32>) -> Result<Vec<MemberActivitySummary>, Error> {
         let mut qb = QueryBuilder::new("SELECT p.id, p.name, SUM(a.amount) AS total_amount \
             FROM activity AS a \
             JOIN person AS p ON a.person_id = p.id");
@@ -154,6 +154,8 @@ pub struct ChallengeFull {
     member_summaries: Vec<MemberActivitySummary>
 }
 
+const TOLERANCE: f32 = 0.00001;
+
 impl ChallengeFull {
     fn copy_record(record: &ChallengeRecord) -> Self {
         Self {
@@ -169,8 +171,20 @@ impl ChallengeFull {
             member_summaries: vec![]
         }
     }
-    async fn expand_leaderboard(mut self, pool: &PgPool) -> Result<Self, Error> {
-        self.member_summaries = MemberActivitySummary::query(pool, self.id, Some(12)).await?;
+    async fn expand_leaderboard(mut self, pool: &PgPool, limit: &Option<i32>) -> Result<Self, Error> {
+        let mut leaderboard = MemberActivitySummary::query(pool, self.id, limit).await?;
+        if limit.is_some() {
+            let leaderboard_sum: f32 = leaderboard.iter()
+                .map(|s| s.total_amount)
+                .sum();
+            let remainder = self.total_all - leaderboard_sum;
+            if remainder >= TOLERANCE {
+                leaderboard.push(MemberActivitySummary {
+                    id: None, name: None, total_amount: remainder
+                });
+            }
+        }
+        self.member_summaries = leaderboard;
         Ok(self)
     }
 }
@@ -293,13 +307,14 @@ fn check_challenge_permission(claims: &Claims, person_id: &Option<i64>) -> Resul
     Ok(())
 }
 
-#[get("/challenges?<person_id>&<date_today>")]
+#[get("/challenges?<person_id>&<date_today>&<leaderboard_limit>")]
 pub async fn list_challenges(
     pool: &State<PgPool>,
     config: &State<Config>,
     claims: Claims,
     person_id: Option<i64>,
-    date_today: Option<String>
+    date_today: Option<String>,
+    leaderboard_limit: Option<i32>
 ) -> Result<Json<Vec<ChallengeFull>>, Custom<String>> {
     check_challenge_permission(&claims, &person_id)?;
     
@@ -315,34 +330,35 @@ pub async fn list_challenges(
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 
-    try_join_all(records.iter().map(|r| expand_record_if_active(&pool, r, &today)))
+    try_join_all(records.iter().map(|r| expand_record_if_active(&pool, r, &today, &leaderboard_limit)))
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
         .map(Json::from)
 }
 
-async fn expand_record_if_active(pool: &PgPool, r: &ChallengeRecord, today: &NaiveDate) -> Result<ChallengeFull, Error> {
+async fn expand_record_if_active(pool: &PgPool, r: &ChallengeRecord, today: &NaiveDate, leaderboard_limit: &Option<i32>) -> Result<ChallengeFull, Error> {
     let full = ChallengeFull::copy_record(r);
     if today >= &full.start {
-        full.expand_leaderboard(pool).await
+        full.expand_leaderboard(pool, leaderboard_limit).await
     } else {
         Ok(full)
     }
 }
 
-#[get("/challenges/<id>?<person_id>")]
+#[get("/challenges/<id>?<person_id>&<leaderboard_limit>")]
 pub async fn get_challenge(
     pool: &State<PgPool>,
     claims: Claims,
     id: i64,
-    person_id: Option<i64>
+    person_id: Option<i64>,
+    leaderboard_limit: Option<i32>
 ) -> Result<Json<ChallengeFull>, Custom<String>> {
     check_challenge_permission(&claims, &person_id)?;
     let simple_record: ChallengeRecord = ChallengeRecord::query_by_id(pool, id, person_id)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 
-    ChallengeFull::copy_record(&simple_record).expand_leaderboard(pool)
+    ChallengeFull::copy_record(&simple_record).expand_leaderboard(pool, &leaderboard_limit)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
         .map(Json::from)
@@ -459,7 +475,8 @@ mod tests {
             State::from(&Config::default()),
             find_user_claim_by_name(&pool, "admin", "admin").await,
             None,
-            Some("2025-05-15".to_string())
+            Some("2025-05-15".to_string()),
+            None
         ).await.unwrap().0;
         assert_eq!(3, challenges.len());
 
@@ -481,7 +498,8 @@ mod tests {
             State::from(&Config::default()),
             find_user_claim_by_name(&pool, "user1", "member").await,
             None,
-            Some("2025-04-15".to_string())
+            Some("2025-04-15".to_string()),
+            None
         ).await.unwrap().0;
         assert_eq!(3, challenges.len());
 
@@ -503,7 +521,8 @@ mod tests {
             State::from(&Config::default()),
             find_user_claim_by_name(&pool, "user1", "member").await,
             Some(find_person_id_by_name(&pool, "user1").await),
-            Some("2025-04-15".to_string())
+            Some("2025-04-15".to_string()),
+            None
         ).await.unwrap().0;
         assert_eq!(3, challenges.len());
 
@@ -525,7 +544,8 @@ mod tests {
             State::from(&Config::default()),
             find_user_claim_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
-            Some("2025-04-15".to_string())
+            Some("2025-04-15".to_string()),
+            None
         ).await.unwrap().0;
         assert_eq!(3, challenges.len());
 
@@ -549,6 +569,7 @@ mod tests {
             State::from(&Config::default()),
             find_user_claim_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
+            None,
             None
         ).await.unwrap().0;
         assert_eq!(3, challenges.len());
@@ -567,10 +588,37 @@ mod tests {
             State::from(&Config::default()),
             find_user_claim_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
+            None,
             None
         ).await.unwrap().0;
         assert_eq!(3, challenges.len());
         assert_eq!(2, challenges[0].member_summaries.len());
+        assert_eq!(1, challenges[1].member_summaries.len());
+        assert_eq!(0, challenges[2].member_summaries.len());
+    }
+
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
+    async fn test_list_challenges_limit_leaderboard(pool: PgPool) {
+        set_timestamp(DateTime::parse_from_rfc3339("2040-01-01T00:00:00Z").unwrap().timestamp());
+
+        let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
+            State::from(&pool),
+            State::from(&Config::default()),
+            find_user_claim_by_name(&pool, "admin", "admin").await,
+            Some(find_person_id_by_name(&pool, "user1").await),
+            None,
+            Some(1)
+        ).await.unwrap().0;
+        assert_eq!(3, challenges.len());
+        assert_eq!(2, challenges[0].member_summaries.len());
+
+        assert_eq!(Some("user2".to_string()), challenges[0].member_summaries[0].name);
+        assert_eq!(400.0, challenges[0].member_summaries[0].total_amount);
+
+        assert_eq!(None, challenges[0].member_summaries[1].name);
+        assert_eq!(300.0, challenges[0].member_summaries[1].total_amount);
+
         assert_eq!(1, challenges[1].member_summaries.len());
         assert_eq!(0, challenges[2].member_summaries.len());
     }
@@ -589,6 +637,7 @@ mod tests {
             State::from(&config),
             find_user_claim_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
+            None,
             None
         ).await.unwrap().0;
         assert_eq!(3, challenges.len());
@@ -613,6 +662,7 @@ mod tests {
             State::from(&config),
             find_user_claim_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
+            None,
             None
         ).await.unwrap().0;
         assert_eq!(3, challenges.len());
@@ -629,6 +679,7 @@ mod tests {
             State::from(&Config::default()),
             find_user_claim_by_name(&pool, "user2", "member").await,
             Some(find_person_id_by_name(&pool, "user1").await),
+            None,
             None
         ).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to view other user challenge totals".to_string()), err);
