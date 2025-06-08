@@ -77,6 +77,7 @@ impl<'r> FromRequest<'r> for LoginSession {
 
         // No cookie in request header => browser has expired the session
         if sessionid.is_none() {
+            info!("Session cookie not sent by client");
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
         let sessionid = sessionid.unwrap();
@@ -98,6 +99,7 @@ impl<'r> FromRequest<'r> for LoginSession {
 
         // No session record in db => we have expired the session
         if login_session.is_none() {
+            info!("Session record not found in table");
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
 
