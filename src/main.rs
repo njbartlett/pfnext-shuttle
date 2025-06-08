@@ -3,6 +3,7 @@
 extern crate rocket;
 
 use std::collections::HashSet;
+use std::env;
 use chrono::{DateTime, FixedOffset};
 
 use rocket::Request;
@@ -85,6 +86,8 @@ async fn rocket(
     }.to_cors().map_err(CustomError::new)?;
 
     // Configure Rocket
+    let rocket_secret_key = secrets.get("ROCKET_SECRET_KEY").expect("Missing secret: ROCKET_SECRET_KEY");
+    env::set_var("ROCKET_SECRET_KEY", rocket_secret_key);
     let rocket = rocket::build()
         .attach(cors)
         .manage(config)
