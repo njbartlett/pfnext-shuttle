@@ -113,7 +113,7 @@ impl UserLoginRecord {
             .await
     }
     pub async fn load_by_email(pool: &PgPool, user_email: &str) -> Result<Option<UserLoginRecord>, sqlx::Error> {
-        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE email = $1")
+        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE LOWER(email) = LOWER($1)")
             .bind(user_email)
             .fetch_optional(pool)
             .await
