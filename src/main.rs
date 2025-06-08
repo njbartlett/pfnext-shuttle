@@ -84,15 +84,12 @@ async fn rocket(
         ..Default::default()
     }.to_cors().map_err(CustomError::new)?;
 
-    let user_agent_parser = UserAgentParser::from_path("user_agents.yaml").expect("Missing user agents config");
-
     // Configure Rocket
     let rocket = rocket::build()
         .attach(cors)
         .manage(config)
         .manage(app_env)
         .manage(pool)
-        .manage(user_agent_parser)
         .register("/", catchers![unauthorized, notfound]) // TODO forbidden
         .mount("/", routes![
             loginsession::login, loginsession::logout, loginsession::verify_session,

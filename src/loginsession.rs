@@ -294,18 +294,13 @@ pub async fn login(
     cookies: &CookieJar<'_>,
     existing_login: Option<LoginSession>,
     client_addr: Option<ClientRealAddr>,
-    product: user_agent_parser::Product<'_>,
-    device: user_agent_parser::Device<'_>,
-    os: user_agent_parser::OS<'_>,
-    cpu: user_agent_parser::CPU<'_>,
-    engine: user_agent_parser::Engine<'_>,
     login_request: Json<LoginRequest>
 ) -> Result<Json<LoggedInUser>, Custom<String>> {
     let mut ipinfo: Option<String> = None;
     if let Some(client_addr) = client_addr {
         let client_ipv6_addr = client_addr.get_ipv6();       
         if let Ok(lookup_result) = public_ip_address::perform_lookup(Some(client_ipv6_addr.to_canonical())).await {
-            info!("Login attempt for user <{}> from {:?} using {:?} {:?} {:?} {:?} {:?}", login_request.email, lookup_result, product, os, device, cpu, engine);
+            info!("Login attempt for user <{}> from {:?}", login_request.email, lookup_result);
             ipinfo = Some(json::to_string(&lookup_result).unwrap_or("{}".to_string()));
         }
     }
