@@ -1,4 +1,4 @@
-You are receiving this email because you registered a new account on {}.
+You are receiving this email because you registered a new account for {}.
 To enable your account, please use the following temporary password on the password reset
 page:
 

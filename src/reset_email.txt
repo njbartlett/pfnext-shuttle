@@ -1,5 +1,6 @@
-You are receiving this email because you requested a password reset at {}. To reset
-your password, use the following temporary password on the password reset page:
+You are receiving this email because you requested a password reset for {}.
+
+To reset your password, enter the following temporary password on the password reset page:
 
     {}
 

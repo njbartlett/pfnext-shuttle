@@ -142,7 +142,7 @@ pub async fn request_pwd_reset(
     // Create temp password and send
     let temp_password = create_temp_password(state.inner(), user_record.id).await?;
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &reset_request.reset_url, encode(&user_record.email), encode(&temp_password));
-    let text = format!(include_str!("reset_email.txt"), &reset_request.website_url, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
+    let text = format!(include_str!("reset_email.txt"), &config.inner().branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     let sender = Address::new_address(Some(&config.inner().email_sender_name), &config.inner().email_sender_address);
     let message = MessageBuilder::new()
         .from(sender.clone())
@@ -187,7 +187,7 @@ pub async fn register_user(
     // Create temp password and send to email
     let temp_password = create_temp_password(state.inner(), user_updated.id).await?;
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &new_user.reset_url, encode(&new_user.email), encode(&temp_password));
-    let text = format!(include_str!("register_email.txt"), &new_user.website_url, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
+    let text = format!(include_str!("register_email.txt"), &config.branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     let sender = Address::new_address(Some(&config.email_sender_name), &config.email_sender_address);
     let message = MessageBuilder::new()
         .from(sender.clone())
