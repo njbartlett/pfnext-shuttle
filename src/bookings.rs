@@ -13,7 +13,8 @@ use sqlx::{Error, FromRow, PgPool, query_as, QueryBuilder, raw_sql, Row};
 use sqlx::postgres::{PgQueryResult, PgRow};
 
 use crate::loginsession::LoginSession;
-use crate::{BigintRecord, parse_opt_date, SessionLocation, SessionType, UserLoginRecord};
+use crate::{BigintRecord, parse_opt_date, SessionLocation, SessionType};
+use crate::users::UserLoginRecord;
 use crate::config::Config;
 use crate::log::append_log;
 
@@ -525,7 +526,8 @@ mod tests {
     use rocket::State;
     use sqlx::{Executor, FromRow, PgPool, query_as};
     use crate::loginsession::LoginSession;
-    use crate::{CountResult, UserLoginRecord};
+    use crate::users::UserLoginRecord;
+    use crate::{CountResult};
     use crate::bookings::BookingUpdate;
     use crate::config::Config;
 

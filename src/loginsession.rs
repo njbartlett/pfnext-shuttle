@@ -24,7 +24,7 @@ use rocket::{
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, query, query_as, FromRow, PgPool, Row};
 
-use crate::{log, UserLoginRecord};
+use crate::{log, users::UserLoginRecord};
 
 const SESSION_ID: &str = "sessionid";
 const ADMIN: &str = "admin";

@@ -18,7 +18,7 @@ use sqlx::postgres::PgRow;
 use urlencoding::encode;
 
 use crate::loginsession::LoginSession;
-use crate::{BigintRecord, CountResult, UserLoginRecord};
+use crate::{BigintRecord, CountResult};
 use crate::config::{Config, AppEnv};
 
 const ACCESS_TOKEN_TTL: Duration = Duration::hours(6);
@@ -38,6 +38,32 @@ const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
 const INVALID_LOGIN_MESSAGE: &str = "incorrect username or password";
 const TEMP_PASSWORD_MINIMUM_RESEND_WAIT: Duration = Duration::minutes(-2);
 const TEMP_PASSWORD_EXPIRY: Duration = Duration::minutes(10);
+
+#[derive(Serialize, FromRow, Clone, Debug)]
+pub struct UserLoginRecord {
+    pub(crate) id: i64,
+    pub(crate) name: String,
+    pub(crate) email: String,
+    pub(crate) phone: Option<String>,
+    pub(crate) pwd: Option<String>,
+    pub(crate) roles: String,
+    pub(crate) credits: i16
+}
+
+impl UserLoginRecord {
+    pub async fn load_by_id(pool: &PgPool, user_id: i64) -> Result<Option<UserLoginRecord>, sqlx::Error> {
+        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+    }
+    pub async fn load_by_email(pool: &PgPool, user_email: &str) -> Result<Option<UserLoginRecord>, sqlx::Error> {
+        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE LOWER(email) = LOWER($1)")
+            .bind(user_email)
+            .fetch_optional(pool)
+            .await
+    }
+}
 
 #[derive(Deserialize)]
 pub struct LoginRequest {

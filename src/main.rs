@@ -110,32 +110,6 @@ async fn rocket(
     Ok(rocket.into())
 }
 
-#[derive(Serialize, FromRow, Clone, Debug)]
-pub struct UserLoginRecord {
-    id: i64,
-    name: String,
-    email: String,
-    phone: Option<String>,
-    pwd: Option<String>,
-    roles: String,
-    credits: i16
-}
-
-impl UserLoginRecord {
-    pub async fn load_by_id(pool: &PgPool, user_id: i64) -> Result<Option<UserLoginRecord>, sqlx::Error> {
-        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE id = $1")
-            .bind(user_id)
-            .fetch_optional(pool)
-            .await
-    }
-    pub async fn load_by_email(pool: &PgPool, user_email: &str) -> Result<Option<UserLoginRecord>, sqlx::Error> {
-        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE LOWER(email) = LOWER($1)")
-            .bind(user_email)
-            .fetch_optional(pool)
-            .await
-    }
-}
-
 #[derive(FromRow, Serialize, Debug)]
 struct BigintRecord {
     id: i64
