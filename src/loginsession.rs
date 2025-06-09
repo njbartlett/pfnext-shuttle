@@ -1,8 +1,5 @@
-
-use mail_send::smtp::client;
 use rocket_client_addr::ClientRealAddr;
 use ::time::OffsetDateTime;
-use user_agent_parser::UserAgent;
 use std::{fmt::{Display, Formatter}};
 
 use base64::{prelude::{BASE64_STANDARD_NO_PAD}, Engine};
@@ -394,7 +391,7 @@ mod tests {
     use rocket::{http::Status, local::asynchronous::{Client, LocalResponse}, serde::json::json, Build,  Rocket};
     use sqlx::{query, Executor, PgPool, Row};
 
-    use crate::{loginsession::{LoginError, LoginSession}, mock_chrono::set_timestamp_rfc3339};
+    use crate::{loginsession::{LoginError, LoginSession, SESSION_ID}, mock_chrono::set_timestamp_rfc3339};
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
     async fn test_load_session(pool: PgPool) {
@@ -484,18 +481,18 @@ mod tests {
     
         // Verify
         let resp_verify_login = client.get(uri!(crate::loginsession::verify_session))
-            .cookie(("sessionid", login.sessionid_raw.clone()))
+            .cookie((SESSION_ID, login.sessionid_raw.clone()))
             .dispatch().await;
         assert_eq!(resp_verify_login.status(), Status::NoContent);
         assert_eq!(count_session_rows(&pool).await, 1, "should be 1 session after login/verify");
     
         // Logout
         let resp_logout = client.post(uri!(crate::loginsession::logout))
-            .cookie(("sessionid", login.sessionid_raw.clone()))
+            .cookie((SESSION_ID, login.sessionid_raw.clone()))
             .dispatch().await;
         assert_eq!(resp_logout.status(), Status::NoContent);
         assert_eq!(count_session_rows(&pool).await, 0, "should be 0 sessions after logout");
-        assert_eq!(resp_logout.cookies().get("sessionid").unwrap().max_age().unwrap().whole_microseconds(), 0);
+        assert_eq!(resp_logout.cookies().get(SESSION_ID).unwrap().max_age().unwrap().whole_microseconds(), 0);
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
@@ -517,7 +514,7 @@ mod tests {
 
         // Login again with existing cookie => no new session record, existing session is extended
         let mut post = client.post(uri!(crate::loginsession::login))
-            .cookie(("sessionid", login1.sessionid_raw.clone()));
+            .cookie((SESSION_ID, login1.sessionid_raw.clone()));
         post.set_body(json!({
             "email": "user1@example.com",
             "password": "password"
@@ -546,7 +543,7 @@ mod tests {
 
         // Login again with existing cookie but wrong password => deletes session record
         let mut post = client.post(uri!(crate::loginsession::login))
-            .cookie(("sessionid", login1.sessionid_raw.clone()));
+            .cookie((SESSION_ID, login1.sessionid_raw.clone()));
         post.set_body(json!({
             "email": "user1@example.com",
             "password": "wrong"
@@ -588,9 +585,9 @@ mod tests {
 
     impl LoginCookie {
         fn from_response(resp: &LocalResponse) -> Option<Self> {
-            resp.cookies().get("sessionid").map(|cookie| {
+            resp.cookies().get(SESSION_ID).map(|cookie| {
                 let cookie_private = resp.cookies()
-                    .get_private("sessionid")
+                    .get_private(SESSION_ID)
                     .map(|c| c.value().to_string())
                     .unwrap_or_else(|| cookie.value().to_string());
                 Self {
