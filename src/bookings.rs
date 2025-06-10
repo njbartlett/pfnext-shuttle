@@ -633,7 +633,7 @@ mod tests {
         crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await.unwrap();
         assert_eq!(1, count_bookings(&pool).await);
 
-        assert_eq!(vec![("Joe Admin".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
+        assert_eq!(vec![("Admin User@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
@@ -652,7 +652,7 @@ mod tests {
         crate::bookings::delete_booking(State::from(&pool), login, member_id, session_id).await.unwrap();
         assert_eq!(0, count_bookings(&pool).await);
 
-        assert_eq!(vec![("Admin User".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", session_time))], read_logged(&pool).await);
+        assert_eq!(vec![("admin@example.org".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
@@ -670,7 +670,7 @@ mod tests {
         };
 
         // Create booking
-        let login = create_login(member1_id, "member", "member");
+        let login = create_login(member2_id, "member", "member");
         let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await;
         assert_eq!(Err(Custom(Status::Forbidden, "Cannot create a booking for another user!".to_string())), result);
 
@@ -692,7 +692,7 @@ mod tests {
         crate::bookings::delete_booking(State::from(&pool), login, member_id, session_id).await.unwrap();
         assert_eq!(0, count_bookings(&pool).await);
 
-        assert_eq!(vec![("Member User".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", session_time))], read_logged(&pool).await);
+        assert_eq!(vec![("member@example.org".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
@@ -706,7 +706,7 @@ mod tests {
         create_booking(&pool, member1_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
 
-        let login = create_login(member1_id, "member", "member");
+        let login = create_login(member2_id, "member", "member");
         let result = crate::bookings::delete_booking(State::from(&pool), login, member1_id, session_id).await;
         assert_eq!(Err(Custom(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string())), result);
 
@@ -732,7 +732,7 @@ mod tests {
         crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await.unwrap();
         assert_eq!(1, count_bookings(&pool).await);
 
-        assert_eq!(vec![("Trainer User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
+        assert_eq!(vec![("trainer@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
@@ -750,7 +750,7 @@ mod tests {
         crate::bookings::delete_booking(State::from(&pool), login, member_id, session_id).await.unwrap();
         assert_eq!(0, count_bookings(&pool).await);
 
-        assert_eq!(vec![("Trainer User".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", session_time))], read_logged(&pool).await);
+        assert_eq!(vec![("trainer@example.org".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
@@ -812,7 +812,7 @@ mod tests {
         crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await.unwrap();
         assert_eq!(1, count_bookings(&pool).await);
 
-        assert_eq!(vec![("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
+        assert_eq!(vec![("member@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]
@@ -891,9 +891,9 @@ mod tests {
         assert_eq!(1, count_bookings(&pool).await);
 
         assert_eq!(vec![
-            ("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", datetime)),
-            ("Member User".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", datetime)),
-            ("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=On The Move, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", datetime))
+            ("member@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", datetime)),
+            ("member@example.org".to_string(), "DELETED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=0", datetime)),
+            ("member@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=On The Move, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", datetime))
         ], read_logged(&pool).await);
     }
 
@@ -935,8 +935,8 @@ mod tests {
         assert_eq!(2, count_bookings(&pool).await);
 
         assert_eq!(vec![
-            ("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", tomorrow)),
-            ("Member User".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=On The Move, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", next_week))
+            ("member@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", tomorrow)),
+            ("member@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=On The Move, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", next_week))
         ], read_logged(&pool).await);
     }
 
@@ -1015,8 +1015,8 @@ mod tests {
         assert_eq!(5, member_record.credits);
 
         assert_eq!(vec![
-            ("PAYG User".to_string(), "CREATED BOOKING".to_string(), format!("person=PAYG User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=1", session_datetime)),
-            ("PAYG User".to_string(), "DELETED BOOKING".to_string(), format!("person=PAYG User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=1", session_datetime))
+            ("PAYG@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=PAYG User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=1", session_datetime)),
+            ("PAYG@example.org".to_string(), "DELETED BOOKING".to_string(), format!("person=PAYG User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=1", session_datetime))
         ], read_logged(&pool).await);
     }
 
@@ -1183,7 +1183,7 @@ mod tests {
             sessionid: "xxx".to_string(),
             uid,
             name: name.to_string(),
-            email: format!("{}@example.com", name),
+            email: format!("{}@example.org", name),
             roles: vec![role.to_string()],
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }

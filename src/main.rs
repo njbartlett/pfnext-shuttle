@@ -4,6 +4,7 @@ extern crate rocket;
 
 use std::collections::HashSet;
 use std::env;
+
 use chrono::{DateTime, FixedOffset};
 
 use rocket::Request;
@@ -11,9 +12,10 @@ use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
 use rocket::serde::Serialize;
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
+
 use shuttle_runtime::CustomError;
 use sqlx::{Executor, FromRow, PgPool, query_as};
-use user_agent_parser::UserAgentParser;
+
 use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
 

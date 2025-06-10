@@ -1,5 +1,4 @@
 use std::ops::Add;
-use std::time;
 
 use chrono::{DateTime, Duration, Utc};
 use mail_send::mail_builder::headers::address::Address;
@@ -660,11 +659,12 @@ async fn send_email<'x>(
 }
 
 mod tests {
-    use chrono::{Days, Duration, Utc};
+    use chrono::{Days, Utc};
     use rocket::http::Status;
     use rocket::response::status::Custom;
     use rocket::State;
-    use sqlx::{FromRow, PgPool, query_as, Executor};
+    use sqlx::{query, query_as, Column, Executor, FromRow, PgPool, Row};
+    use crate::backup::PersonRow;
     use crate::users::{get_user, list_users};
     use crate::loginsession::LoginSession;
 
@@ -686,10 +686,10 @@ mod tests {
         member_id.id
     }
 
-    fn create_login(name: &str, role: &str) -> LoginSession {
+    fn create_login(uid: i64, name: &str, role: &str) -> LoginSession {
         LoginSession {
             sessionid: "xxx".to_string(),
-            uid: 0,
+            uid,
             name: name.to_string(),
             email: format!("{}@example.com", name),
             roles: vec![role.to_string()],
@@ -730,10 +730,10 @@ mod tests {
         let pid1 = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
         let pid2 = create_person(&pool, "bob@example.com", Option::None, "member", 0).await;
 
-        let claim = create_login("admin", "admin");
-        assert_eq!("joe@example.com", get_user(State::from(&pool), claim.clone(), pid1).await.unwrap().email);
-        assert_eq!("bob@example.com", get_user(State::from(&pool), claim.clone(), pid2).await.unwrap().email);
-        assert_eq!(Err(Custom(Status::NotFound, "no user found for id -1".to_string())), get_user(State::from(&pool), claim.clone(), -1).await);
+        let login = create_login(-1, "admin", "admin");
+        assert_eq!("joe@example.com", get_user(State::from(&pool), login.clone(), pid1).await.unwrap().email);
+        assert_eq!("bob@example.com", get_user(State::from(&pool), login.clone(), pid2).await.unwrap().email);
+        assert_eq!(Err(Custom(Status::NotFound, "no user found for id -1".to_string())), get_user(State::from(&pool), login.clone(), -1).await);
     }
 
     #[sqlx::test]
@@ -742,7 +742,7 @@ mod tests {
         create_person(&pool, "joe@example.com", None, "member", 0).await;
         create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        let result = list_users(State::from(&pool), create_login("admin", "admin"), None).await.unwrap();
+        let result = list_users(State::from(&pool), create_login(-1, "admin", "admin"), None).await.unwrap();
 
         assert_eq!(2, result.len());
     }
@@ -753,8 +753,8 @@ mod tests {
         let user1 = create_person(&pool, "joe@example.com", None, "member", 0).await;
         let user2 = create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        let claim = create_login("member", "member");
-        let result = list_users(State::from(&pool), create_login("member", "member"), None).await.unwrap();
+        dump_persons(&pool).await;
+        let result = list_users(State::from(&pool), create_login(user1, "user1§", "member"), None).await.unwrap();
 
         assert_eq!(1, result.len());
         assert_eq!("joe@example.com", result[0].email);
@@ -766,10 +766,19 @@ mod tests {
         create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
         create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        let result = list_users(State::from(&pool), create_login("admin", "admin"), None).await.unwrap();
+        let result = list_users(State::from(&pool), create_login(-1, "admin", "admin"), None).await.unwrap();
 
         assert_eq!(2, result.len());
         assert_eq!(true, result.get(0).unwrap().pwd_defined);
         assert_eq!(false, result.get(1).unwrap().pwd_defined);
+    }
+
+    async fn dump_persons(pool: &PgPool) {
+        query_as("SELECT * FROM person")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .for_each(|row: PersonRow| println!("### Person: {:?}", row));
     }
 }

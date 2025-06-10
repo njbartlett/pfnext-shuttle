@@ -88,7 +88,7 @@ mod tests {
 
         let login = create_login("member", "member");
         let read_result = crate::log::read_log(State::from(&pool), login, None, None).await;
-        assert_eq!(Custom(Status::Forbidden, "user is not allowed to perform this action".to_string()), read_result.unwrap_err());
+        assert_eq!(Custom(Status::Forbidden, "admin role required to read log".to_string()), read_result.unwrap_err());
     }
     #[sqlx::test]
     async fn read_empty_admin(pool: PgPool) {
