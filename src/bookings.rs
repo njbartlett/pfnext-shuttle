@@ -1,22 +1,22 @@
-use std::fmt::{Display, Formatter};
-use chrono::{Datelike, DateTime, Days, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Days, NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
-use rocket::futures::StreamExt;
 use rocket::futures::stream::BoxStream;
+use rocket::futures::StreamExt;
 use rocket::http::Status;
 use rocket::response::status::{Created, Custom, NoContent};
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::State;
 use serde::Deserialize;
-use sqlx::{Error, FromRow, PgPool, query_as, QueryBuilder, raw_sql, Row};
 use sqlx::postgres::{PgQueryResult, PgRow};
+use sqlx::{query_as, raw_sql, Error, FromRow, PgPool, QueryBuilder, Row};
+use std::fmt::{Display, Formatter};
 
-use crate::loginsession::LoginSession;
-use crate::{BigintRecord, parse_opt_date, SessionLocation, SessionType};
-use crate::users::UserLoginRecord;
 use crate::config::Config;
 use crate::log::append_log;
+use crate::loginsession::LoginSession;
+use crate::users::UserLoginRecord;
+use crate::{parse_opt_date, BigintRecord, SessionLocation, SessionType};
 
 const ROLE_FULL_MEMBER: &str = "member";
 const ROLE_TRAINER: &str = "trainer";

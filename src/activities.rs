@@ -3,15 +3,15 @@ use chrono_tz::Tz;
 use futures::future::try_join_all;
 use rocket::http::Status;
 use rocket::response::status::{Created, Custom, NoContent};
-use rocket::State;
 use rocket::serde::json::Json;
+use rocket::State;
 use serde::{Deserialize, Serialize};
-use sqlx::{query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 use sqlx::postgres::PgRow;
+use sqlx::{query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
 use crate::loginsession::LoginSession;
-use crate::whereclause::WhereClause;
 use crate::whereclause::Operator::Equal;
+use crate::whereclause::WhereClause;
 use crate::{BigintRecord, Config};
 
 #[cfg(test)]

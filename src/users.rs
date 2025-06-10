@@ -9,16 +9,16 @@ use password_auth::{generate_hash, verify_password};
 use passwords::PasswordGenerator;
 use rocket::http::{Header, Status};
 use rocket::response::status::{Accepted, Custom, NoContent};
-use rocket::serde::{Deserialize, Serialize};
 use rocket::serde::json::Json;
+use rocket::serde::{Deserialize, Serialize};
 use rocket::State;
-use sqlx::{Error, FromRow, PgPool, query_as, raw_sql, Row, QueryBuilder, Postgres};
 use sqlx::postgres::PgRow;
+use sqlx::{query_as, raw_sql, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 use urlencoding::encode;
 
+use crate::config::{AppEnv, Config};
 use crate::loginsession::LoginSession;
 use crate::{BigintRecord, CountResult};
-use crate::config::{Config, AppEnv};
 
 const ACCESS_TOKEN_TTL: Duration = Duration::hours(6);
 const ACCESS_TOKEN_TTL_ADMIN: Duration = Duration::hours(3);

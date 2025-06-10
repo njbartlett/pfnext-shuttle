@@ -2,15 +2,15 @@ use chrono::{DateTime, Utc};
 use rocket::form::validate::Contains;
 use rocket::http::Status;
 use rocket::response::status::{Created, Custom, NoContent};
-use rocket::serde::Deserialize;
 use rocket::serde::json::Json;
+use rocket::serde::Deserialize;
 use rocket::State;
 use serde::Serialize;
-use sqlx::{Error, FromRow, PgPool, Postgres, query_as, QueryBuilder, Row};
 use sqlx::postgres::PgRow;
+use sqlx::{query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
 use crate::loginsession::LoginSession;
-use crate::{BigintRecord, parse_opt_date, SessionLocation, SessionTrainer, SessionType};
+use crate::{parse_opt_date, BigintRecord, SessionLocation, SessionTrainer, SessionType};
 
 #[derive(Serialize, Clone, Debug)]
 pub struct SessionFullRecord {

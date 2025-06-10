@@ -4,7 +4,7 @@ use rocket::response::status::Custom;
 use rocket::serde::json::Json;
 use rocket::State;
 use serde::Serialize;
-use sqlx::{FromRow, PgPool, query_as};
+use sqlx::{query_as, FromRow, PgPool};
 
 use crate::loginsession::LoginSession;
 

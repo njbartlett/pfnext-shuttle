@@ -1,8 +1,8 @@
-use rocket_client_addr::ClientRealAddr;
 use ::time::OffsetDateTime;
-use std::{fmt::{Display, Formatter}};
+use rocket_client_addr::ClientRealAddr;
+use std::fmt::{Display, Formatter};
 
-use base64::{prelude::{BASE64_STANDARD_NO_PAD}, Engine};
+use base64::{prelude::BASE64_STANDARD_NO_PAD, Engine};
 use chrono::{DateTime, Duration, FixedOffset, Offset};
 
 #[cfg(test)]

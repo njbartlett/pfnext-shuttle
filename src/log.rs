@@ -1,11 +1,11 @@
+use crate::{loginsession::LoginSession, parse_opt_date, BigintRecord};
 use chrono::{DateTime, Utc};
 use rocket::http::Status;
 use rocket::response::status::Custom;
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::State;
-use sqlx::{FromRow, PgPool, query_as, QueryBuilder};
-use crate::{loginsession::LoginSession, parse_opt_date, BigintRecord};
+use sqlx::{query_as, FromRow, PgPool, QueryBuilder};
 
 #[derive(FromRow, Serialize, Debug)]
 pub struct LogRow {

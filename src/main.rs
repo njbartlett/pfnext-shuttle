@@ -7,28 +7,28 @@ use std::env;
 
 use chrono::{DateTime, FixedOffset};
 
-use rocket::Request;
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
 use rocket::serde::Serialize;
+use rocket::Request;
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
 
 use shuttle_runtime::CustomError;
-use sqlx::{Executor, FromRow, PgPool, query_as};
+use sqlx::{query_as, Executor, FromRow, PgPool};
 
 use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
 
-mod config;
-mod sessions;
-mod users;
-mod bookings;
-mod backup;
-mod log;
 mod activities;
-mod whereclause;
+mod backup;
+mod bookings;
+mod config;
+mod log;
 mod loginsession;
 mod mock_chrono;
+mod sessions;
+mod users;
+mod whereclause;
 
 #[catch(401)]
 pub fn unauthorized(request: &Request) -> Custom<String> {
