@@ -7,13 +7,15 @@ use std::env;
 
 use chrono::{DateTime, FixedOffset};
 
+use dotenv::dotenv;
+
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
-use rocket::Request;
+use rocket::{Build, Request, Rocket};
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
 
-use shuttle_runtime::CustomError;
-use sqlx::{Executor, PgPool};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 
 use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
@@ -35,11 +37,22 @@ pub fn unauthorized(request: &Request) -> Custom<String> {
     info!("### Intercepted 401 return, auth error: {:?}", auth_error);
     match auth_error {
         Some(err) => match err {
-            AuthenticationError::MissingSession => Custom(Status::Unauthorized, "Your login session has expired".to_string()),
-            AuthenticationError::MissingDatabase => Custom(Status::InternalServerError, "Failed to validate session".to_string()),
-            AuthenticationError::DatabaseError(err) => Custom(Status::InternalServerError, err.to_string()),
+            AuthenticationError::MissingSession => Custom(
+                Status::Unauthorized,
+                "Your login session has expired".to_string(),
+            ),
+            AuthenticationError::MissingDatabase => Custom(
+                Status::InternalServerError,
+                "Failed to validate session".to_string(),
+            ),
+            AuthenticationError::DatabaseError(err) => {
+                Custom(Status::InternalServerError, err.to_string())
+            }
         },
-        None => Custom(Status::InternalServerError, "Failed to authenticate user".to_string())
+        None => Custom(
+            Status::InternalServerError,
+            "Failed to authenticate user".to_string(),
+        ),
     }
 }
 
@@ -48,67 +61,106 @@ pub fn notfound(request: &Request) -> Custom<String> {
     Custom(Status::NotFound, "not found".to_string())
 }
 
-#[shuttle_runtime::main]
-async fn rocket(
-    #[shuttle_shared_db::Postgres] pool: PgPool,
-    #[shuttle_runtime::Secrets] secrets: shuttle_runtime::SecretStore
-) -> shuttle_rocket::ShuttleRocket {
-    // Initiate tables
-    pool.execute(include_str!("../schema.sql"))
+async fn create_pool() -> PgPool {
+    dotenv().expect("Failed to load .env properties");
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
         .await
-        .map_err(CustomError::new)?;
+        .expect("Failed to create pool")
+}
 
-    // Init config
-    let config: Config = Config::default();
-    info!("Initialized config: {:?}", config);
-    let app_env: AppEnv = AppEnv {
-        database_url: secrets.get("DATABASE_URL").unwrap(),
-        access_token_key: secrets.get("ACCESS_TOKEN_KEY").unwrap(),
-        refresh_token_key: secrets.get("REFRESH_TOKEN_KEY").unwrap(),
-        smtp_host: secrets.get("SMTP_HOST").unwrap(),
-        smtp_port: secrets.get("SMTP_PORT").unwrap().parse().unwrap(),
-        smtp_username: secrets.get("SMTP_USERNAME").unwrap(),
-        smtp_password: secrets.get("SMTP_PASSWORD").unwrap(),
-        cors_allowed: secrets.get("CORS_ALLOWED").unwrap(),
-        static_path: secrets.get("STATIC_PATH").unwrap()
-    };
+#[launch]
+async fn launch() -> Rocket<Build> {
+    dotenv().ok();
+
+    // Load config
+    let config = Config::load().expect("Failed to load config properties");
+    info!("Loaded configuration: {:?}", config);
+    let app_env = AppEnv::new_from_env().expect("Failed to load application environment");
+    info!("Loaded application environment");
+
+    // Start DB connection pool
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&app_env.database_url)
+        .await
+        .expect("Failed to create pool");
 
     // Configure CORS
-    info!("Initializing CORS with allowed origin regex: {}", &app_env.cors_allowed);
+    info!(
+        "Initializing CORS with allowed origin regex: {}",
+        &app_env.cors_allowed
+    );
     let allow_domain = [&app_env.cors_allowed];
     let allowed_origins = AllowedOrigins::some_regex(&allow_domain);
     let cors = rocket_cors::CorsOptions {
         allowed_origins,
-        allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete, Method::Put, Method::Patch].into_iter().map(From::from).collect(),
+        allowed_methods: vec![
+            Method::Get,
+            Method::Post,
+            Method::Options,
+            Method::Head,
+            Method::Delete,
+            Method::Put,
+            Method::Patch,
+        ]
+        .into_iter()
+        .map(From::from)
+        .collect(),
         allowed_headers: AllowedHeaders::All,
         expose_headers: HashSet::from(["Location".to_string()]),
         allow_credentials: true,
         ..Default::default()
-    }.to_cors().map_err(CustomError::new)?;
+    }
+    .to_cors()
+    .expect("Failed to create cors options");
 
     // Configure Rocket
-    let rocket_secret_key = secrets.get("ROCKET_SECRET_KEY").expect("Missing secret: ROCKET_SECRET_KEY");
-    env::set_var("ROCKET_SECRET_KEY", rocket_secret_key);
-    let rocket = rocket::build()
+    rocket::build()
         .attach(cors)
         .manage(config)
         .manage(app_env)
         .manage(pool)
         .register("/", catchers![unauthorized, notfound]) // TODO forbidden
-        .mount("/", routes![
-            loginsession::login, loginsession::logout, loginsession::verify_session,
-
-            users::register_user, users::request_pwd_reset, users::reset_pwd, users::get_user, users::list_users, users::delete_user, users::update_user, users::patch_user,
-
-            sessions::list_sessions, sessions::get_session, sessions::create_session, sessions::delete_session, sessions::list_locations, sessions::list_session_types, sessions::update_session,
-            bookings::list_bookings, bookings::create_booking, bookings::delete_booking, bookings::update_booking, bookings::get_attendance_stats,
-
-            activities::list_activity_types, activities::list_challenges, activities::get_challenge, activities::get_activity, activities::list_activities, activities::create_activity, activities::delete_activity,
-
-            log::read_log, backup::backup_all
-        ]);
-
-    Ok(rocket.into())
+        .mount(
+            "/",
+            routes![
+                loginsession::login,
+                loginsession::logout,
+                loginsession::verify_session,
+                users::register_user,
+                users::request_pwd_reset,
+                users::reset_pwd,
+                users::get_user,
+                users::list_users,
+                users::delete_user,
+                users::update_user,
+                users::patch_user,
+                sessions::list_sessions,
+                sessions::get_session,
+                sessions::create_session,
+                sessions::delete_session,
+                sessions::list_locations,
+                sessions::list_session_types,
+                sessions::update_session,
+                bookings::list_bookings,
+                bookings::create_booking,
+                bookings::delete_booking,
+                bookings::update_booking,
+                bookings::get_attendance_stats,
+                activities::list_activity_types,
+                activities::list_challenges,
+                activities::get_challenge,
+                activities::get_activity,
+                activities::list_activities,
+                activities::create_activity,
+                activities::delete_activity,
+                log::read_log,
+                backup::backup_all
+            ],
+        )
 }
 
 fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, Custom<String>> {
@@ -116,5 +168,7 @@ fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, 
         return Ok(None);
     }
     let parsed = DateTime::parse_from_rfc3339(str.as_ref().unwrap());
-    Ok(Some(parsed.map_err(|e| Custom(Status::UnprocessableEntity, e.to_string()))?))
+    Ok(Some(parsed.map_err(|e| {
+        Custom(Status::UnprocessableEntity, e.to_string())
+    })?))
 }

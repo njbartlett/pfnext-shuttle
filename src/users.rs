@@ -638,8 +638,8 @@ async fn send_email<'x>(
     app_env: &AppEnv
 ) -> Result<(), Custom<String>> {
     // Open the client
-    info!("Connecting to SMTP server at {}:{}...", &app_env.smtp_host, &app_env.smtp_port);
-    let mut client = SmtpClientBuilder::new(&app_env.smtp_host, app_env.smtp_port)
+    info!("Connecting to SMTP server at {}:{}...", &config.smtp_host, &config.smtp_port);
+    let mut client = SmtpClientBuilder::new(&config.smtp_host, config.smtp_port)
         .implicit_tls(true)
         .credentials(Credentials::new(&app_env.smtp_username, &app_env.smtp_password))
         .connect()
