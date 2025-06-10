@@ -4,14 +4,16 @@ extern crate rocket;
 
 use std::collections::HashSet;
 use std::env;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, FixedOffset};
 
 use dotenv::dotenv;
 
+use rocket::fs::{relative, NamedFile};
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
-use rocket::{Build, Request, Rocket};
+use rocket::{Build, Request, Rocket, State};
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
 
 use sqlx::postgres::PgPoolOptions;
@@ -31,6 +33,19 @@ mod sessions;
 mod users;
 mod whereclause;
 
+#[rocket::get("/<path..>")]
+async fn static_files(
+    app_env: &State<AppEnv>,
+    path: PathBuf
+) -> Option<NamedFile> {
+    let root = relative!("/");
+    let mut path = Path::new(root).join(&app_env.static_path).join(path);
+    if path.is_dir() {
+        path.push("index.html");
+    }
+
+    NamedFile::open(path).await.ok()
+}
 #[catch(401)]
 pub fn unauthorized(request: &Request) -> Custom<String> {
     let auth_error = request.local_cache::<Option<AuthenticationError>, _>(|| None);
@@ -123,9 +138,10 @@ async fn launch() -> Rocket<Build> {
         .manage(config)
         .manage(app_env)
         .manage(pool)
-        .register("/", catchers![unauthorized, notfound]) // TODO forbidden
+        .mount("/", routes![static_files])
+        .register("/api", catchers![unauthorized, notfound]) // TODO forbidden
         .mount(
-            "/",
+            "/api",
             routes![
                 loginsession::login,
                 loginsession::logout,

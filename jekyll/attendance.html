@@ -1,0 +1,47 @@
+---
+layout: nonav
+title: Session Attendance
+script: js/attendance.js
+---
+
+<div v-if="session !== null" class="card my-2">
+    <div class="card-header d-flex align-items-center">
+        <svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" fill="currentColor" class="bi bi-sun-fill" viewBox="0 0 54 54">
+                <path d="m 29.64,32.02 2.7,-4.68 8.16,14.04 h 5.4 C 44.7,39.46 33.3,19.96 32.34,18.04 L 20.58,38.44 16.2,46.06 H 0 C 0.9,44.56 6.96,34 12.78,23.86 16.2,17.92 19.98,11.26 24.24,4 h 5.4 L 18.48,23.32 8.1,41.38 h 5.4 C 20.88,28.36 25.5,20.68 32.34,8.68 32.76,9.4 53.88,46 54,46.06 H 37.8 Z"/>
+        </svg>
+        <h2 class="ms-2">Session Attendance</h2>
+        <div class="ms-auto align-middle">
+            <a type="button" class="btn-close" aria-label="Close" :href="page_return_path"></a>
+        </div>
+    </div>
+    <div class="card-body">
+        <p>${bookings.length} member(s) booked ${session.session_type.name} session at ${displayTime(session.datetime)} on ${displayDate(session.datetime)}<span v-if="session.location"> at ${session.location.name}</span>.</p>
+        <table class="table table-hover table-sm">
+            <thead>
+                <tr>
+                    <th>Member</th>
+                    <th>Attended?</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            <tr v-for="booking in bookings">
+                <td>${booking.person_name}</td>
+                <td><form><input type="checkbox" class="form-check larger align-middle" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
+                <td><button type="button" class="btn btn-outline-danger btn-sm float-end" @click="removeMember(session.id, booking.person_id)"><i class="bi bi-trash"></i></button></td>
+            </tr>
+
+        </table>
+
+        <form>
+            <div class="input-group m-0 p-0">
+                <span class="input-group-text">+</span>
+                <input id="addMemberToSessionInput" type="search" class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="addMemberInput">
+                <button class="btn btn-primary" :disabled="!adding_user" @click.prevent="addMember(session.id, adding_user.id)">Add</button>
+            </div>
+            <datalist id="addMemberToSessionOptions">
+                <option v-if="all_user_data && all_user_data.name_email_to_user" v-for="user_name_email in all_user_data.name_email_to_user.keys()" :value="user_name_email">
+            </datalist>
+        </form>
+    </div> <!-- end card body -->
+</div> <!-- end card -->

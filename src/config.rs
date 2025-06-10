@@ -75,8 +75,8 @@ pub(crate) struct AppEnv {
     pub(crate) smtp_username: String,
     pub(crate) smtp_password: String,
     pub(crate) cors_allowed: String,
-    pub(crate) static_path: String,
     pub(crate) rocket_secret_key: String,
+    pub(crate) static_path: String,
 }
 
 impl Drop for AppEnv {
@@ -97,8 +97,8 @@ impl AppEnv {
             smtp_username: field_from_env("SMTP_USERNAME")?,
             smtp_password: field_from_env("SMTP_PASSWORD")?,
             cors_allowed: field_from_env("CORS_ALLOWED")?,
-            static_path: field_from_env("STATIC_PATH")?,
             rocket_secret_key: field_from_env("ROCKET_SECRET_KEY")?,
+            static_path: field_from_env("STATIC_PATH")?,
         })
     }
 }

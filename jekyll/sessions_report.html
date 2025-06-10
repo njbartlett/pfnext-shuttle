@@ -1,0 +1,57 @@
+---
+layout: loggedin
+title: Sessions Report
+script: js/sessions_report.js
+---
+<h2 class="my-3">Sessions Report</h2>
+
+<form>
+    <div class="row">
+        <div class="col-2">
+            <label for="rangeFrom" class="col-form-label">From:</label>
+        </div>
+        <div class="col-4">
+            <input id="rangeFrom" type="date" class="form-control" placeholder="start date" aria-label="start date" v-model="filter_data.from">
+        </div>
+        <div class="col-2">
+            <label for="rangeTo" class="col-form-label">To:</label>
+        </div>
+        <div class="col-4">
+            <input id="rangeTo" type="date" class="form-control" placeholder="end date" aria-label="end date" v-model="filter_data.to">
+        </div>
+    </div>
+    <div class="row mt-1">
+        <div class="col-2">
+            <label for="filterTrainer" class="col-form-label">Trainer:</label>
+        </div>
+        <div class="col-4">
+            <select id="filterTrainer" class="form-control" v-model="filter_data.trainer_id">
+                <option :value="null">Any</option>
+                <option v-for="trainer in trainer_list" :value="trainer.id">${trainer.name}</option>
+            </select>
+        </div>
+    </div>
+</form>
+
+<table class="table table-striped my-3">
+    <thead>
+        <tr>
+            <th scope="col">Date/Time</th>
+            <th scope="col">Type</th>
+            <th scope="col">Location</th>
+            <th scope="col">Trainer</th>
+            <th scope="col">Attendance</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr v-for="session in session_data">
+            <td>${displayDate(session.datetime)} ${displayTime(session.datetime)}</td>
+            <td>${session.session_type.name}</td>
+            <td>${session.location ? session.location.name : 'N/A'}</td>
+            <td>${session.trainer ? session.trainer.name : 'N/A'}</td>
+            <td>${session.attended_count} / ${session.booking_count}</td>
+        </tr>
+    </tbody>
+</table>
+
+

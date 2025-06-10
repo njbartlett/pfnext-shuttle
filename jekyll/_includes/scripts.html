@@ -1,0 +1,25 @@
+<script type="module">
+
+{% include library.js %}
+
+{% if page.script %}
+
+    // BEGIN {{ page.script }}
+    {% include_relative {{ page.script }} %}
+    // END {{ page.script }}
+
+{% else %}
+
+    // Simple static page setup
+    let app = createApp({
+        setup() {
+            return {
+                loggedin, onLogout, isAdmin
+            }
+        }
+    })
+    app.config.compilerOptions.delimiters = ['${', '}']
+    app.mount('#app')
+
+{% endif %}
+</script>

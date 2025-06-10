@@ -1,0 +1,66 @@
+---
+layout: loggedin
+title: Attendance Stats
+script: js/stats.js
+---
+
+<h2 class="my-3">Attendance Stats</h2>
+
+<!-- Query Params -->
+<div class="row">
+    <div class="col">
+        <div class="card my-2">
+            <h6 class="card-header">Date Range</h6>
+            <div class="card-body">
+                <form>
+                    <div class="row">
+                        <div class="col">
+                            <label for="fromDate" class="form-label">From</label>
+                            <input id="fromDate" class="form-control" type="date" v-model="filter.from">
+                        </div>
+                        <div class="col">
+                            <label for="toDate" class="form-label">To</label>
+                            <input id="toDate" class="form-control" type="date" v-model="filter.to">
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card my-2">
+            <h6 class="card-header">Included Session Types</h6>
+            <div class="card-body">
+                <div v-for="session_type in session_types" class="form-check">
+                    <input type="checkbox" class="form-check-input" v-model="session_type.enabled">
+                    <label class="form-check-label">${session_type.name}</label>
+                </div>
+            </div>
+        </div>        
+    </div>
+</div>
+
+<table class="table align-middle">
+    <thead>
+        <tr>
+            <th scope="col">Rank</th>
+            <th scope="col">Sessions Attended</th>
+            <th scope="col">Name</th>
+        </tr>
+    </thead>
+    <tbody v-for="ranking in stats_categorized">
+        <tr>
+            <td :rowspan="ranking.subentries.length + 1">
+                <span v-if="ranking.rank == 1" title="Gold Medal" class="fs-1">🥇</span>
+                <span v-if="ranking.rank == 2" title="Silver Medal" class="fs-1">🥈</span>
+                <span v-if="ranking.rank == 3" title="Bronze Medal" class="fs-1">🥉</span>
+                <span v-if="ranking.rank >= 4">${ranking.rank}</span>
+            </td>
+            <td :rowspan="ranking.subentries.length + 1">${ranking.attended_count}</td>
+            <td>${ranking.initial.name}</td>
+        </tr>
+        <tr v-for="subentry in ranking.subentries">
+            <td>${subentry.name}</td>
+        </tr>
+    </tbody>
+</table>

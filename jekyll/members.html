@@ -1,0 +1,104 @@
+---
+layout: loggedin
+title: Members Directory
+script: js/members.js
+---
+
+
+<div class="my-3 row">
+    <div class="col">
+        <div class="card">
+            <h5 class="card-header">Member List</h5>
+            <div class="card-body">
+                <table class="table table-borderless table-hover table-sm">
+                    <tbody>
+                        <tr v-for="user in user_data">
+                            <td><a href="#" @click="onSelectedMember(user)">${user.name}&nbsp;&lt;${user.email}&gt;</a></td>
+                            <td>
+                                <span v-for="role in user.roles" class="badge rounded-pill text-bg-primary" style="margin-right: 1px;">${role}</span>
+                            </td>
+                            <td :class="{'text-success': user.credits > 0, 'text-secondary': user.credits <= 0}">${user.credits}&nbsp;<i class="bi bi-ticket-perforated"></i></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col">
+        <div class="card">
+            <h5 class="card-header">Member Details</h5>
+            <div class="card-body">
+                <form @submit.prevent="">
+                    <table class="table table-borderless">
+                        <tbody>
+                        <tr>
+                            <td>Name</td>
+                            <td><input type="text" class="form-control" v-model="selected_user.name"></td>
+                        </tr>
+                        <tr>
+                            <td>Email</td>
+                            <td><input type="text" class="form-control" v-model="selected_user.email"></td>
+                        </tr>
+                        <tr>
+                            <td>Phone</td>
+                            <td><input type="text" class="form-control" v-model="selected_user.phone"></td>
+                        </tr>
+                        <tr>
+                            <td>Emergency Contact</td>
+                            <td>
+                                <div class="row">
+                                    <div class="col-sm-6">
+                                        <input type="text" class="form-control" v-model="selected_user.emergency_name" placeholder="Name">
+                                    </div>
+                                    <div class="col-sm-6">
+                                        <input type="text" class="form-control" v-model="selected_user.emergency_phone" placeholder="Phone">
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Medical Info</td>
+                            <td><textarea class="form-control" v-model="selected_user.medical_info" rows="5"></textarea></td>
+                        </tr>
+                        <tr>
+                            <td>Credits</td>
+                            <td><input type="number" class="form-control" v-model="selected_user.credits"></td>
+                        </tr>
+                        <tr>
+                            <td>Password</td>
+                            <td>
+                                <span v-if="selected_user.pwd_defined" class="text-success"><i class="bi bi-check2-circle"></i> Defined</span>
+                                <span v-else class="text-danger"><i class="bi bi-x-circle"></i> Undefined</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Roles</td>
+                            <td>
+                                <span v-if="selected_user.roles.length === 0" class="badge rounded-pill text-bg-secondary">none</span>
+                                <span v-for="role in selected_user.roles">
+                                    <span class="badge rounded-pill text-bg-primary">${role}&nbsp;<a href="" class="link-light" @click.prevent="deleteRole(role, selected_user)"><i class="bi bi-x-circle"></i></a></span>&nbsp;
+                                </span>&nbsp;
+                                <div class="input-group my-2 p-0">
+                                    <span class="input-group-text">+</span>
+                                    <br>
+                                    <input class="form-control" type="text" placeholder="New role name" v-model="new_role.name" :class="{'is-invalid': new_role_validation.name}">
+                                    <button type="button" class="btn btn-outline-primary" @click.prevent="addRole(new_role.name, selected_user)" :disabled="!new_role_validation.ready">Add Role</button>
+                                    <div class="invalid-feedback">${new_role_validation.name}</div>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td>
+                                <button type="button" class="btn btn-outline-primary" :disabled="!edit_user_changed" @click.prevent="onSave(selected_user)">Save</button>&nbsp;<button type="button" class="btn btn-outline-secondary" :disabled="!edit_user_changed" @click.prevent="onReset">Reset</button>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </form>
+            </div>
+        </div>
+
+    </div>
+</div>

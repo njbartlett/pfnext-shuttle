@@ -1,0 +1,68 @@
+---
+layout: loggedin
+title: My Profile
+script: js/profile.js
+---
+
+<form @submit.prevent="onSubmit()">
+    <table class="table" v-if="user_data">
+        <tbody>
+            <tr>
+                <td>Email</td>
+                <td>
+                    <div class="d-flex">
+                        <div class="flex-grow-1 me-2">
+                            ${user_data.email}
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary" :disabled="!user_data_changed" @click.prevent="doSave">Save</button>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td>Name</td>
+                <td><input class="form-control" type="text" id="inputName" v-model="user_data.name" required></td>
+            </tr>
+            <tr>
+                <td>Phone</td>
+                <td><input class="form-control" type="tel" id="inputPhone" v-model="user_data.phone" required></td>
+            </tr>
+            <tr>
+                <td>Emergency Contact</td>
+                <td>
+                    <div class="row">
+                        <div class="col-sm-6">
+                            <input class="form-control" type="text" id="inputEmergencyName" v-model="user_data.emergency_name" placeholder="Name" required>
+                        </div>
+                        <div class="col-sm-6">
+                            <input class="form-control" type="tel" id="inputEmergencyPhone" v-model="user_data.emergency_phone" placeholder="Phone" required>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td>Medical Information</td>
+                <td><textarea class="form-control" id="medicalText" rows="5" title="the title" v-model="user_data.medical_info" placeholder="Please state any relevant medical information, e.g. asthma, epilepsy, medications, allergies etc"></textarea></td>
+            </tr>
+            <tr>
+                <td>Credits</td>
+                <td :class="{'text-success': user_data.credits > 0, 'text-secondary': user_data.credits <= 0}">${user_data.credits}&nbsp;<i class="bi bi-ticket-perforated"></i></td>
+            </tr>
+            <tr>
+                <td>Roles</td>
+                <td>
+                    <span v-for="role in user_data.roles">
+                        <span class="badge rounded-pill text-bg-secondary">${role}</span>&nbsp;
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <td>Password</td>
+                <td>
+                    <a @click="onResetPassword" class="link-warning" href="#">Send a password reset email.</a>
+                    <br>
+                    <div v-if="reset_password_message.message" class="my-1" :class="{'text-danger': reset_password_message.is_error}">${reset_password_message.message}</div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</form>
