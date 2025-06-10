@@ -7,12 +7,12 @@ use rocket::serde::json::Json;
 use rocket::State;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgRow;
-use sqlx::{query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::{query, query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
+use crate::config::Config;
 use crate::loginsession::LoginSession;
 use crate::whereclause::Operator::Equal;
 use crate::whereclause::WhereClause;
-use crate::{BigintRecord, Config};
 
 #[cfg(test)]
 use crate::mock_chrono::Utc;
@@ -207,11 +207,11 @@ pub struct NewActivity {
 
 impl NewActivity {
     pub async fn save(&self, pool: &PgPool) -> Result<i64, Error> {
-        query_as("INSERT INTO activity (person_id, challenge_id, date, amount) VALUES ($1, $2, $3, $4) RETURNING id")
+        query("INSERT INTO activity (person_id, challenge_id, date, amount) VALUES ($1, $2, $3, $4) RETURNING id")
             .bind(self.person_id).bind(self.challenge_id).bind(self.date).bind(self.amount)
             .fetch_one(pool)
             .await
-            .map(|r: BigintRecord| r.id)
+            .and_then(|r| r.try_get("id"))
     }
 }
 
@@ -409,10 +409,11 @@ pub async fn delete_activity(
     }
     qb.push(" RETURNING id");
 
-    qb.build_query_as().fetch_optional(pool.inner())
+    qb.build()
+        .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-        .and_then(|o: Option<BigintRecord>| o.ok_or(Custom(Status::NotFound, "activity not found or user not allowed to delete".to_string())))
+        .and_then(|r| r.ok_or(Custom(Status::NotFound, "activity not found or user not allowed to delete".to_string())))
         .map(|_| NoContent)
 }
 
@@ -424,23 +425,24 @@ mod tests {
     use rocket::response::status::Custom;
     use rocket::serde::json::Json;
     use rocket::State;
-    use sqlx::{query_as, PgPool};
+    use sqlx::{query, PgPool, Row};
 
     use crate::activities::{Activity, ChallengeFull, NewActivity};
+    use crate::config::Config;
     use crate::loginsession::LoginSession;
-    use crate::{BigintRecord, Config};
     use crate::mock_chrono::set_timestamp_rfc3339;
 
     const DUMMY_SESSION_ID: &str = "xxx";
     
     async fn find_person_id_by_name(pool: &PgPool, name: &str) -> i64 {
-        query_as("SELECT id FROM person WHERE name = $1")
+        query("SELECT id FROM person WHERE name = $1")
             .bind(name)
             .fetch_one(pool)
             .await
-            .map(|r: BigintRecord| r.id)
+            .and_then(|r| r.try_get("id"))
             .expect(&format!("failed to find user with name {}", name))
     }
+
     async fn find_user_login_by_name(pool: &PgPool, name: &str, role: &str) -> LoginSession {
         let uid = find_person_id_by_name(pool, name).await;
         LoginSession {
@@ -454,20 +456,20 @@ mod tests {
     }
 
     async fn find_challenge_by_name(pool: &PgPool, name: &str) -> i64 {
-        query_as("SELECT id FROM challenge WHERE name = $1")
+        query("SELECT id FROM challenge WHERE name = $1")
             .bind(name)
             .fetch_one(pool)
             .await
-            .map(|r: BigintRecord| r.id)
+            .and_then(|r| r.try_get("id"))
             .expect(&format!("failed to find challenge with name {}", name))
     }
     
     async fn count_activities(pool: &PgPool) -> i64 {
-        let record: BigintRecord = query_as("select count(*) as id from activity")
+        query("SELECT COUNT(*) AS id FROM activity")
             .fetch_one(pool)
             .await
-            .unwrap();
-        record.id
+            .and_then(|r| r.try_get("id"))
+            .unwrap()
     }
 
     #[sqlx::test(fixtures("../schema.sql"))]
@@ -712,13 +714,14 @@ mod tests {
     async fn test_get_activity_self(pool: PgPool) {
         let login = find_user_login_by_name(&pool, "user1", "member").await;
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
-        let activity_id_record: BigintRecord = query_as("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
+        let activity_id: i64 = query("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
             .bind(login.uid).bind(challenge)
             .fetch_one(&pool)
             .await
+            .and_then(|r| r.try_get("id"))
             .unwrap();
 
-        let activity = crate::activities::get_activity(State::from(&pool), login, activity_id_record.id).await.unwrap().0;
+        let activity = crate::activities::get_activity(State::from(&pool), login, activity_id).await.unwrap().0;
         assert_eq!(100.0, activity.amount);
     }
 
@@ -726,14 +729,15 @@ mod tests {
     async fn test_get_activity_other_admin(pool: PgPool) {
         let user1 = find_person_id_by_name(&pool, "user1").await;
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
-        let activity_id_record: BigintRecord = query_as("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
+        let activity_id: i64 = query("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
             .bind(user1).bind(challenge)
             .fetch_one(&pool)
             .await
+            .and_then(|r| r.try_get("id"))
             .unwrap();
 
         let login = find_user_login_by_name(&pool, "admin", "admin").await;
-        let activity = crate::activities::get_activity(State::from(&pool), login, activity_id_record.id).await.unwrap().0;
+        let activity = crate::activities::get_activity(State::from(&pool), login, activity_id).await.unwrap().0;
         assert_eq!(100.0, activity.amount);
     }
 
@@ -741,14 +745,15 @@ mod tests {
     async fn test_get_activity_other_nonadmin(pool: PgPool) {
         let user1 = find_person_id_by_name(&pool, "user1").await;
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
-        let activity_id_record: BigintRecord = query_as("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
+        let activity_id: i64 = query("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
             .bind(user1).bind(challenge)
             .fetch_one(&pool)
             .await
+            .and_then(|r| r.try_get("id"))
             .unwrap();
 
         let login = find_user_login_by_name(&pool, "user2", "member").await;
-        let err = crate::activities::get_activity(State::from(&pool), login, activity_id_record.id).await.unwrap_err();
+        let err = crate::activities::get_activity(State::from(&pool), login, activity_id ).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 

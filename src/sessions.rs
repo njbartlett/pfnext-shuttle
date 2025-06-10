@@ -10,23 +10,58 @@ use sqlx::postgres::PgRow;
 use sqlx::{query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
 use crate::loginsession::LoginSession;
-use crate::{parse_opt_date, BigintRecord, SessionLocation, SessionTrainer, SessionType};
+use crate::parse_opt_date;
+
+#[derive(FromRow, Serialize, Clone, Debug, PartialEq)]
+pub(crate) struct SessionType {
+    pub(crate) id: i32,
+    pub(crate) name: String,
+    pub(crate) requires_trainer: bool,
+    pub(crate) cost: i16,
+    pub(crate) deprecated: bool
+}
+
+impl SessionType {
+    async fn find_by_id(pool: &PgPool, id: i32) -> Result<Option<Self>, String> {
+        query_as("SELECT * FROM session_type WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
 
 #[derive(Serialize, Clone, Debug)]
-pub struct SessionFullRecord {
-    pub id: i64,
-    pub datetime: DateTime<Utc>,
-    pub duration_mins: i32,
-    pub session_type: SessionType,
-    pub location: Option<SessionLocation>,
-    pub trainer: Option<SessionTrainer>,
-    pub booked: bool,
-    pub attended: bool,
-    pub booking_count: i64,
-    pub max_booking_count: Option<i64>,
-    pub attended_count: Option<i64>,
-    pub notes: Option<String>,
-    pub cost: i16
+pub(crate) struct SessionTrainer {
+    pub(crate) id: i64,
+    pub(crate) name: String,
+    pub(crate) email: String,
+    pub(crate) url: Option<String>
+}
+
+#[derive(FromRow, Serialize, Clone, Debug, PartialEq)]
+pub(crate) struct SessionLocation {
+    pub(crate) id: i32,
+    pub(crate) name: String,
+    pub(crate) address: String,
+    pub(crate) url: Option<String>
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub(crate)  struct SessionFullRecord {
+    pub(crate)  id: i64,
+    pub(crate)  datetime: DateTime<Utc>,
+    pub(crate)  duration_mins: i32,
+    pub(crate)  session_type: SessionType,
+    pub(crate)  location: Option<SessionLocation>,
+    pub(crate)  trainer: Option<SessionTrainer>,
+    pub(crate)  booked: bool,
+    pub(crate)  attended: bool,
+    pub(crate)  booking_count: i64,
+    pub(crate)  max_booking_count: Option<i64>,
+    pub(crate)  attended_count: Option<i64>,
+    pub(crate)  notes: Option<String>,
+    pub(crate)  cost: i16
 }
 
 impl FromRow<'_, PgRow> for SessionFullRecord {
@@ -201,12 +236,17 @@ fn build_session_query(
     Ok(())
 }
 
+#[derive(FromRow, Serialize)]
+pub(crate) struct IdRecord {
+    pub(crate) id: i64
+}
+
 #[post("/sessions", data="<new_session>")]
 pub async fn create_session(
     pool:  &State<PgPool>,
     login: LoginSession,
     new_session: Json<NewSession>
-) -> Result<Created<Json<BigintRecord>>, Custom<String>> {
+) -> Result<Created<Json<IdRecord>>, Custom<String>> {
     // Admins can create any session. Trainers can only create sessions with themselves as the trainer.
     // Nobody else can create sessions.
     if !login.has_role("admin") {
@@ -223,7 +263,7 @@ pub async fn create_session(
         .await
         .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 
-    let id_record: BigintRecord = query_as("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id")
+    let id_record: IdRecord = query_as("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id")
         .bind(&new_session.datetime)
         .bind(&new_session.duration_mins)
         .bind(&new_session.session_type_id)
@@ -254,7 +294,7 @@ pub async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_i
         }
     }
     qb.push(" RETURNING id");
-    let id_record: BigintRecord= qb.build_query_as()
+    let id_record: IdRecord = qb.build_query_as()
         .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
@@ -312,7 +352,7 @@ pub async fn update_session(
         .await
         .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 
-    let id_record: BigintRecord = qb.build_query_as()
+    let id_record: IdRecord = qb.build_query_as()
         .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?

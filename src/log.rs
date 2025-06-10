@@ -1,11 +1,11 @@
-use crate::{loginsession::LoginSession, parse_opt_date, BigintRecord};
+use crate::{loginsession::LoginSession, parse_opt_date};
 use chrono::{DateTime, Utc};
 use rocket::http::Status;
 use rocket::response::status::Custom;
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::State;
-use sqlx::{query_as, FromRow, PgPool, QueryBuilder};
+use sqlx::{query, FromRow, PgPool, QueryBuilder, Row};
 
 #[derive(FromRow, Serialize, Debug)]
 pub struct LogRow {
@@ -18,15 +18,15 @@ pub struct LogRow {
 
 pub async fn append_log(pool: &PgPool, originator: &Option<String>, event_type: &str, detail: &str) -> Result<i64, Custom<String>> {
     let timestamp: DateTime<Utc> = Utc::now();
-    let new_record: BigintRecord = query_as("INSERT INTO eventlog (datetime, person, type, detail) VALUES ($1, $2, $3, $4) RETURNING id")
+    query("INSERT INTO eventlog (datetime, person, type, detail) VALUES ($1, $2, $3, $4) RETURNING id")
         .bind(timestamp)
         .bind(originator.as_ref().map(|s| s.as_str()).unwrap_or("<missing>"))
         .bind(event_type)
         .bind(detail)
         .fetch_one(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    Ok(new_record.id)
+        .and_then(|r| r.try_get("id"))
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
 }
 
 #[get("/log?<from>&<to>")]
@@ -64,10 +64,10 @@ pub async fn read_log(
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Days, Duration, Utc};
+    use chrono::{DateTime, Days, Duration, Utc};
     use rocket::{http::Status, response::status::Custom, State};
-    use sqlx::{Executor, PgPool, query_as};
-    use crate::{loginsession::LoginSession, BigintRecord};
+    use sqlx::{query, query_as, Executor, PgPool, Row};
+    use crate::loginsession::LoginSession;
 
     const DUMMY_SESSION_ID: &str = "xxx";
 
@@ -103,10 +103,9 @@ mod tests {
     async fn read_one(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let _new_record: BigintRecord = query_as("INSERT INTO eventlog (datetime, person, type, detail) VALUES ('19700101_00:00:00Z', 'joe', 'Test Event', 'Test event') RETURNING ID")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let _ = query("INSERT INTO eventlog (datetime, person, type, detail) VALUES ('19700101_00:00:00Z', 'joe', 'Test Event', 'Test event') RETURNING ID")
+            .execute(&pool)
+            .await;
 
         let login = create_login("admin", "admin");
         let read_result = crate::log::read_log(State::from(&pool), login, None, None).await.unwrap();
@@ -118,9 +117,9 @@ mod tests {
     async fn read_with_date_range(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let _new_record1: BigintRecord = query_as("INSERT INTO eventlog (datetime, person, type, detail) VALUES ('19700101_00:00:00Z', '', 'Test Event', 'Test event 1') RETURNING ID").fetch_one(&pool).await.unwrap();
-        let _new_record2: BigintRecord = query_as("INSERT INTO eventlog (datetime, person, type, detail) VALUES ('19800101_00:00:00Z', '', 'Test Event', 'Test event 2') RETURNING ID").fetch_one(&pool).await.unwrap();
-        let _new_record3: BigintRecord = query_as("INSERT INTO eventlog (datetime, person, type, detail) VALUES ('19900101_00:00:00Z', '', 'Test Event', 'Test event 3') RETURNING ID").fetch_one(&pool).await.unwrap();
+        let _new_record1 = insert_log(&pool, "1970-01-01T00:00:00Z", "Test Event", "Test event 1").await;
+        let _new_record2 = insert_log(&pool, "1980-01-01T00:00:00Z", "Test Event", "Test event 2").await;
+        let _new_record3 = insert_log(&pool, "1990-01-01T00:00:00Z", "Test Event", "Test event 3").await;
 
         let login = create_login("admin", "admin");
         let read_result = crate::log::read_log(
@@ -130,6 +129,16 @@ mod tests {
         ).await.unwrap();
         assert_eq!(1, read_result.len());
         assert_eq!("Test event 2", read_result.get(0).unwrap().detail);
+    }
+
+    async fn insert_log(pool: &PgPool, timestamp_str: &str, event_type: &str, event_detail: &str) -> i64 {
+        let timestamp = DateTime::parse_from_rfc3339(timestamp_str).unwrap();
+        query("INSERT INTO eventlog (datetime, person, type, detail) VALUES ($1, '', $2, $3) RETURNING id")
+            .bind(timestamp).bind(event_type).bind(event_detail)
+            .fetch_one(pool)
+            .await
+            .and_then(|r| r.try_get("id"))
+            .unwrap()
     }
 
 }

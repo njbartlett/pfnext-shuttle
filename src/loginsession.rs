@@ -16,8 +16,9 @@ use rocket::{
     http::{private::cookie::Expiration, Cookie, CookieJar, SameSite, Status},
     request::{FromRequest, Outcome},
     response::status::{Custom, NoContent},
-    serde::json::{self, Json, json},
-    Request, State};
+    serde::json::{self, json, Json},
+    Request, State,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, query, query_as, FromRow, PgPool, Row};
 

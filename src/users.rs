@@ -13,16 +13,11 @@ use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
 use rocket::State;
 use sqlx::postgres::PgRow;
-use sqlx::{query_as, raw_sql, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::{query, query_as, raw_sql, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 use urlencoding::encode;
 
 use crate::config::{AppEnv, Config};
 use crate::loginsession::LoginSession;
-use crate::{BigintRecord, CountResult};
-
-const ACCESS_TOKEN_TTL: Duration = Duration::hours(6);
-const ACCESS_TOKEN_TTL_ADMIN: Duration = Duration::hours(3);
-const REFRESH_TOKEN_EXPIRATION: Duration = Duration::hours(24);
 
 const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
     length: 6,
@@ -154,13 +149,14 @@ pub async fn request_pwd_reset(
 
     // Fail if we have sent an email to this address within the last 2 mins
     let latest_previous_sent_time = Utc::now().add(TEMP_PASSWORD_MINIMUM_RESEND_WAIT);
-    let latest_previous_sent_count: CountResult = query_as("SELECT count(*) FROM temp_password WHERE person_id = $1 AND sent > $2")
+    let latest_previous_sent_count: i64 = query("SELECT count(*) FROM temp_password WHERE person_id = $1 AND sent > $2")
         .bind(&user_record.id)
         .bind(latest_previous_sent_time)
         .fetch_one(state.inner())
         .await
+        .and_then(|r| r.try_get(0))
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    if latest_previous_sent_count.count > 0 {
+    if latest_previous_sent_count > 0 {
         return Err(Custom(Status::BadRequest, format!("Cannot send another reset email within {} minutes.", TEMP_PASSWORD_MINIMUM_RESEND_WAIT.num_minutes().abs())));
     }
 
@@ -479,9 +475,9 @@ pub async fn delete_user(
     }
 
     // Actually delete the data. Related records in bookings are removed by DELETE CASCADE
-    let _: BigintRecord = query_as("DELETE FROM person WHERE id = $1 RETURNING id")
+    query("DELETE FROM person WHERE id = $1 RETURNING id")
         .bind(user_id)
-        .fetch_one(state.inner())
+        .execute(state.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 
@@ -604,8 +600,8 @@ pub async fn patch_user(
         return Ok(Accepted(String::from("no changes to user data")));
     }
 
-    let _: BigintRecord = qb.build_query_as()
-        .fetch_one(pool.inner())
+    qb.build()
+        .execute(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 

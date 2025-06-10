@@ -9,14 +9,15 @@ use rocket::serde::Serialize;
 use rocket::State;
 use serde::Deserialize;
 use sqlx::postgres::{PgQueryResult, PgRow};
-use sqlx::{query_as, raw_sql, Error, FromRow, PgPool, QueryBuilder, Row};
+use sqlx::{query, query_as, raw_sql, Error, FromRow, PgPool, QueryBuilder, Row};
 use std::fmt::{Display, Formatter};
 
 use crate::config::Config;
 use crate::log::append_log;
 use crate::loginsession::LoginSession;
+use crate::parse_opt_date;
+use crate::sessions::{SessionLocation, SessionType};
 use crate::users::UserLoginRecord;
-use crate::{parse_opt_date, BigintRecord, SessionLocation, SessionType};
 
 const ROLE_FULL_MEMBER: &str = "member";
 const ROLE_TRAINER: &str = "trainer";
@@ -239,7 +240,7 @@ pub async fn create_booking(
 
     // Debit the credits used from the user if required
     if credits_cost > 0 {
-        let _: BigintRecord = query_as("UPDATE person SET credits = credits - $1 WHERE id = $2 RETURNING id")
+        query("UPDATE person SET credits = credits - $1 WHERE id = $2 RETURNING id")
             .bind(credits_cost)
             .bind(booking.person_id)
             .fetch_one(pool.inner())
@@ -256,12 +257,13 @@ async fn user_is_admin_for_session(pool: &PgPool, login: &LoginSession, session_
     }
     if login.has_role(ROLE_TRAINER) {
         // Need to read the trainer ID of the selected session
-        let session_trainer_id_record: BigintRecord = query_as("SELECT trainer AS id FROM session WHERE id = $1")
+        let session_trainer_id: i64 = query("SELECT trainer AS id FROM session WHERE id = $1")
             .bind(session_id)
             .fetch_one(pool)
             .await
+            .and_then(|r| r.try_get("id"))
             .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-        return Ok(session_trainer_id_record.id == login.uid);
+        return Ok(session_trainer_id == login.uid);
     }
     return Ok(false);
 }
@@ -417,7 +419,7 @@ pub async fn delete_booking(
     // Restore the credits used for this booking
     let credits_refund = booking_deleted.credits_used.unwrap_or(0);
     if credits_refund > 0 {
-        let _: BigintRecord = query_as("UPDATE person SET credits = credits + $1 WHERE id = $2 RETURNING id")
+        query("UPDATE person SET credits = credits + $1 WHERE id = $2 RETURNING id")
             .bind(booking_deleted.credits_used)
             .bind(person_id)
             .fetch_one(pool.inner())
@@ -444,7 +446,7 @@ pub async fn update_booking(
     if !user_is_admin_for_session(pool, &login, session_id).await? {
         return Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string()));
     }
-    let _: BigintRecord = query_as("UPDATE booking SET attended = $1 WHERE person_id = $2 AND session_id = $3 RETURNING person_id AS id")
+    query("UPDATE booking SET attended = $1 WHERE person_id = $2 AND session_id = $3 RETURNING person_id AS id")
         .bind(booking_update.attended)
         .bind(person_id)
         .bind(session_id)
@@ -524,10 +526,9 @@ mod tests {
     use rocket::serde::json::Json;
     use rocket::response::status::Custom;
     use rocket::State;
-    use sqlx::{Executor, FromRow, PgPool, query_as};
+    use sqlx::{query, query_as, Executor, FromRow, PgPool, Row};
     use crate::loginsession::LoginSession;
     use crate::users::UserLoginRecord;
-    use crate::{CountResult};
     use crate::bookings::BookingUpdate;
     use crate::config::Config;
 
@@ -588,20 +589,20 @@ mod tests {
     }
 
     async fn count_bookings(pool: &PgPool) -> i64 {
-        let record: CountResult = query_as("SELECT COUNT(*) FROM booking")
+        query("SELECT COUNT(*) FROM booking")
             .fetch_one(pool)
             .await
-            .unwrap();
-        record.count
+            .and_then(|r| r.try_get(0))
+            .unwrap()
     }
 
     async fn count_bookings_attended(pool: &PgPool, attended: bool) -> i64 {
-        let record: CountResult = query_as("SELECT COUNT(*) FROM booking WHERE attended = $1")
+        query("SELECT COUNT(*) FROM booking WHERE attended = $1")
             .bind(attended)
             .fetch_one(pool)
             .await
-            .unwrap();
-        record.count
+            .and_then(|r| r.try_get(0))
+            .unwrap()
     }
 
     async fn read_logged(pool: &PgPool) -> Vec<(String, String, String)> {

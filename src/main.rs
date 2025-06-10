@@ -9,12 +9,11 @@ use chrono::{DateTime, FixedOffset};
 
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
-use rocket::serde::Serialize;
 use rocket::Request;
 use rocket_cors::{AllowedHeaders, AllowedOrigins};
 
 use shuttle_runtime::CustomError;
-use sqlx::{query_as, Executor, FromRow, PgPool};
+use sqlx::{Executor, PgPool};
 
 use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
@@ -110,51 +109,6 @@ async fn rocket(
         ]);
 
     Ok(rocket.into())
-}
-
-#[derive(FromRow, Serialize, Debug)]
-struct BigintRecord {
-    id: i64
-}
-
-#[derive(FromRow, Serialize, Clone, Debug, PartialEq)]
-pub struct SessionType {
-    id: i32,
-    name: String,
-    requires_trainer: bool,
-    cost: i16,
-    deprecated: bool
-}
-
-impl SessionType {
-    async fn find_by_id(pool: &PgPool, id: i32) -> Result<Option<Self>, String> {
-        query_as("SELECT * FROM session_type WHERE id = $1")
-            .bind(id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| e.to_string())
-    }
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct SessionTrainer {
-    id: i64,
-    name: String,
-    email: String,
-    url: Option<String>
-}
-
-#[derive(FromRow, Serialize, Clone, Debug, PartialEq)]
-pub struct SessionLocation {
-    id: i32,
-    name: String,
-    address: String,
-    url: Option<String>
-}
-
-#[derive(FromRow, Debug)]
-struct CountResult {
-    count: i64
 }
 
 fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, Custom<String>> {
