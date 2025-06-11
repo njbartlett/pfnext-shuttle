@@ -194,11 +194,11 @@ function isPast(datetime) {
 // When the user is not an admin, the list passed is only the current user.
 async function loadAllUsers(callback) {
     if (isAdmin()) {
-        httpGetJson("/users/list", callback)
+        return httpGetJson("/users/list", callback)
     } else if (loggedin.value) {
-        callback([loggedin.value])
+        return callback([loggedin.value])
     } else {
-        callback(null)
+        return callback(null)
     }
 }
 
