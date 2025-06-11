@@ -638,14 +638,14 @@ async fn send_email<'x>(
     app_env: &AppEnv
 ) -> Result<(), Custom<String>> {
     // Open the client
-    info!("Connecting to SMTP server at {}:{}...", &config.smtp_host, &config.smtp_port);
+    println!("Connecting to SMTP server at {}:{}...", &config.smtp_host, &config.smtp_port);
     let mut client = SmtpClientBuilder::new(&config.smtp_host, config.smtp_port)
         .implicit_tls(true)
         .credentials(Credentials::new(&app_env.smtp_username, &app_env.smtp_password))
         .connect()
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    info!("Connected to SMTP server");
+        .map_err(|e| Custom(Status::InternalServerError, format!("Failed to connect to SMTP server: {}", e.to_string())))?;
+    println!("Connected to SMTP server");
 
     // Send the message
     println!("Sending message: {:?}", message);

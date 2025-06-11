@@ -34,17 +34,7 @@ pub(crate) struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            branding: String::from("Another Level"),
-            smtp_host: String::from("localhost"),
-            smtp_port: 465,
-            email_sender_name: String::from("Another Level Community Fitness"),
-            email_sender_address: String::from("admin@anotherlevelfitness.uk"),
-            email_replyto_name: String::from("Another Level Community Fitness"),
-            email_replyto_address: String::from("admin@anotherlevelfitness.uk"),
-            email_admin_notifications: String::from("notifications@anotherlevelfitness.uk"),
-            timezone_name: String::from("Europe/London"),
-        }
+        panic!("No default config")
     }
 }
 
