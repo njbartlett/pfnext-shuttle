@@ -11,6 +11,8 @@ use chrono::{DateTime, FixedOffset};
 
 use dotenv::dotenv;
 
+use log::{info, warn};
+
 use rocket::fs::{relative, NamedFile};
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
@@ -27,7 +29,7 @@ mod activities;
 mod backup;
 mod bookings;
 mod config;
-mod log;
+mod transaction_log;
 mod loginsession;
 mod mock_chrono;
 mod sessions;
@@ -79,12 +81,13 @@ pub fn notfound(_request: &Request) -> Custom<String> {
 #[launch]
 async fn launch() -> Rocket<Build> {
     dotenv().ok();
+    env_logger::init();
 
     // Load config
     let config = Config::load().expect("Failed to load config properties");
-    println!("### Loaded configuration: {:?}", config);
+    info!("Loaded configuration: {:?}", config);
     let app_env = AppEnv::new_from_env().expect("Failed to load application environment");
-    println!("### Loaded application environment");
+    info!("Loaded application environment");
 
     // Start DB connection pool
     let pool = PgPoolOptions::new()
@@ -98,20 +101,19 @@ async fn launch() -> Rocket<Build> {
     let schema = read_to_string(schema_path)
         .map_err(|e| format!("Failed to open DB schema file {:?}: {}", schema_path, e))
         .unwrap();
-    println!("### Loaded schema from {:?}", schema_path);
+    info!("Loaded schema from {:?}", schema_path);
     pool.execute(schema.as_str()).await
         .map_err(|e| format!("Failed to import DB schema: {}", e))
         .unwrap();
-    println!("### Imported schema into database.");
+    info!("Imported schema into database.");
 
     // Configure Rocket
     rocket::build()
-        //.attach(configure_cors(&app_env))
         .manage(config)
         .manage(app_env)
         .manage(pool)
         .mount("/", routes![static_files])
-        .register("/api", catchers![unauthorized, notfound]) // TODO forbidden
+        .register("/api", catchers![unauthorized, notfound])
         .mount(
             "/api",
             routes![
@@ -145,7 +147,7 @@ async fn launch() -> Rocket<Build> {
                 activities::list_activities,
                 activities::create_activity,
                 activities::delete_activity,
-                log::read_log,
+                transaction_log::read_log,
                 backup::backup_all
             ],
         )
@@ -161,7 +163,7 @@ fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, 
     })?))
 }
 
-fn configure_cors(app_env: &AppEnv) -> Cors {
+fn _configure_cors(app_env: &AppEnv) -> Cors {
     let allowed_origins = AllowedOrigins::some_regex::<&String>(&[&app_env.cors_allowed]);
     println!("Initializing CORS with allowed domain(s): {:?}", &allowed_origins);
     CorsOptions {

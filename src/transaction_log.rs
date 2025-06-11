@@ -87,7 +87,7 @@ mod tests {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
         let login = create_login("member", "member");
-        let read_result = crate::log::read_log(State::from(&pool), login, None, None).await;
+        let read_result = crate::transaction_log::read_log(State::from(&pool), login, None, None).await;
         assert_eq!(Custom(Status::Forbidden, "admin role required to read log".to_string()), read_result.unwrap_err());
     }
     #[sqlx::test]
@@ -95,7 +95,7 @@ mod tests {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
         let login = create_login("admin", "admin");
-        let read_result = crate::log::read_log(State::from(&pool), login, None, None).await.unwrap();
+        let read_result = crate::transaction_log::read_log(State::from(&pool), login, None, None).await.unwrap();
         assert_eq!(0, read_result.len());
     }
 
@@ -108,7 +108,7 @@ mod tests {
             .await;
 
         let login = create_login("admin", "admin");
-        let read_result = crate::log::read_log(State::from(&pool), login, None, None).await.unwrap();
+        let read_result = crate::transaction_log::read_log(State::from(&pool), login, None, None).await.unwrap();
         assert_eq!(1, read_result.len());
         assert_eq!("Test event", read_result.get(0).unwrap().detail);
     }
@@ -122,7 +122,7 @@ mod tests {
         let _new_record3 = insert_log(&pool, "1990-01-01T00:00:00Z", "Test Event", "Test event 3").await;
 
         let login = create_login("admin", "admin");
-        let read_result = crate::log::read_log(
+        let read_result = crate::transaction_log::read_log(
             State::from(&pool), login,
             Some("1980-01-01T00:00:00Z".to_string()),
             Some("1985-01-01T00:00:00Z".to_string()),

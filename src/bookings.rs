@@ -13,7 +13,7 @@ use sqlx::{query, query_as, raw_sql, Error, FromRow, PgPool, QueryBuilder, Row};
 use std::fmt::{Display, Formatter};
 
 use crate::config::Config;
-use crate::log::append_log;
+use crate::transaction_log::append_log;
 use crate::loginsession::LoginSession;
 use crate::parse_opt_date;
 use crate::sessions::{SessionLocation, SessionType};

@@ -22,7 +22,7 @@ use rocket::{
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, query, query_as, FromRow, PgPool, Row};
 
-use crate::{log, users::UserLoginRecord};
+use crate::{transaction_log::append_log, users::UserLoginRecord};
 
 const SESSION_ID: &str = "sessionid";
 const ADMIN: &str = "admin";
@@ -271,7 +271,7 @@ async fn log_login(pool: &PgPool, email: &String, ipinfo: &Option<String>, succe
         true => "LOGIN",
         false => "FAILED LOGIN",
     };
-    let _ = log::append_log(pool, &None, event_type, &log_detail).await;
+    let _ = append_log(pool, &None, event_type, &log_detail).await;
 }
 
 #[derive(Deserialize)]
