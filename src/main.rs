@@ -4,6 +4,7 @@ extern crate rocket;
 
 use std::collections::HashSet;
 use std::env;
+use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, FixedOffset};
@@ -14,10 +15,10 @@ use rocket::fs::{relative, NamedFile};
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
 use rocket::{Build, Request, Rocket, State};
-use rocket_cors::{AllowedHeaders, AllowedOrigins};
+use rocket_cors::{AllowedHeaders, AllowedOrigins, Cors, CorsOptions};
 
 use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
+use sqlx::Executor;
 
 use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
@@ -49,7 +50,6 @@ async fn static_files(
 #[catch(401)]
 pub fn unauthorized(request: &Request) -> Custom<String> {
     let auth_error = request.local_cache::<Option<AuthenticationError>, _>(|| None);
-    info!("### Intercepted 401 return, auth error: {:?}", auth_error);
     match auth_error {
         Some(err) => match err {
             AuthenticationError::MissingSession => Custom(
@@ -72,18 +72,8 @@ pub fn unauthorized(request: &Request) -> Custom<String> {
 }
 
 #[catch(404)]
-pub fn notfound(request: &Request) -> Custom<String> {
+pub fn notfound(_request: &Request) -> Custom<String> {
     Custom(Status::NotFound, "not found".to_string())
-}
-
-async fn create_pool() -> PgPool {
-    dotenv().expect("Failed to load .env properties");
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await
-        .expect("Failed to create pool")
 }
 
 #[launch]
@@ -92,9 +82,9 @@ async fn launch() -> Rocket<Build> {
 
     // Load config
     let config = Config::load().expect("Failed to load config properties");
-    info!("Loaded configuration: {:?}", config);
+    println!("### Loaded configuration: {:?}", config);
     let app_env = AppEnv::new_from_env().expect("Failed to load application environment");
-    info!("Loaded application environment");
+    println!("### Loaded application environment");
 
     // Start DB connection pool
     let pool = PgPoolOptions::new()
@@ -103,38 +93,20 @@ async fn launch() -> Rocket<Build> {
         .await
         .expect("Failed to create pool");
 
-    // Configure CORS
-    info!(
-        "Initializing CORS with allowed origin regex: {}",
-        &app_env.cors_allowed
-    );
-    let allow_domain = [&app_env.cors_allowed];
-    let allowed_origins = AllowedOrigins::some_regex(&allow_domain);
-    let cors = rocket_cors::CorsOptions {
-        allowed_origins,
-        allowed_methods: vec![
-            Method::Get,
-            Method::Post,
-            Method::Options,
-            Method::Head,
-            Method::Delete,
-            Method::Put,
-            Method::Patch,
-        ]
-        .into_iter()
-        .map(From::from)
-        .collect(),
-        allowed_headers: AllowedHeaders::All,
-        expose_headers: HashSet::from(["Location".to_string()]),
-        allow_credentials: true,
-        ..Default::default()
-    }
-    .to_cors()
-    .expect("Failed to create cors options");
+    // Import Schema
+    let schema_path = Path::new("schema.sql");
+    let schema = read_to_string(schema_path)
+        .map_err(|e| format!("Failed to open DB schema file {:?}: {}", schema_path, e))
+        .unwrap();
+    println!("### Loaded schema from {:?}", schema_path);
+    pool.execute(schema.as_str()).await
+        .map_err(|e| format!("Failed to import DB schema: {}", e))
+        .unwrap();
+    println!("### Imported schema into database.");
 
     // Configure Rocket
     rocket::build()
-        .attach(cors)
+        //.attach(configure_cors(&app_env))
         .manage(config)
         .manage(app_env)
         .manage(pool)
@@ -187,4 +159,23 @@ fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, 
     Ok(Some(parsed.map_err(|e| {
         Custom(Status::UnprocessableEntity, e.to_string())
     })?))
+}
+
+fn configure_cors(app_env: &AppEnv) -> Cors {
+    let allowed_origins = AllowedOrigins::some_regex::<&String>(&[&app_env.cors_allowed]);
+    println!("Initializing CORS with allowed domain(s): {:?}", &allowed_origins);
+    CorsOptions {
+        allowed_origins,
+        allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete, Method::Put, Method::Patch]
+            .into_iter()
+            .map(From::from)
+            .collect(),
+        allowed_headers: AllowedHeaders::All,
+        expose_headers: HashSet::from(["Location".to_string()]),
+        allow_credentials: true,
+        ..Default::default()
+    }
+    .to_cors()
+    .map_err(|e| format!("Failed to create CORS options: {}", e))
+    .unwrap()
 }
