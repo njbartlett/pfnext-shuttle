@@ -14,7 +14,7 @@ futures = "0.3.31"
 jsonwebtoken = { version = "9.3.0", default-features = false }
 lazy_static = "1.4.0"
 log = { version = "0.4.27", features = ["std"] }
-mail-send = "0.4.7"
+mail-send = "0.5.1"
 passwords = "3.1.16"
 password-auth = "1"
 public-ip-address = "0.3.3"

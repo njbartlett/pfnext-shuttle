@@ -1,0 +1,14 @@
+branding = "Another Level"
+
+smtp_host = 'smtp.mailersend.net'
+smtp_port = 587
+
+email_sender_name = "Another Level Community Fitness"
+email_sender_address = "admin@anotherlevelfitness.uk"
+
+email_replyto_name = "Another Level Community Fitness"
+email_replyto_address = "noreply@anotherlevelfitness.uk"
+
+email_admin_notifications = ["njbartlett@gmail.com", "anotherlevelcommunityfitness@gmail.com"]
+
+timezone_name = "Europe/London"

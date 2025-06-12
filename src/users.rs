@@ -227,7 +227,7 @@ pub async fn register_user(
     let notification_message = MessageBuilder::new()
         .from(sender.clone())
         .reply_to(reply_to)
-        .to(config.email_admin_notifications.as_str())
+        .to(config.email_admin_notifications.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
         .subject(format!("New User Registration for {}", &config.branding))
         .text_body(format!(include_str!("register_notify_email.txt"),
             &new_user.name,
@@ -642,14 +642,14 @@ async fn send_email<'x>(
     app_env: &AppEnv
 ) -> Result<(), Custom<String>> {
     // Open the client
-    println!("Connecting to SMTP server at {}:{}...", &config.smtp_host, &config.smtp_port);
+    info!("Connecting to SMTP server at {}:{}...", &config.smtp_host, &config.smtp_port);
     let mut client = SmtpClientBuilder::new(&config.smtp_host, config.smtp_port)
-        .implicit_tls(true)
+        .implicit_tls(false)
         .credentials(Credentials::new(&app_env.smtp_username, &app_env.smtp_password))
         .connect()
         .await
         .map_err(|e| Custom(Status::InternalServerError, format!("Failed to connect to SMTP server: {}", e.to_string())))?;
-    println!("Connected to SMTP server");
+    info!("Connected to SMTP server");
 
     // Send the message
     println!("Sending message: {:?}", message);

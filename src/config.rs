@@ -28,7 +28,7 @@ pub(crate) struct Config {
     pub(crate) email_sender_address: String,
     pub(crate) email_replyto_name: String,
     pub(crate) email_replyto_address: String,
-    pub(crate) email_admin_notifications: String,
+    pub(crate) email_admin_notifications: Vec<String>,
     pub(crate) timezone_name: String
 }
 
@@ -42,7 +42,7 @@ impl Config {
     pub(crate) fn load() -> Result<Config, ConfigError> {
         let mut config_path = env::current_dir()
             .map_err(|e| ConfigError::new(format!("failed to get current directory: {}", e)))?;
-        config_path.push("Config.properties");
+        config_path.push("Config.toml");
         info!("Loading config from path {}", &config_path.display());
         let config: Self = confy::load_path(config_path).map_err(|e| ConfigError::new(e.to_string()))?;
 
