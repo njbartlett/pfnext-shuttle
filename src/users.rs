@@ -165,9 +165,10 @@ pub async fn request_pwd_reset(
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &reset_request.reset_url, encode(&user_record.email), encode(&temp_password));
     let text = format!(include_str!("reset_email.txt"), &config.inner().branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     let sender = Address::new_address(Some(&config.inner().email_sender_name), &config.inner().email_sender_address);
+    let reply_to = Address::new_address(Some(&config.email_replyto_name), &config.email_replyto_address);
     let message = MessageBuilder::new()
         .from(sender.clone())
-        .reply_to(sender)
+        .reply_to(reply_to)
         .to(Address::new_address(Some(&user_record.name), &user_record.email))
         .subject(format!("Password Reset for {}", &config.inner().branding))
         .text_body(text)
@@ -210,9 +211,11 @@ pub async fn register_user(
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &new_user.reset_url, encode(&new_user.email), encode(&temp_password));
     let text = format!(include_str!("register_email.txt"), &config.branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     let sender = Address::new_address(Some(&config.email_sender_name), &config.email_sender_address);
+    let reply_to = Address::new_address(Some(&config.email_replyto_name), &config.email_replyto_address);
+
     let message = MessageBuilder::new()
         .from(sender.clone())
-        .reply_to(sender.clone())
+        .reply_to(reply_to.clone())
         .to(Address::new_address(Some(&new_user.name), &new_user.email))
         .subject(format!("New User Registration for {}", &config.branding))
         .text_body(text)
@@ -223,7 +226,7 @@ pub async fn register_user(
     // Send notification email to admin
     let notification_message = MessageBuilder::new()
         .from(sender.clone())
-        .reply_to(sender.clone())
+        .reply_to(reply_to)
         .to(config.email_admin_notifications.as_str())
         .subject(format!("New User Registration for {}", &config.branding))
         .text_body(format!(include_str!("register_notify_email.txt"),
@@ -337,9 +340,10 @@ pub async fn reset_pwd(
     // Send acknowledgement email
     let text = format!(include_str!("post_reset_email.txt"), &user_record.name, &user_record.email, &user_pwd_reset.website_url);
     let sender = Address::new_address(Some(&config.email_sender_name), &config.email_sender_address);
+    let reply_to = Address::new_address(Some(&config.email_replyto_name), &config.email_replyto_address);
     let message = MessageBuilder::new()
         .from(sender.clone())
-        .reply_to(sender)
+        .reply_to(reply_to.clone())
         .to(Address::new_address(Some(&user_record.name), &user_record.email))
         .subject(format!("Password Changed for {}", &config.branding))
         .text_body(text)
