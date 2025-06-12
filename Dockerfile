@@ -2,7 +2,7 @@ FROM jekyll/jekyll AS jekyll-builder
 WORKDIR /app
 COPY jekyll /app
 RUN chmod -R 777 /app
-RUN jekyll build --verbose --trace
+RUN JEKYLL_ENV=production jekyll build --verbose --trace
 
 FROM rust:1.87.0 AS rust-builder
 WORKDIR /app
