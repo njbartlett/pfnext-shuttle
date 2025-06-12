@@ -294,6 +294,11 @@ pub async fn login(
     cookies: &CookieJar<'_>,
     existing_login: Option<LoginSession>,
     client_addr: Option<ClientRealAddr>,
+    user_product: user_agent_parser::Product<'_>,
+    user_os: user_agent_parser::OS<'_>,
+    user_device: user_agent_parser::Device<'_>,
+    user_cpu: user_agent_parser::CPU<'_>,
+    user_engine: user_agent_parser::Engine<'_>,
     login_request: Json<LoginRequest>
 ) -> Result<Json<LoggedInUser>, Custom<String>> {
     let mut ipinfo: Option<String> = None;
@@ -304,6 +309,7 @@ pub async fn login(
             Err(err) => warn!("Failed to lookup IP info for client {}: {}", client_ip, err)
         }
     }
+    info!("User '{}' attempting login using {user_product:?}, {user_os:?}, {user_device:?}, {user_cpu:?}, {user_engine:?}", login_request.email);
 
     let login_result = match existing_login {
         Some(existing_login) => existing_login.relogin(pool, &login_request.password, &ipinfo).await.map_err(to_http_err),

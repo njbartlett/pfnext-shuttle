@@ -22,6 +22,8 @@ use rocket_cors::{AllowedHeaders, AllowedOrigins, Cors, CorsOptions};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Executor;
 
+use user_agent_parser::{self, UserAgentParser};
+
 use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
 
@@ -89,6 +91,11 @@ async fn launch() -> Rocket<Build> {
     let app_env = AppEnv::new_from_env().expect("Failed to load application environment");
     info!("Loaded application environment");
 
+    // Load users agents config
+    let user_agent_parser = UserAgentParser::from_path("user_agents.yaml")
+        .map_err(|e| format!("Failed to load User-Agents config: {}", e))
+        .unwrap();
+
     // Start DB connection pool
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -112,6 +119,7 @@ async fn launch() -> Rocket<Build> {
         .manage(config)
         .manage(app_env)
         .manage(pool)
+        .manage(user_agent_parser)
         .mount("/", routes![static_files])
         .register("/api", catchers![unauthorized, notfound])
         .mount(

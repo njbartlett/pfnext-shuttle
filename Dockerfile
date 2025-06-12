@@ -16,6 +16,7 @@ COPY --from=jekyll-builder /app/_site /app/static
 COPY --from=rust-builder /app/target/release/pfnext /app/pfnext
 COPY schema.sql /app/schema.sql
 COPY Config.toml /app/Config.toml
+COPY user_agents.yaml /app/user_agents.yaml
 RUN apt-get update
 RUN apt-get -y install libssl3
 EXPOSE 8000
