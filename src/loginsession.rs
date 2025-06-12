@@ -298,10 +298,10 @@ pub async fn login(
 ) -> Result<Json<LoggedInUser>, Custom<String>> {
     let mut ipinfo: Option<String> = None;
     if let Some(client_addr) = client_addr {
-        let client_ipv6_addr = client_addr.get_ipv6();       
-        if let Ok(lookup_result) = public_ip_address::perform_lookup(Some(client_ipv6_addr.to_canonical())).await {
-            info!("Login attempt for user <{}> from {:?}", login_request.email, lookup_result);
-            ipinfo = Some(json::to_string(&lookup_result).unwrap_or("{}".to_string()));
+        let client_ip = client_addr.get_ipv6().to_canonical();
+        match public_ip_address::perform_lookup(Some(client_ip)).await {
+            Ok(lookup_result)=>ipinfo=Some(json::to_string(&lookup_result).unwrap_or("{}".to_string())),
+            Err(err) => warn!("Failed to lookup IP info for client {}: {}", client_ip, err)
         }
     }
 
