@@ -86,7 +86,7 @@ let app = createApp({
         return {
             http_err, loggedin, page_return_path,
             session, bookings, adding_user, all_user_data,
-            isAdmin, onLogout, displayTime, displayDate, addMemberInput, addMember, removeMember, toggleAttendance, encodeLoginReturnUrl
+            isAdmin, onLogout, displayTime, displayDate, addMemberInput, addMember, removeMember, toggleAttendance, encodeLoginReturnUrl, goBack
         }
     }
 })

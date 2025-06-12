@@ -11,7 +11,7 @@ script: js/edit_session.js
         </svg>
         <h2 class="ms-2">${session_data.id ? 'Edit' : 'Create New'} Session</h2>
         <div class="ms-auto align-middle">
-            <a type="button" class="btn-close" aria-label="Close" :href="page_return_path"></a>
+            <button type="button" class="btn-close" aria-label="Close" @click="goBack()"></button>
         </div>
     </div>
     <div class="card-body">

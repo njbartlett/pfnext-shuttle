@@ -52,7 +52,7 @@ let app = createApp({
             loggedin, user_data, reset_password_result, http_err,
 
             // Callback functions
-            onChangePasswordInput, onSubmit, onLogout, isAdmin
+            onChangePasswordInput, onSubmit, onLogout, isAdmin, goBack
         }
     }
 })

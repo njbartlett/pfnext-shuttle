@@ -79,7 +79,7 @@ let app = createApp({
             // Data
             user_data, user_data_val, register_result, http_err,
             // Callback functions
-            onSubmit, isAdmin
+            onSubmit, isAdmin, goBack
         }
     }
 })

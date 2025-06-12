@@ -203,7 +203,7 @@ let app = createApp({
             loggedin, http_err, outcome, page_return_path,
             session_data, session_data_validation, onChangeSessionType,
             admin_user_data, admin_trainer_list, admin_session_type_list, admin_location_list, suggested_session_times,
-            saveSession, isAdmin, onLogout, encodeLoginReturnUrl
+            saveSession, isAdmin, onLogout, encodeLoginReturnUrl, goBack
         }
     }
 })

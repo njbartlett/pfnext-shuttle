@@ -202,4 +202,13 @@ async function loadAllUsers(callback) {
     }
 }
 
+function goBack() {
+    if (typeof page_return_path !== 'undefined' && page_return_path !== null && page_return_path.value != null) {
+        window.location.href = page_return_path.value
+    } else {
+        window.history.back()
+    }
+
+}
+
 // END library.js

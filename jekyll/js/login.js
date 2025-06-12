@@ -10,7 +10,7 @@ const user_data_val = ref({
 })
 
 const reset_password_result = ref(null)
-const login_return_path = ref("index.html")
+const page_return_path = ref("index.html")
 
 async function onLogin() {
     http_err.value = null
@@ -20,7 +20,7 @@ async function onLogin() {
         password: user_data.password
     }, res => res.json().then(json => {
         setAuthenticatedUser(json)
-        window.location.href = login_return_path.value
+        window.location.href = page_return_path.value
     }))
 }
 
@@ -63,7 +63,7 @@ let app = createApp({
             // Data
             loggedin, user_data, user_data_val, http_err, reset_password_result,
             // Callbacks
-            onLogin, onForgottenPassword, onUnforgottenPassword, onResetPassword, onLogout, isAdmin
+            onLogin, onForgottenPassword, onUnforgottenPassword, onResetPassword, onLogout, isAdmin, goBack
         }
     }
 })
@@ -72,6 +72,6 @@ app.mount('#app')
 
 let return_path = url_params.get("return")
 if (return_path) {
-    login_return_path.value = decodeURIComponent(return_path)
+    page_return_path.value = decodeURIComponent(return_path)
 }
 
