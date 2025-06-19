@@ -99,5 +99,11 @@ fn field_from_env(field_name: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::Config;
 
+    #[test]
+    fn test_load() {
+        let config = Config::load().unwrap();
+        assert_eq!("Another Level", config.branding);
+    }
 }

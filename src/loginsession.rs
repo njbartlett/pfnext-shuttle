@@ -1,9 +1,8 @@
-use ::time::OffsetDateTime;
 use rocket_client_addr::ClientRealAddr;
 use std::fmt::{Display, Formatter};
 
 use base64::{prelude::BASE64_STANDARD_NO_PAD, Engine};
-use chrono::{DateTime, Duration, FixedOffset, Offset};
+use chrono::{DateTime, Duration, FixedOffset};
 
 #[cfg(test)]
 use crate::mock_chrono::Utc;
@@ -13,16 +12,12 @@ use chrono::Utc;
 use password_auth::verify_password;
 use rand::{thread_rng, RngCore};
 use rocket::{
-    http::{private::cookie::Expiration, Cookie, CookieJar, SameSite, Status},
-    request::{FromRequest, Outcome},
-    response::status::{Custom, NoContent},
-    serde::json::{self, json, Json},
-    Request, State,
+    http::{private::cookie::Expiration, Cookie, CookieJar, SameSite, Status}, request::{FromRequest, Outcome}, response::status::{Custom, NoContent}, serde::json::Json, Request, State
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgRow, query, query_as, FromRow, PgPool, Row};
+use sqlx::{postgres::PgRow, query, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
-use crate::{transaction_log::append_log, users::UserLoginRecord};
+use crate::{transaction_log::append_log, users::UserLoginRecord, whereclause::{Operator, WhereClause}};
 
 const SESSION_ID: &str = "sessionid";
 const ADMIN: &str = "admin";
@@ -51,15 +46,16 @@ impl Display for LoginError {
         }
     }
 }
-
-#[derive(Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub(crate) struct LoginSession {
     pub(crate) sessionid: String,
     pub(crate) uid: i64,
     pub(crate) name: String,
     pub(crate) email: String,
     pub(crate) roles: Vec<String>,
-    pub(crate) expiry: DateTime<FixedOffset>,
+    pub(crate) loggedin: Option<DateTime<FixedOffset>>,
+    pub(crate) loggedin_from: Option<String>,
+    pub(crate) expiry: DateTime<FixedOffset>
 }
 
 #[rocket::async_trait]
@@ -79,6 +75,7 @@ impl<'r> FromRequest<'r> for LoginSession {
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
         let sessionid = sessionid.unwrap();
+        info!("Verifying login session for id {}", sessionid);
 
         // Get the database pool from the request state
         let pool: Option<&PgPool> = request.rocket().state();
@@ -87,9 +84,13 @@ impl<'r> FromRequest<'r> for LoginSession {
         }
         let pool = pool.unwrap();
 
+        // Get the client address
+        let client_info = request.guard::<ClientInfo>().await
+            .succeeded()
+            .map(|i| i.to_string());
+
         // Load the session record
-        let load_result = LoginSession::load(&pool, &sessionid).await
-            .inspect_err(|e| error!("Failed to query login session: {}", e));
+        let load_result = LoginSession::load(&pool, &sessionid).await;
         if load_result.is_err() {
             return Self::set_outcome_error(AuthenticationError::DatabaseError(load_result.unwrap_err().to_string()), request);
         }
@@ -101,7 +102,7 @@ impl<'r> FromRequest<'r> for LoginSession {
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
 
-        debug!("Authenticated user session {:?}", login_session);
+        info!("Authenticated user session {:?}", login_session);
         Outcome::Success(login_session.unwrap())
     }
 
@@ -115,6 +116,8 @@ impl FromRow<'_, PgRow> for LoginSession {
             name: row.try_get("name")?,
             email: row.try_get("email")?,
             roles: row.try_get("roles").map(|r| parse_roles(r))?,
+            loggedin: row.try_get("loggedin")?,
+            loggedin_from: row.try_get("loggedin_from")?,
             expiry: row.try_get("expiry")?
         })
     }
@@ -127,14 +130,25 @@ impl LoginSession {
         Outcome::Error((Status::Unauthorized, e))
     }
 
+    fn query_base<'a>() -> QueryBuilder<'a, Postgres> {
+        return QueryBuilder::new("SELECT s.id AS sessionid, s.loggedin, s.loggedin_from, s.expiry, p.id AS uid, p.name, p.email, p.roles FROM loginsession s JOIN person p ON s.uid = p.id");
+    }
+
+    pub(crate) async fn load_all(pool: &PgPool) -> Result<Vec<LoginSession>, sqlx::Error> {
+        let mut qb = Self::query_base();
+        qb.push(" ORDER BY s.loggedin ASC");
+        qb.build_query_as()
+            .fetch_all(pool)
+            .await
+    }
+
     pub(crate) async fn load(pool: &PgPool, sessionid: &str) -> Result<Option<LoginSession>, sqlx::Error> {
-        let now = Utc::now().fixed_offset();
-        query_as("SELECT s.id AS sessionid, s.expiry, p.id AS uid, p.name, p.email, p.roles \
-                FROM loginsession AS s \
-                JOIN person AS p ON s.uid = p.id \
-                WHERE s.id = $1 \
-                AND s.expiry >= $2")
-            .bind(sessionid).bind(now)
+        let mut qb = Self::query_base();
+        let mut wc = WhereClause::init();
+        
+        wc.append_to(&mut qb, "s.id", Operator::Equal, sessionid);
+        wc.append_to(&mut qb, "s.expiry", Operator::GreaterThanOrEqual, Utc::now().fixed_offset());
+        qb.build_query_as()
             .fetch_optional(pool)
             .await
     }
@@ -148,7 +162,8 @@ impl LoginSession {
     }
 
     pub(crate) async fn login(pool: &PgPool, email: &str, password: &str, ipinfo: &Option<String>) -> Result<LoginSession, LoginError> {
-        Self::clear_expired(pool, &Utc::now().fixed_offset()).await;
+        let now = Utc::now().fixed_offset();
+        Self::clear_expired(pool, &now).await;
 
         // Fetch login record
         let login_record = UserLoginRecord::load_by_email(pool, email)
@@ -174,8 +189,12 @@ impl LoginSession {
         // Insert session into table
         let expiry = Utc::now() + SESSION_DURATION;
         query(
-            "INSERT INTO loginsession (id, uid, expiry, ipinfo) VALUES ($1, $2, $3, $4) RETURNING id")
-            .bind(&sessionid).bind(login_record.id).bind(expiry).bind(ipinfo)
+            "INSERT INTO loginsession (id, uid, expiry, loggedin, loggedin_from) VALUES ($1, $2, $3, $4, $5) RETURNING id")
+            .bind(&sessionid) // $1
+            .bind(login_record.id) // $2
+            .bind(expiry) // $4
+            .bind(now) // $3
+            .bind(ipinfo) // $5
             .fetch_one(pool)
             .await
             .map_err(|e| LoginError::Internal(e.to_string()))?;
@@ -187,6 +206,8 @@ impl LoginSession {
             name: login_record.name,
             email: login_record.email,
             roles: parse_roles(&login_record.roles),
+            loggedin: Some(now),
+            loggedin_from: ipinfo.clone(),
             expiry: expiry.fixed_offset()
         })
     }
@@ -212,9 +233,11 @@ impl LoginSession {
         }
 
         // Update session in table
-        let expiry = (Utc::now() + SESSION_DURATION).fixed_offset();
-        let _update_result = query("UPDATE loginsession SET expiry = $1, ipinfo = $2 WHERE id = $3")
-            .bind(expiry).bind(ipinfo).bind(&self.sessionid)
+        let now = Utc::now().fixed_offset();
+        let expiry = now + SESSION_DURATION;
+        let _update_result = query("UPDATE loginsession SET expiry = $1 WHERE id = $2")
+            .bind(expiry)
+            .bind(&self.sessionid)
             .execute(pool)
             .await
             .map_err(|e| LoginError::Internal(e.to_string()))?;
@@ -225,6 +248,7 @@ impl LoginSession {
             email: self.email.clone(),
             name: self.name.clone(),
             roles: self.roles.clone(),
+            loggedin: None, loggedin_from: None,
             expiry
         })
     }
@@ -288,36 +312,132 @@ pub struct LoggedInUser {
     roles: Vec<String>
 }
 
+#[derive(Debug)]
+pub(crate) struct ClientInfo<'a> {
+    location: String,
+    user_agent_product: user_agent_parser::Product<'a>,
+    user_agent_os: user_agent_parser::OS<'a>,
+    user_agent_device: user_agent_parser::Device<'a>,
+    user_agent_cpu: user_agent_parser::CPU<'a>,
+    user_agent_engine: user_agent_parser::Engine<'a>
+}
+
+const UNKNOWN: &str = "Unknown";
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for ClientInfo<'r> {
+    
+    type Error = ();
+    
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        use user_agent_parser::*;
+
+        let location = Self::extract_ip_info(request).await.unwrap_or(UNKNOWN.to_string());
+
+        let uap = request.rocket().state::<UserAgentParser>();
+        let ua = request.headers().get("user-agent").next();
+        let info = match (uap, ua) {
+            (Some(parser), Some(user_agent)) => ClientInfo {
+                location,
+                user_agent_product: parser.parse_product(user_agent),
+                user_agent_os: parser.parse_os(user_agent),
+                user_agent_device: parser.parse_device(user_agent),
+                user_agent_cpu: parser.parse_cpu(user_agent),
+                user_agent_engine: parser.parse_engine(user_agent)
+            },
+            _ => ClientInfo {
+                location,
+                user_agent_product: Product::default(),
+                user_agent_os: OS::default(),
+                user_agent_device: Device::default(),
+                user_agent_cpu: CPU::default(),
+                user_agent_engine: Engine::default()
+            }
+        };
+        Outcome::Success(info)
+    }
+}
+
+impl Display for ClientInfo<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Location: {}", self.location)?;
+        
+        write!(f, " Product: {}", self.user_agent_product.name.as_deref().unwrap_or(UNKNOWN))?;
+        fmt_optional(f, "_", &self.user_agent_product.major)?;
+        fmt_optional(f, ".", &self.user_agent_product.minor)?;
+        fmt_optional(f, ".", &self.user_agent_product.patch)?;
+
+        write!(f, " OS: {}", self.user_agent_os.name.as_deref().unwrap_or(UNKNOWN))?;
+        fmt_optional(f, "_", &self.user_agent_os.major)?;
+        fmt_optional(f, ".", &self.user_agent_os.minor)?;
+        fmt_optional(f, ".", &self.user_agent_os.patch)?;
+        fmt_optional(f, ".", &self.user_agent_os.patch_minor)?;
+
+        fmt_optional(f, " Device-Name: ", &self.user_agent_device.name)?;
+        fmt_optional(f, " Device-Brand: ", &self.user_agent_device.brand)?;
+        fmt_optional(f, " Device-Model: ", &self.user_agent_device.model)?;
+
+        fmt_optional(f, " CPU: ", &self.user_agent_cpu.architecture)?;
+
+        write!(f, " Engine: {}", self.user_agent_engine.name.as_deref().unwrap_or(UNKNOWN))?;
+        fmt_optional(f, "_", &self.user_agent_engine.major)?;
+        fmt_optional(f, ".", &self.user_agent_engine.minor)?;
+        fmt_optional(f, ".", &self.user_agent_engine.patch)?;
+
+        Ok(())
+    }
+}
+
+impl ClientInfo<'_> {
+    async fn extract_ip_info<'r>(request: &'r Request<'_>) -> Option<String> {
+        let client_addr = request.guard::<ClientRealAddr>().await.succeeded();
+        match client_addr {
+            Some(addr) => {
+                let ip = addr.get_ipv6().to_canonical();
+                match public_ip_address::perform_lookup(Some(ip)).await {
+                    Ok(lookup_result) => Some(lookup_result.to_string()),
+                        //.inspect_err(|e| error!("Failed to serialize public IP address lookup {:?}: {}", lookup_result, e))
+                        //.ok(),
+                    Err(err) => {
+                        warn!("Failed to lookup IP info for client {}: {}", ip, err);
+                        None
+                    }
+                }
+            },
+            None => None
+        }
+    }
+}
+
+fn fmt_optional<T>(f: &mut Formatter<'_>, prefix: &str, opt_value: &Option<T>) -> std::fmt::Result
+where
+    T: Display
+{
+    if let Some(value) = opt_value {
+        write!(f, "{}{}", prefix, value)
+    } else {
+        Ok(())
+    }
+}
+
+
 #[post("/login", data = "<login_request>")]
 pub async fn login(
     pool: &State<PgPool>,
     cookies: &CookieJar<'_>,
     existing_login: Option<LoginSession>,
-    client_addr: Option<ClientRealAddr>,
-    user_product: user_agent_parser::Product<'_>,
-    user_os: user_agent_parser::OS<'_>,
-    user_device: user_agent_parser::Device<'_>,
-    user_cpu: user_agent_parser::CPU<'_>,
-    user_engine: user_agent_parser::Engine<'_>,
+    client_info: Option<ClientInfo<'_>>,
     login_request: Json<LoginRequest>
 ) -> Result<Json<LoggedInUser>, Custom<String>> {
-    let mut ipinfo: Option<String> = None;
-    if let Some(client_addr) = client_addr {
-        let client_ip = client_addr.get_ipv6().to_canonical();
-        match public_ip_address::perform_lookup(Some(client_ip)).await {
-            Ok(lookup_result)=>ipinfo=Some(json::to_string(&lookup_result).unwrap_or("{}".to_string())),
-            Err(err) => warn!("Failed to lookup IP info for client {}: {}", client_ip, err)
-        }
-    }
-    info!("User '{}' attempting login using {user_product:?}, {user_os:?}, {user_device:?}, {user_cpu:?}, {user_engine:?}", login_request.email);
+    let client_info = &client_info.map(|i| i.to_string());
 
     let login_result = match existing_login {
-        Some(existing_login) => existing_login.relogin(pool, &login_request.password, &ipinfo).await.map_err(to_http_err),
-        None => LoginSession::login(pool, &login_request.email, &login_request.password, &ipinfo).await.map_err(to_http_err)
+        Some(existing_login) => existing_login.relogin(pool, &login_request.password, &client_info).await.map_err(to_http_err),
+        None => LoginSession::login(pool, &login_request.email, &login_request.password, &client_info).await.map_err(to_http_err)
     };
     if let Err(login_err) = login_result {
         // Log the failed login
-        log_login(pool, &login_request.email, &ipinfo, false).await;
+        log_login(pool, &login_request.email, &client_info, false).await;
 
         // Send the cookie with sessionid set to "_" and Max-Age zero, to ensure the cookie is removed from the browser
         let mut clear_cookie = Cookie::new(SESSION_ID, "_".to_string());
@@ -329,7 +449,7 @@ pub async fn login(
     let login_session = login_result.unwrap();
 
     // Log the successful login
-    log_login(pool, &login_request.email, &ipinfo, true).await;
+    log_login(pool, &login_request.email, &client_info, true).await;
 
     // Build login response body
     let body = LoggedInUser {
@@ -341,15 +461,11 @@ pub async fn login(
     
     // Add session cookie
     let mut cookie = Cookie::new(SESSION_ID, login_session.sessionid);
-    let expiry_chrono = Utc::now() + SESSION_DURATION;
-    let expiry_offset_datetime: OffsetDateTime = OffsetDateTime::from_unix_timestamp(expiry_chrono.timestamp())
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-
     cookie.set_secure(true);
-    cookie.set_same_site(SameSite::None);
+    cookie.set_same_site(SameSite::Strict);
     cookie.unset_domain();
     cookie.set_http_only(true);
-    cookie.set_expires(Expiration::DateTime(expiry_offset_datetime));
+    cookie.set_expires(Expiration::Session);
     cookies.add_private(cookie);
 
     Ok(Json(body))
@@ -382,10 +498,94 @@ pub async fn verify_session(
     _login: LoginSession
 ) -> Result<NoContent, Custom<String>> {
     Ok(NoContent)
-}    
+}
+
+#[derive(Serialize)]
+pub struct LoginSessionAugmented {
+    pub(crate) sessionid: String,
+    pub(crate) uid: i64,
+    pub(crate) name: String,
+    pub(crate) email: String,
+    pub(crate) roles: Vec<String>,
+    pub(crate) loggedin: Option<DateTime<FixedOffset>>,
+    pub(crate) loggedin_from: Option<String>,
+    pub(crate) expiry: DateTime<FixedOffset>,
+    pub(crate) is_current: bool
+}
+
+impl LoginSessionAugmented {
+    pub(crate) fn augment(session: &LoginSession, is_current: bool) -> LoginSessionAugmented {
+        LoginSessionAugmented {
+            sessionid: session.sessionid.clone(),
+            uid: session.uid,
+            name: session.name.clone(),
+            email: session.email.clone(),
+            roles: session.roles.clone(),
+            loggedin: session.loggedin.clone(),
+            loggedin_from: session.loggedin_from.clone(),
+            expiry: session.expiry.clone(),
+            is_current
+        }
+    }
+}
+
+#[get("/loginsession")]
+pub async fn get_sessions(
+    pool: &State<PgPool>,
+    login: LoginSession
+) -> Result<Json<Vec<LoginSessionAugmented>>, Custom<String>> {
+    if !login.is_admin() {
+        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+    }
+    LoginSession::load_all(pool)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map(|v| {
+            v.into_iter()
+                .map(|l| LoginSessionAugmented::augment(&l, l.sessionid == login.sessionid))
+                .collect::<Vec<LoginSessionAugmented>>()
+        })
+        .map(Json::from)
+}
+
+#[get("/loginsession/<id>")]
+pub async fn get_session_by_id(
+    pool: &State<PgPool>,
+    login: LoginSession,
+    id: &str
+) -> Result<Json<LoginSessionAugmented>, Custom<String>> {
+    if !login.is_admin() {
+        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+    }
+    let session = LoginSession::load(pool.inner(), id)
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .and_then(|o| o.ok_or_else(|| Custom(Status::NotFound, format!("no loginsession id found for id {}", id))))?;
+    Ok(Json(LoginSessionAugmented::augment(&session, session.sessionid == login.sessionid)))
+}
+
+#[delete("/loginsession/<id>")]
+pub async fn delete_session_by_id(
+    pool: &State<PgPool>,
+    login: LoginSession,
+    id: &str
+) -> Result<NoContent, Custom<String>> {
+    if !login.is_admin() {
+        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+    }
+    let result = query("DELETE FROM loginsession WHERE id = $1")
+        .bind(id)
+        .execute(pool.inner())
+        .await
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    if result.rows_affected() < 1 {
+        Err(Custom(Status::NotFound, "no login session with specified id".to_string()))
+    } else {
+        Ok(NoContent)
+    }
+}
 
 fn to_http_err(e: LoginError) -> Custom<String> {
-    info!("Converting LoginError {:?} to Custom<String>", e);
     let status = match e {
         LoginError::Internal(_) => Status::InternalServerError,
         _ => Status::Unauthorized
@@ -395,10 +595,11 @@ fn to_http_err(e: LoginError) -> Custom<String> {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, FixedOffset, Utc};
     use rocket::{http::Status, local::asynchronous::{Client, LocalResponse}, serde::json::json, Build,  Rocket};
     use sqlx::{query, Executor, PgPool, Row};
 
-    use crate::{loginsession::{LoginError, LoginSession, SESSION_ID}, mock_chrono::set_timestamp_rfc3339};
+    use crate::{loginsession::{LoginError, LoginSession, SESSION_ID}, mock_chrono::{set_timestamp_datetime, set_timestamp_rfc3339}};
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
     async fn test_load_session(pool: PgPool) {
@@ -418,7 +619,7 @@ mod tests {
     async fn test_load_session_expired(pool: PgPool) {
         // Insert a session that has already expired
         pool.execute("INSERT INTO loginsession (id, uid, expiry) SELECT 'xxx', id, '2030-01-01T00:00:00Z' FROM person WHERE name = 'user1'").await.expect("failed to create session");
-        set_timestamp_rfc3339("2030-01-01T00:00:30Z");
+        set_timestamp_rfc3339("2030-01-01T00:00:01Z");
 
         let opt_session = LoginSession::load(&pool, "xxx").await.unwrap();
         assert!(opt_session.is_none(), "loginsession record should not be found");
@@ -451,12 +652,39 @@ mod tests {
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
     async fn test_login_session_created(pool: PgPool) {
+        let now = DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z").unwrap();
+        set_timestamp_datetime(&now);
+
         let new_session = LoginSession::login(&pool, "user1@example.com", "password", &None).await.unwrap();
         assert_eq!("user1", new_session.name);
 
         let read_session = LoginSession::load(&pool, &new_session.sessionid).await.unwrap().unwrap();
         assert_eq!(new_session.sessionid, read_session.sessionid);
         assert_eq!("user1", read_session.name);
+        assert_eq!(Some(now), read_session.loggedin);
+        assert_eq!(DateTime::parse_from_rfc3339("2025-01-08T00:00:00Z").unwrap(), read_session.expiry);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_login_session_verify(pool: PgPool) {
+        let start_time = DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z").unwrap();
+        set_timestamp_datetime(&start_time);
+
+        // Create a new login
+        let new_session = LoginSession::login(&pool, "user1@example.com", "password", &Some("127.0.0.1".to_string())).await.unwrap();
+        assert_eq!("user1", new_session.name);
+        assert_eq!(Some(start_time), new_session.loggedin);
+        assert_eq!(DateTime::parse_from_rfc3339("2025-01-08T00:00:00Z").unwrap(), new_session.expiry);
+
+        // Advance by one hour and load the record with updating access time
+        let verify_time = DateTime::parse_from_rfc3339("2025-01-01T01:00:00Z").unwrap();
+        set_timestamp_datetime(&verify_time);
+        let read_session = LoginSession::load(&pool, &new_session.sessionid).await.unwrap().unwrap();
+        assert_eq!(new_session.sessionid, read_session.sessionid);
+        assert_eq!("user1", read_session.name);
+        assert_eq!(Some(start_time), read_session.loggedin);
+        assert_eq!(DateTime::parse_from_rfc3339("2025-01-08T00:00:00Z").unwrap(), read_session.expiry);
+
     }
 
     pub(crate) async fn count_session_rows(pool: &PgPool) -> i64 {
@@ -469,10 +697,13 @@ mod tests {
     fn rocket(pool: PgPool) -> Rocket<Build> {
         rocket::build()
             .manage(pool)
+            .manage(user_agent_parser::UserAgentParser::from_path("user_agents.yaml").unwrap())
             .mount("/", routes![
                 crate::loginsession::login,
                 crate::loginsession::verify_session,
                 crate::loginsession::logout,
+                crate::loginsession::get_sessions,
+                crate::loginsession::get_session_by_id,
             ])
     }
     
@@ -514,7 +745,8 @@ mod tests {
         // Login
         let login1 = dispatch_login(&client, "user1@example.com", "password").await.unwrap();
         assert_eq!(count_session_rows(&pool).await, 1, "should be 1 session after login");
-        assert_ne!(-1, login1.expiry);
+        assert_eq!(None, login1.max_age_secs);
+        let session_after_first_login = LoginSession::load(&pool, &login1.sessionid).await.unwrap().unwrap();
 
         // Advance clock by 1 hour
         set_timestamp_rfc3339("2025-01-01T01:00:00Z");
@@ -533,8 +765,10 @@ mod tests {
         let login2 = LoginCookie::from_response(&resp).unwrap();
         
         assert_eq!(login1.sessionid, login2.sessionid);
-        let expiry_delta = login2.expiry - login1.expiry;
-        assert_eq!(expiry_delta, 3600, "cookie expiry should be extended by 1 hour");
+        let session_after_second_login = LoginSession::load(&pool, &login1.sessionid).await.unwrap().unwrap();
+
+        let expiry_delta = session_after_second_login.expiry - session_after_first_login.expiry;
+        assert_eq!(expiry_delta.num_seconds(), 3600, "cookie expiry should be extended by 1 hour");
     }
     
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
@@ -546,7 +780,7 @@ mod tests {
         // Login
         let login1 = dispatch_login(&client, "user1@example.com", "password").await.unwrap();
         assert_eq!(count_session_rows(&pool).await, 1, "should be 1 session after login");
-        assert_ne!(-1, login1.expiry);
+        assert_eq!(None, login1.max_age_secs);
 
         // Login again with existing cookie but wrong password => deletes session record
         let mut post = client.post(uri!(crate::loginsession::login))
@@ -562,7 +796,7 @@ mod tests {
         assert_eq!(count_session_rows(&pool).await, 0, "should be 0 sessions after incorrect login");
         let login2 = LoginCookie::from_response(&resp).unwrap();
         assert_eq!(login2.sessionid, "_".to_string(), "sessionid should be cleared from cookie");
-        assert_eq!(login2.max_age_secs, 0, "session cookie should have max_age zeroed to delete it from the browser");
+        assert_eq!(login2.max_age_secs, Some(0), "session cookie should have max_age zeroed to delete it from the browser");
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
@@ -586,8 +820,7 @@ mod tests {
     struct LoginCookie {
         sessionid: String,
         sessionid_raw: String,
-        max_age_secs: i64,
-        expiry: i64,
+        max_age_secs: Option<i64>
     }
 
     impl LoginCookie {
@@ -602,10 +835,6 @@ mod tests {
                     sessionid: cookie_private,
                     max_age_secs: cookie.max_age()
                         .map(|d| d.whole_seconds())
-                        .unwrap_or(-1),
-                    expiry: cookie.expires_datetime()
-                        .map(|dt| dt.to_utc().unix_timestamp())
-                        .unwrap_or(-1)
                 }
             })
         }

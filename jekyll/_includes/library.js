@@ -7,6 +7,7 @@ import { createApp, onMounted, reactive, ref, watch } from '/js/vue.esm-browser.
 
 const SERVER_URL = '/api'
 const LOGIN_STORAGE_KEY = "anotherlevellogin"
+const TIMEZONE = "Europe/London"
 
 const http_err = ref(null)
 const loggedin = ref((_ => {
@@ -105,8 +106,7 @@ function validatePhone(phone) {
 
 function displayDate(datestr) {
     return new Date(datestr).toLocaleDateString("en-GB", {
-        timeZone: 'Europe/London',
-        // dateStyle: "medium",
+        timeZone: TIMEZONE,
         weekday: "short",
         day: 'numeric',
         month: 'long',
@@ -117,9 +117,21 @@ function displayDate(datestr) {
 function displayTime(datetimestr) {
     const datetime = new Date(datetimestr)
     return datetime.toLocaleTimeString("en-GB", {
-        timeZone: 'Europe/London',
+        timeZone: TIMEZONE,
         timeStyle: "short",
         hour12: false
+    })
+}
+
+function displayDateTime(datetimestr) {
+    const datetime = new Date(datetimestr)
+    return datetime.toLocaleDateString("en-GB", {
+        timeZone: TIMEZONE,
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+    }) + ' ' + datetime.toLocaleTimeString("en-GB", {
+        timeZone: TIMEZONE
     })
 }
 

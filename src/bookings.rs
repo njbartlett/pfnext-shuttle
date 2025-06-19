@@ -631,7 +631,7 @@ mod tests {
         // Create booking
         
         let login = create_login(admin_id, "Admin User", "admin");
-        crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await.unwrap();
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await.unwrap();
         assert_eq!(1, count_bookings(&pool).await);
 
         assert_eq!(vec![("Admin User@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
@@ -672,7 +672,7 @@ mod tests {
 
         // Create booking
         let login = create_login(member2_id, "member", "member");
-        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await;
+        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
         assert_eq!(Err(Custom(Status::Forbidden, "Cannot create a booking for another user!".to_string())), result);
 
         assert_eq!(0, read_logged(&pool).await.len());
@@ -730,7 +730,7 @@ mod tests {
 
         // Create booking
         let login = create_login(trainer_id, "trainer", "trainer");
-        crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await.unwrap();
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await.unwrap();
         assert_eq!(1, count_bookings(&pool).await);
 
         assert_eq!(vec![("trainer@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
@@ -788,7 +788,7 @@ mod tests {
 
         // Create booking
         let login = create_login(trainer2_id, "trainer2", "trainer");
-        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await;
+        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
         assert_eq!(Err(Custom(Status::Forbidden, "Cannot create a booking for another user!".to_string())), result);
 
         assert_eq!(0, read_logged(&pool).await.len());
@@ -810,7 +810,7 @@ mod tests {
 
         // Create booking
         let login = create_login(member_id, "member", "member");
-        crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await.unwrap();
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await.unwrap();
         assert_eq!(1, count_bookings(&pool).await);
 
         assert_eq!(vec![("member@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
@@ -831,7 +831,7 @@ mod tests {
 
         // Create booking
         let login = create_login(member_id, "test", "");
-        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await;
+        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
         assert!(result.is_err());
         assert_eq!(Custom(Status::Forbidden, "Missing or expired membership, and no PAYG credits.".to_string()), result.err().unwrap());
 
@@ -866,13 +866,13 @@ mod tests {
 
         // Create booking 1
         let login = create_login(member_id, "member", "limited-member");
-        crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login.clone(), Json(booking_1)).await.unwrap();
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login.clone(), Json(booking_1)).await.unwrap();
 
         // Postcondition 1: one booking
         assert_eq!(1, count_bookings(&pool).await);
 
         // Create booking 2: fails
-        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login.clone(), Json(booking_2.clone())).await;
+        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login.clone(), Json(booking_2.clone())).await;
         assert!(result.is_err());
         assert_eq!(Custom(Status::Forbidden, "Cannot book session: member already has 1 booking(s) in this week.".to_string()), result.err().unwrap());
 
@@ -886,7 +886,7 @@ mod tests {
         assert_eq!(0, count_bookings(&pool).await);
 
         // Create booking 2: succeeds now
-        crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login.clone(), Json(booking_2)).await.unwrap();
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login.clone(), Json(booking_2)).await.unwrap();
 
         // Postcondition 4: one booking
         assert_eq!(1, count_bookings(&pool).await);
@@ -924,13 +924,13 @@ mod tests {
 
         // Create booking 1
         let login = create_login(member_id, "member", "limited-member");
-        crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login.clone(), Json(booking_1)).await.unwrap();
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login.clone(), Json(booking_1)).await.unwrap();
 
         // Postcondition 1: one booking
         assert_eq!(1, count_bookings(&pool).await);
 
         // Create booking 2: succeeds because it's next week
-        crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking_2.clone())).await.unwrap();
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking_2.clone())).await.unwrap();
 
         // Postcondition 2: two bookings
         assert_eq!(2, count_bookings(&pool).await);
@@ -959,7 +959,7 @@ mod tests {
 
         // Create booking
         let login = create_login(member_id, "nonmember", "");
-        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await;
+        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
         assert!(result.is_err());
         assert_eq!(Custom(Status::PaymentRequired, "Opt in to use credits for booking.".to_string()), result.err().unwrap());
 
@@ -987,7 +987,7 @@ mod tests {
 
         // Create booking
         let login = create_login(member_id, "PAYG", "");
-        crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login.clone(), Json(booking)).await.expect("booking should be created");
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login.clone(), Json(booking)).await.expect("booking should be created");
 
         // Check that the booking has the used credits
         let created_booking: crate::bookings::SessionBooking = query_as("SELECT person_id, session_id, credits_used FROM booking WHERE person_id = $1 AND session_id = $2")
@@ -1039,7 +1039,7 @@ mod tests {
 
         // Create booking: fail due to max bookings reached
         let login = create_login(member_id, "PAYG User", "");
-        let booking_result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::default()), login, Json(booking)).await.err().unwrap();
+        let booking_result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await.err().unwrap();
         assert_eq!(Custom(Status::Conflict, "Session has reached it maximum number of bookings: 0.".to_string()), booking_result);
 
         // Still zero bookings
@@ -1186,6 +1186,7 @@ mod tests {
             name: name.to_string(),
             email: format!("{}@example.org", name),
             roles: vec![role.to_string()],
+            loggedin: None, loggedin_from: None,
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }
     }

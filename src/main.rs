@@ -125,6 +125,9 @@ async fn launch() -> Rocket<Build> {
         .mount(
             "/api",
             routes![
+                loginsession::delete_session_by_id,
+                loginsession::get_session_by_id,
+                loginsession::get_sessions,
                 loginsession::login,
                 loginsession::logout,
                 loginsession::verify_session,

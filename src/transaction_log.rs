@@ -78,6 +78,7 @@ mod tests {
             name: name.to_string(),
             email: format!("{}@example.com", name),
             roles: vec![role.to_string()],
+            loggedin: None, loggedin_from: None,
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }
     }

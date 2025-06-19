@@ -15,18 +15,6 @@ async function loadLogs() {
     httpGetJson("/log?" + urlParams.toString(), json => log_entries.value = json)
 }
 
-function displayDateTime(datetimestr) {
-    const datetime = new Date(datetimestr)
-    return datetime.toLocaleDateString("en-GB", {
-        timeZone: 'Europe/London',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-    }) + ' ' + datetime.toLocaleTimeString("en-GB", {
-        timeZone: 'Europe/London'
-    })
-}
-
 function prevDate() {
     let datetime = new Date(filter.date)
     let prev = new Date()

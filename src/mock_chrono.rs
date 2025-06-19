@@ -1,4 +1,4 @@
-use chrono::DateTime;
+use chrono::{DateTime, TimeZone};
 use std::cell::Cell;
 
 thread_local! {
@@ -21,5 +21,12 @@ pub fn set_timestamp(timestamp: i64) {
 }
 
 pub fn set_timestamp_rfc3339(date_str: &str) {
-    set_timestamp(DateTime::parse_from_rfc3339(date_str).expect("invalid date-time").timestamp());
+    let dt = DateTime::parse_from_rfc3339(date_str)
+        .map_err(|e| format!("invalid date-time: {}", e))
+        .unwrap();
+    set_timestamp_datetime(&dt);
+}
+
+pub fn set_timestamp_datetime<T: TimeZone>(timestamp: &DateTime<T>) {
+    set_timestamp(timestamp.timestamp());
 }

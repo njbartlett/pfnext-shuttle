@@ -451,6 +451,7 @@ mod tests {
             name: name.to_string(),
             email: format!("{}@example.com", name),
             roles: vec![role.to_string()],
+            loggedin: None, loggedin_from: None,
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }
     }
@@ -483,7 +484,7 @@ mod tests {
     async fn test_list_challenges_anon_admin(pool: PgPool) {
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
-            State::from(&Config::default()),
+            State::from(&Config::load().unwrap()),
             find_user_login_by_name(&pool, "admin", "admin").await,
             None,
             Some("2025-05-15".to_string()),
@@ -506,7 +507,7 @@ mod tests {
     async fn test_list_challenges_anon_nonadmin(pool: PgPool) {
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
-            State::from(&Config::default()),
+            State::from(&Config::load().unwrap()),
             find_user_login_by_name(&pool, "user1", "member").await,
             None,
             Some("2025-04-15".to_string()),
@@ -529,7 +530,7 @@ mod tests {
     async fn test_list_challenges_for_user(pool: PgPool) {
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
-            State::from(&Config::default()),
+            State::from(&Config::load().unwrap()),
             find_user_login_by_name(&pool, "user1", "member").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             Some("2025-04-15".to_string()),
@@ -552,7 +553,7 @@ mod tests {
     async fn test_list_challenges_for_otheruser_admin(pool: PgPool) {
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
-            State::from(&Config::default()),
+            State::from(&Config::load().unwrap()),
             find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             Some("2025-04-15".to_string()),
@@ -577,7 +578,7 @@ mod tests {
 
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
-            State::from(&Config::default()),
+            State::from(&Config::load().unwrap()),
             find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,
@@ -596,7 +597,7 @@ mod tests {
 
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
-            State::from(&Config::default()),
+            State::from(&Config::load().unwrap()),
             find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,
@@ -615,7 +616,7 @@ mod tests {
 
         let challenges: Vec<ChallengeFull> = crate::activities::list_challenges(
             State::from(&pool),
-            State::from(&Config::default()),
+            State::from(&Config::load().unwrap()),
             find_user_login_by_name(&pool, "admin", "admin").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,
@@ -637,7 +638,7 @@ mod tests {
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_list_challenges_system_date_using_configured_timezone1(pool: PgPool) {
         // Set timezone to New York
-        let mut config = Config::default();
+        let mut config = Config::load().unwrap();
         config.timezone_name = "America/New_York".to_string();
 
         // Set current time to 00:00 on 1 April 2025 in UTC, which is 20:00 on 31 March in New York
@@ -662,7 +663,7 @@ mod tests {
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_list_challenges_system_date_using_configured_timezone2(pool: PgPool) {
         // Set timezone to London
-        let mut config = Config::default();
+        let mut config = Config::load().unwrap();
         config.timezone_name = "Europe/London".to_string();
 
         // Set current time to 23:00 on 31 March 2025 in UTC, which is 00:00 on 1 April in London (BST)
@@ -687,7 +688,7 @@ mod tests {
     async fn test_list_challenges_for_otheruser_nonadmin(pool: PgPool) {
         let err = crate::activities::list_challenges(
             State::from(&pool),
-            State::from(&Config::default()),
+            State::from(&Config::load().unwrap()),
             find_user_login_by_name(&pool, "user2", "member").await,
             Some(find_person_id_by_name(&pool, "user1").await),
             None,

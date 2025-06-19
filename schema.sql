@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS loginsession (
     id text PRIMARY KEY,
     uid bigint NOT NULL REFERENCES person ON DELETE CASCADE,
     expiry timestamptz NOT NULL,
-    ipinfo text
+    loggedin timestamptz,
+    loggedin_from text
 );
 
 -- location table and data
