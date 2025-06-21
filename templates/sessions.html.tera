@@ -1,0 +1,243 @@
+{% extends "default_layout" %}
+
+{% block content %}
+<div class="container">
+
+    <div class="mt-2 mx-auto text-center">
+        <h1 class="display-4 fw-normal text-body-emphasis">{{page_title}}</h1>
+    </div>    
+    
+    <!-- All computed content behind a v-cloak-->
+    <div v-cloak>
+
+        <!-- Prompt to provide emergency contact info -->
+        <div v-if="user_data && (!user_data.emergency_name || !user_data.emergency_phone)" class="alert alert-warning" role="alert">
+            <i class="bi bi-exclamation-triangle-fill"></i>&nbsp;Please <a href="/profile.html" class="alert-link">provide an emergency contact</a>.
+        </div>
+    
+        <!-- Weekly Pagination -->
+        <div class="my-2 d-flex flex-wrap">
+            <div class="btn-group my-1 flex-grow-1" style="width: max-content">
+                <button type="button" class="btn btn-outline-primary flex-grow-0" @click="scrollPaginationBackwards">&laquo;</button>
+                <button v-for="index of session_pagination.pages" type="button"
+                    class="btn"
+                    :class="{'btn-primary': session_pagination.week_offset === session_pagination.block + index, 'btn-outline-primary': session_pagination.week_offset !== session_pagination.block + index}"
+                    @click.stop="setSessionPage(session_pagination.block + index)">
+                    ${renderWeekOffset(session_pagination.block + index)}
+                </button>
+                <button type="button" class="btn btn-outline-primary flex-grow-0" @click="scrollPaginationForwards">&raquo;</button>
+            </div>
+            <div class="my-1 ms-auto">
+                <button type="button" class="btn btn-outline-primary rounded-pill ms-2" @click="resetPagination()" :disabled="session_pagination.block === 0 && session_pagination.week_offset === 0">Now</button>
+
+                <button v-if="view_mode === 'list'" type="button" class="btn btn-outline-primary ms-1" @click="view_mode = 'cal'" title="Switch to Calendar View"><i class="bi bi-calendar3"></i></button>
+                <button v-else type="button" class="btn btn-outline-primary ms-1" @click="view_mode = 'list'" title="Switch to List View"><i class="bi bi-list-ul"></i></button>
+            </div>
+        </div> <!-- weekly pagination -->
+    
+        <!-- List View Table -->
+        <table v-if="view_mode === 'list'" class="table table-borderless table-sm align-middle">
+            <thead>
+                <tr>
+                    <th scope="col">When</th>
+                    <th scope="col">Trainer</th>
+                    <th scope="col">What &amp; Where</th>
+                    <th v-if="loggedin" scope="col">Actions</th>
+                </tr>
+            </thead>
+            <tbody v-for="session in session_data">
+                <tr class="border-top" :class="{'session-past': isPast(session.datetime), 'border-bottom': !session.notes}">
+                    <td :rowspan="session.notes ? 2 : 1">${displayDate(session.datetime)} ${displayTime(session.datetime)}</td>
+                    <td :rowspan="session.notes ? 2 : 1">
+                        <div v-if="session.trainer">
+                            <a v-if="session.trainer.url" :href="session.trainer.url" :class="{'link-secondary': isPast(session.datetime)}"><i class="bi bi-person-arms-up"></i>&nbsp;${session.trainer.name}</a>
+                            <span v-else><i class="bi bi-person-arms-up"></i>&nbsp;${session.trainer.name}</span>
+                        </div>
+                        <div v-else>N/A</div>
+                    </td>
+                    <td>
+                        <!-- Session type and location-->
+                        <span>${session.session_type.name}</span>
+                        <span v-if="session.location">, 
+                            <span v-if="session.location.url"><a :href="session.location.url" :class="{'link-secondary': isPast(session.datetime)}">${session.location.name}</a></span>
+                            <span v-else>${session.location.name}</span>
+                        </span>
+                        &nbsp;
+                        <!-- Attendance pill -->
+                        <span v-if="session.max_booking_count" class="badge rounded-pill"
+                            :class="{'text-bg-danger': session.booking_count >= session.max_booking_count, 'text-bg-primary': session.booking_count < session.max_booking_count}"
+                            :title="session.booking_count + ' member(s) booked of maximum ' + session.max_booking_count">
+                            ${session.booking_count}/${session.max_booking_count}
+                        </span>
+                        <span v-else class="badge rounded-pill text-bg-primary" :title="session.booking_count + ' member(s) booked'">
+                            ${session.booking_count}
+                        </span>
+                    </td>
+
+                    <!-- Member book/cancel and admin controls -->
+                    <td v-if="loggedin">
+                        <div class="btn-group">
+                            <div v-if="isPast(session.datetime)">
+                                <div v-if="session.booked">
+                                    <!-- Booked session in the past -->
+                                    <button v-if="session.attended" class="btn btn-sm btn-outline-success" disabled><i class="bi bi-check2-circle"> Attended</i></button>
+                                    <button v-else class="btn btn-sm btn-outline-danger" disabled><i class="bi bi-x-circle"> Didn't Attend</i></button>
+                                </div>
+                            </div>
+                            <div v-else>
+                                <div v-if="session.booked">
+                                    <!-- Booked session in the future -->
+                                    <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                        Booked!
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        <li><a class="dropdown-item link-danger" href="#" @click.prevent="cancelBooking(session)"><i class="bi bi-trash"></i>&nbsp;Cancel</a></li>
+                                    </ul>
+                                </div>
+                                <button v-else type="button" class="btn btn-primary btn-sm" @click="bookSession(session)">Book</button>
+                            </div>
+                            <!-- Admin Controls -->
+                            <div v-if="isAdmin()" class="dropup">
+                                <button class="btn btn-sm btn-outline-primary dropdown-toggle ms-1" type="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</button>
+                                <ul class="dropdown-menu">
+                                    <li><a class="dropdown-item" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a></li>
+                                    <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#edit=' + session.id" class="dropdown-item"><i class="bi bi-pencil"></i> Edit</a></li>
+                                    <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#copy=' + session.id" class="dropdown-item"><i class="bi bi-copy"></i> Copy</a></li>
+                                    <li><button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#deleteConfirmDialog" @click="onClickDeleteSession(session)"><i class="bi bi-trash"></i> Delete</button></li>
+                                </ul>
+                            </div>
+                            <a v-else v-if="isUserTrainerOfSession(session)" class="btn btn-outline-primary btn-sm" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a>
+                        </div> <!-- Booking/admin button group -->
+                    </td>
+                </tr>
+                <tr v-if="session.notes" class="border-bottom" :class="{'session-past': isPast(session.datetime)}">
+                    <td colspan="4">${session.notes}</td>
+                </tr>
+            </tbody>
+        </table> <!-- list view table -->
+    
+        <!-- Calendar View Table -->
+        <table v-else class="table table-sm table-borderless">
+            <thead>
+                <tr class="border-top">
+                    <th v-for="day in daysOfWeek()" scope="col" class="border-end bg-light-subtle" :class="{'bg-opacity-50': !day.is_today, 'border-start': day.index === 0}">
+                        <span class="d-block d-sm-none">${displayDateCalendar(day.date, 'xs')}</span>
+                        <span class="d-none d-sm-block d-lg-none">${displayDateCalendar(day.date, 's')}</span>
+                        <span class="d-none d-lg-block">${displayDateCalendar(day.date, 'l')}</span>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr v-for="time in sessionsByTime(session_data)">
+                    <td v-for="day in time.days" class="border-start border-end" :class="{'bg-light-subtle': day.is_today}">
+                        <div v-for="session in day.sessions" class="border rounded p-1" :class="{'border-primary': !isPast(session.datetime), 'bg-primary-subtle': !isPast(session.datetime), 'bg-secondary-subtle': isPast(session.datetime), 'text-secondary': isPast(session.datetime)}">
+                            <div class="d-flex align-items-center mb-1">
+                                <strong>${displayTime(session.datetime)} ${session.session_type.name}</strong>
+                                <span v-if="session.max_booking_count" class="ms-auto badge rounded-pill"
+                                    :class="{'text-bg-danger': session.booking_count >= session.max_booking_count, 'text-bg-primary': session.booking_count < session.max_booking_count}"
+                                    :title="session.booking_count + ' member(s) booked of maximum ' + session.max_booking_count">
+                                    ${session.booking_count}/${session.max_booking_count}
+                                </span>
+                                <span v-else class="ms-auto badge rounded-pill text-bg-primary" :title="session.booking_count + ' member(s) booked'">${session.booking_count}</span>
+                            </div>
+                            <div v-if="session.location">
+                                <span v-if="session.location.url"><a :href="session.location.url" :class="{'link-secondary': isPast(session.datetime)}"><i class="bi bi-geo-alt-fill"></i>&nbsp;${session.location.name}</a></span>
+                                <span v-else><i class="bi bi-geo-alt-fill"></i>&nbsp;${session.location.name}</span>
+                            </div>
+                            <div v-if="session.trainer">
+                                <span v-if="session.trainer.url"><a :href="session.trainer.url" :class="{'link-secondary': isPast(session.datetime)}"><i class="bi bi-person-arms-up"></i>&nbsp;${session.trainer.name}</a></span>
+                                <span v-else><i class="bi bi-person-arms-up"></i>&nbsp;${session.trainer.name}</span>
+                            </div>
+                            <div v-if="session.notes" class="text-wrap" style="max-width: 15rem;">${session.notes}</div>
+                            <!-- Member Booked -->
+                            <div v-if="loggedin" class="mt-2">
+                                <span v-if="session.booked">                        
+                                    <span v-if="isPast(session.datetime)" class="me-1">
+                                        <span v-if="session.attended" class="text-success"><i class="bi bi-check2-circle">&nbsp;Attended</i></span>
+                                        <span v-else class="text-danger"><i class="bi bi-x-circle">&nbsp;Didn't Attend</i></span>
+                                    </span>
+                                    <div v-else class="btn-group me-1">
+                                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                            Booked!
+                                        </button>
+                                        <ul class="dropdown-menu">
+                                            <li><a class="dropdown-item link-danger" href="#" @click.prevent="cancelBooking(session)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a></li>
+                                        </ul>
+                                    </div>
+                                </span>
+                                <!-- Member Not Booked -->
+                                <button v-else v-if="!isPast(session.datetime)" type="button" class="btn btn-primary btn-sm me-1" @click="bookSession(session)">Book</button>
+                                <!-- Admin Dropdown -->
+                                <div v-if="isAdmin()" class="btn-group dropup">
+                                    <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                        Admin
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        <li><a class="dropdown-item" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a></li>
+                                        <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#edit=' + session.id" class="dropdown-item"><i class="bi bi-pencil"></i> Edit</a></li>
+                                        <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#copy=' + session.id" class="dropdown-item"><i class="bi bi-copy"></i> Copy</a></li>
+                                        <li><button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#deleteConfirmDialog" @click="onClickDeleteSession(session)"><i class="bi bi-trash"></i> Delete</button></li>
+                                    </ul>
+                                </div>
+                                <a v-else v-if="isUserTrainerOfSession(session)" class="btn btn-outline-primary btn-sm" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                <tr class="border-bottom"></tr>
+            </tbody>
+        </table> <!-- calendar view table -->
+    
+        <a v-if="!loggedin" :href="'login.html?return=' + encodeLoginReturnUrl()" class="btn btn-success rounded-pill mb-3">Login to Book</a>
+    
+        <p class="text-center text-secondary">Showing week commencing ${displayDate(session_pagination.start)}. Found ${session_data.length} session(s) for selected week. Session times shown are local to the venue.</p>
+    
+        <!-- Deletion Confirm Dialog -->
+        <div class="modal fade" id="deleteConfirmDialog" tabindex="-1" aria-labelledby="deleteConfirmModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header bg-danger">
+                        <h5 class="modal-title" id="deleteConfirmModalLabel"><i class="bi bi-exclamation-triangle-fill"></i>&nbsp;Delete Session</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Are you sure you want to delete the following session?</p>
+                        <ul>
+                            <li>${displayDate(deleting_session.datetime)} at ${displayTime(deleting_session.datetime)}</li>
+                            <li><span v-if="deleting_session.session_type">${deleting_session.session_type.name}</span><span v-if="deleting_session.location">, ${deleting_session.location.name}</span></li>
+                            <li v-if="deleting_session.trainer">${deleting_session.trainer.name}</li>
+                            <li>${deleting_session.booking_count} member(s) booked</li>
+                        </ul>
+                        <p>This cannot be undone. All related bookings and attendance records will be deleted.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-danger" @click="deleteSession(deleting_session)" data-bs-dismiss="modal"><i class="bi bi-trash"></i> Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div> <!-- End deletion confirm dialog -->
+    
+        <!-- Use credits confirm dialog -->
+        <div class="modal fade" id="spendCreditsConfirmDialog" tabindex="-1" aria-labelledby="spendCreditsConfirmModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header bg-primary">
+                        <h5 class="modal-title" id="spendCreditsConfirmModalLabel"><i class="bi bi-exclamation-triangle-fill"></i>&nbsp;Book with Credits</h5>
+                    </div>
+                    <div class="modal-body" v-if="payment_confirm">
+                        <p class="fs-5">Do you want to use ${payment_confirm.cost} of your pay-as-you-go credits to book this session?</p>
+                        <p class="text-secondary"><i class="bi bi-info-circle"></i>&nbsp;<span v-if="payment_confirm.cost == 1">This credit</span><span v-else>These credits</span> will be refunded if you cancel the booking before the session begins.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" data-bs-dismiss="modal" @click="bookSession(payment_confirm.session, payment_confirm.cost)">Yes</button>
+                    </div>
+                </div>
+            </div>
+        </div> <!-- use credits confirm dialog -->
+    </div> <!-- computed content-->
+
+</div> <!-- Main Container-->
+
+{% endblock content %}

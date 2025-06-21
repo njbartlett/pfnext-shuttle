@@ -1,0 +1,67 @@
+{%extends "loggedin_layout" %}
+
+{% block loggedin_content %}
+<div class="container">
+
+    <div class="mt-2 mx-auto text-center">
+        <h1 class="display-4 fw-normal text-body-emphasis">{{page_title}}</h1>
+    </div>    
+    
+    <div v-if="isAdmin()" class="alert alert-warning my-3 position-relative">
+        <div class="position-absolute top-0 end-0"><i class="bi bi-lightning-fill" title="Admin Only"></i></div>
+        <form>
+            <label for="selectMemberDataList" class="form-label">Show Bookings for Member:</label>
+            <input type="search" class="form-control" id="selectMemberDataList" placeholder="Type member name to search&hellip;" list="selectMemberOptions" @input.prevent="onSelectedMember">
+            <datalist id="selectMemberOptions">
+                <option v-for="user in admin_all_user_data" :value="formatNameAndEmail(user.name, user.email)"></option>
+            </datalist>
+        </form>
+    </div>
+
+    <!-- Monthly Pagination -->
+    <div class="my-2 d-flex flex-wrap">
+        <div class="btn-group my-1 flex-grow-1" role="group">
+            <button type="button" class="btn btn-outline-primary flex-grow-0" @click="scrollPaginationBackwards">&laquo;</button>
+            <button v-for="index of monthly_pagination.pages" type="button"
+                    class="btn"
+                    :class="{'btn-primary': monthly_pagination.month_offset === monthly_pagination.block + index, 'btn-outline-primary': monthly_pagination.month_offset !== monthly_pagination.block + index}"
+                    @click.stop="setMonthPage(monthly_pagination.block + index)">
+                ${renderMonthOffset(monthly_pagination.block + index)}
+            </button>
+            <button type="button" class="btn btn-outline-primary flex-grow-0" @click="scrollPaginationForwards">&raquo;</button>
+        </div>
+        <div class="my-1 ms-auto">
+            <button type="button" class="btn btn-outline-primary rounded-pill ms-2" @click="resetPagination()" :disabled="monthly_pagination.block === 0 && monthly_pagination.month_offset === 0">Now</button>
+        </div>
+    </div>
+    <!-- End Monthly Pagination-->
+
+    <!-- bookings table -->
+    <p class="text-secondary">Showing bookings for ${selected_user ? selected_user.name : 'N/A'} in ${renderMonthOffset(monthly_pagination.month_offset)}.</p>
+    <table class="table table-hover table-sm">
+        <thead>
+            <tr>
+                <th scope="col">Date & Time</th>
+                <th scope="col">Type</th>
+                <th scope="col">Location</th>
+                <th scope="col"></th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr v-for="booking in bookings_list">
+                <td>${displayDate(booking.session_datetime)} at ${displayTime(booking.session_datetime)}</td>
+                <td>${booking.session_type.name}</td>
+                <td><a v-if="booking.session_location" :href="'http://www.google.com/maps/search/' + encodeURIComponent(booking.session_location.address)" target="_blank">${booking.session_location.name}</a></td>
+                <td v-if="isPast(booking.session_datetime)">
+                    <span v-if="booking.attended" class="text-success"><i class="bi bi-check2-circle"> Attended</i></span>
+                    <span v-else class="text-danger"><i class="bi bi-x-circle"> Didn't Attend</i></span>
+                </td>
+                <td v-else>
+                    <span v-if="booking.credits_used > 0" class="text-success" :title="booking.credits_used + ' credit(s) spent'">${booking.credits_used}&nbsp;<i class="bi bi-ticket-perforated"></i>&nbsp;</span>
+                    <a href="#" class="btn btn-sm btn-outline-danger" @click.prevent="cancelBooking(booking)"><i class="bi bi-trash"></i>&nbsp;Cancel</a>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}

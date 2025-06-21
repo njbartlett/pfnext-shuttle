@@ -1,0 +1,15 @@
+{% extends "default_layout" %}
+
+{% block content %}
+<div v-if="!loggedin" class="alert alert-info my-2 text-center align-middle" role="alert" v-cloak>
+    <i class="bi bi-info-circle"></i>&nbsp;You must log in to continue&nbsp;
+    <a class="btn btn-success rounded-pill my-1 mx-2" :href="'login.html?return=' + encodeLoginReturnUrl()">Login</a>
+</div>
+
+<!-- Logged in section -->
+<div v-else v-cloak>
+    {% block loggedin_content %}
+    {% endblock loggedin_content %}
+</div>
+
+{% endblock content %}

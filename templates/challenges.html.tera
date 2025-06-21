@@ -1,0 +1,185 @@
+{% extends "loggedin_layout" %}
+
+{% block loggedin_content %}
+<div class="container">
+
+    <div class="mt-2 mx-auto text-center">
+        <h1 class="display-4 fw-normal text-body-emphasis">{{page_title}}</h1>
+    </div>    
+    
+    <!-- Admin Only Card -->
+    <div v-if="isAdmin()" class="alert alert-warning my-3 position-relative">
+        <div class="position-absolute top-0 end-0"><i class="bi bi-lightning-fill" title="Admin Only"></i></div>
+        <form>
+            <div class="row">
+                <div class="col">
+                    <label for="selectMemberDataList" class="form-label">View and Log as Member:</label>
+                    <input type="search" class="form-control" id="selectMemberDataList" placeholder="Type member name to search&hellip;" list="selectMemberOptions" v-model="admin_controls.user_name_email">
+                    <datalist id="selectMemberOptions">
+                        <option v-for="user in admin_all_user_data" :value="formatNameAndEmail(user.name, user.email)"></option>
+                    </datalist>
+                </div>
+                <div class="col">
+                    <label for="selectCurrentDate" class="form-label">Set Current Date:</label>
+                    <input type="date" class="form-control" id="selectCurrentDate" v-model="admin_controls.current_date">
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Navigation Tabs-->
+    <ul class="nav nav-tabs" id="myTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active fs-5" id="challenges-tab" data-bs-toggle="tab" data-bs-target="#challenges-tab-pane" type="button" role="tab" aria-controls="challenges-tab-pane" aria-selected="true">Challenges</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fs-5" id="activity-log-tab" data-bs-toggle="tab" data-bs-target="#activity-log-tab-pane" type="button" role="tab" aria-controls="activity-log-tab-pane" aria-selected="false">Activity Log</button>
+        </li>
+    </ul>
+
+    <!-- Tab Contents-->
+    <div class="tab-content" id="myTabContent">
+
+        <!-- Challenges Tab -->
+        <div class="tab-pane show active" id="challenges-tab-pane" role="tabpanel" aria-labelledby="challenges-tab" tabindex="0">
+            <!-- Alert if no active challenges -->
+            <div v-if="challenges.length == 0" class="alert alert-light my-5 fs-5">
+                There are no active challenges at the moment. Please check back later!
+            </div>
+
+            <!-- Create a card for each challenge -->
+            <div v-for="(challenge, challenge_index) in challenges" class="card mt-5 rounded-3 shadow-sm" :class="{'border-primary': new_activities[challenge_index]}">
+                <div class="card-header" :class="{'text-bg-primary': new_activities[challenge_index]}">
+                    <h5 >${challenge.name}</h5>
+                    ${displayDate(challenge.start)} to ${displayDate(challenge.finish)}
+                </div>
+                <!-- Active challenge -->
+                <div v-if="isChallengeStarted(challenge)">
+                    <ul class="list-group list-group-flush">
+            
+                        <!-- Progress Bars -->
+                        <li class="list-group-item">
+                            <!-- Overall Progress-->
+                            <div class="text-primary fs-5">
+                                Group Goal: ${displayNumber(challenge.total_all)} of ${displayNumber(challenge.goal)} ${challenge.activity_type.units}
+                            </div>
+                            <div class="progress-stacked my-2" style="height: 50px">
+                                <div class="progress" role="progressbar" :style="'width:' + displayPercent(challenge.total_for_person / challenge.goal)">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="height: 50px">${displayPercent(challenge.total_for_person / challenge.goal, 0)}</div>
+                                </div>
+                                <div class="progress" role="progressbar" :style="'width:' + displayPercent((challenge.total_all - challenge.total_for_person) / challenge.goal)">
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="height: 50px">${displayPercent(challenge.total_all / challenge.goal, 0)}</div>
+                                </div>
+                            </div>
+                            <!-- Individual Progress-->
+                            <div class="text-success fs-5">
+                                ${admin_controls.user.name}'s Goal: ${displayNumber(challenge.total_for_person)} of ${displayNumber(challenge.individual_goal)} ${challenge.activity_type.units}
+                            </div>
+                            <div class="progress my-2" role="progressbar" style="height: 50px">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" :style="'width:' + displayPercent(challenge.total_for_person / challenge.individual_goal)">${displayPercent(challenge.total_for_person / challenge.individual_goal)}</div>
+                            </div>
+                        </li>
+
+                        <!-- New Activity Entry -->
+                        <li v-if="new_activities[challenge_index]" class="list-group-item">
+                            <form @submit.prevent="submitActivity(challenge_index, challenge)">
+                                <div class="d-flex flex-wrap align-items-center"> <!-- flex wrap to allow the label to split from the form controls -->
+                                    <div class="fs-5 text-nowrap me-1">Log ${challenge.activity_type.name}</div>
+                                    <div class="flex-grow-1 d-flex align-items-center gy-2"> <!-- non-wrapping flex to keep the form controls in a line -->
+                                        <!-- Date -->
+                                        <input
+                                            v-model="new_activities[challenge_index].date"
+                                            type="date"
+                                            class="form-control" :class="{'is-invalid': new_activities_validation[challenge_index].date != 'valid'}"
+                                            required>
+                    
+                                        <!-- Amount -->
+                                        <div class="input-group ms-1 flex-nowrap">
+                                            <input
+                                                v-model="new_activities[challenge_index].amount"
+                                                type="number"
+                                                min="0"
+                                                :step="new_activities[challenge_index].step_size"
+                                                class="form-control" :class="{'is-invalid': new_activities_validation[challenge_index].amount != 'valid'}"
+                                                style="max-width: 160px;"
+                                                placeholder="Quantity"
+                                                required>
+                                            <span class="input-group-text">${new_activities[challenge_index].units}</span>
+                                        </div>
+                                        <div class="ms-auto">
+                                            <button type="button" class="btn btn-outline-primary ms-1" @click="submitActivity(challenge_index, challenge)" :disabled="!new_activities_validation[challenge_index].ready">Add</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-if="new_activities_validation[challenge_index].error_msg" class="text-danger"><i class="bi bi-exclamation-circle"></i>&nbsp;${new_activities_validation[challenge_index].error_msg}</div>
+                            </form>
+                        </li>
+                    </ul>
+            
+                    <!-- Leaderboard in card footer -->
+                    <div class="card-footer">
+                        <span class="fs-5 mt-2">Leaderboard</span>
+                        <table class="table table-borderless table-transparent mt-2 align-middle">
+                            <tr v-if="challenge.member_summaries.length == 0">
+                                <td class="ps-0 fs-5" colspan="3">
+                                    No activities recorded yet!
+                                </td>
+                            </tr>
+                            <tr v-for="(member_summary, index) in challenge.member_summaries">
+                                <td class="ps-0 fs-6">
+                                    <span v-if="index == 0" title="Gold Medal">🥇</span>
+                                    <span v-if="index == 1" title="Silver Medal">🥈</span>
+                                    <span v-if="index == 2" title="Bronze Medal">🥉</span>
+                                    <span v-if="index >= 3">${index + 1}</span>
+                                </td>
+                                <td class="fs-6 text-nowrap" :class="{'text-success': isSelectedUserId(member_summary.id)}">
+                                    <span v-if="member_summary.name">${member_summary.name}</span>
+                                    <span v-else>&laquo; others &raquo;</span>
+                                </td>
+                                <td width="100%">
+                                    <div class="progress" role="progressbar" style="height: 25px">
+                                        <div class="progress-bar"
+                                        :class="{'bg-success': isSelectedUserId(member_summary.id), 'bg-primary': !isSelectedUserId(member_summary.id)}"
+                                        :style="'width:' + calculateMemberBarWidth(challenge.member_summaries, index)">${displayNumber(member_summary.total_amount)}</div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+            
+                </div> <!-- active challenge -->
+                <div v-else class="card-body">
+                    This challenge hasn't started yet. Check back soon!
+                </div>
+            </div>
+        </div> <!-- challenges tab-->
+
+        <!-- My Activity Log Tab -->
+        <div class="tab-pane" id="activity-log-tab-pane" role="tabpanel" aria-labelledby="activity-log-tab" tabindex="0">
+            <div v-if="admin_controls.user" class="card my-5 border-success">
+                <h5 class="card-header border-success text-bg-success">${admin_controls.user.name}'s Activity Log</h5>
+                <div class="card-body">
+                    <table class="table table-borderless table-striped table-sm align-middle ">
+                        <thead>
+                            <tr>
+                                <th scope="col">Date</th>
+                                <th scope="col">Challenge / Activity</th>
+                                <th scope="col">Quantity</th>
+                                <th scope="col"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(activity, index) in all_activities">
+                                <td>${displayDate(activity.date)}</td>
+                                <td>${activity.challenge_name} / ${activity.activity_type.name}</td>
+                                <td>${displayNumber(activity.amount)}&nbsp;${activity.activity_type.units}</td>
+                                <td><button class="btn btn-sm btn-outline-danger float-end" @click="deleteActivity(activity, index)"><i class="bi bi-trash"></i></button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div> <!-- activity log tab -->
+    </div> <!-- tab content-->
+</div> <!-- main container -->
+{% endblock loggedin_content %} 

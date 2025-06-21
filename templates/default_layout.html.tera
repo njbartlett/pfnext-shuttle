@@ -1,0 +1,24 @@
+{% extends "base_layout" %}
+
+{% block base_content %}
+<div id="app">
+
+    {% block navigation %}
+        {% include "navigation" %}
+    {% endblock navigation %}
+
+    {# REST errors #}
+    <div v-if="http_err !== null" v-cloak class="alert alert-danger my-2 text-center" role="alert">
+        <i class="bi bi-exclamation-triangle-fill"></i>&nbsp;${http_err.text}
+    </div>
+
+    {% block content %}
+    {% endblock %}
+
+</div>
+
+{# Footer #}
+<div class="sticky-bottom bg-body mt-5 mx-2 text-secondary d-print-none">
+    <p>&copy; 2024 &ndash; 2025 Neil Bartlett all rights reserved.</p>
+</div>
+{% endblock %}

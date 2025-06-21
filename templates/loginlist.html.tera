@@ -1,0 +1,42 @@
+{% extends "loggedin_layout" %}
+
+{% block loggedin_content %}
+<div class="container">
+    <div class="mt-2 mx-auto text-center">
+        <h1 class="display-4 fw-normal text-body-emphasis">{{page_title}}</h1>
+    </div>    
+    <table class="table table-sm align-center">
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Logged In</th>
+                <th>Expiry</th>
+            </tr>
+        </thead>
+        <tr v-for="login in logins">
+            <td class="text-secondary">
+                ${login.name} <span class="text-primary">&lt;${login.email}&gt;</span>
+                <span v-if="login.is_current" class="text-success" title="Current Login">&nbsp;<i class="bi bi-person-circle"></i></span>
+            </td>
+            <td class="text-secondary">
+                <span>${displayDateTime(login.loggedin)}</span>
+                <button class="btn btn-sm text-toggle me-1" type="button" data-bs-toggle="collapse" :data-bs-target="'#loggedinCollapse' + login.sessionid" aria-expanded="false" :aria-controls="'loggedinCollapse' + login.sessionid">
+                    <span><i class="bi bi-info-circle"></i></span>
+                </button>
+                <div class="collapse" :id="'loggedinCollapse' + login.sessionid">
+                    <div class="card card-body mt-1">
+                        ${login.loggedin_from}
+                    </div>
+                </div>
+            </td>
+            <td class="text-secondary">
+                ${displayDateTime(login.expiry)}
+                <button v-if="!login.is_current" class="btn btn-sm btn-outline-danger float-end" title="Expire Now" @click="deleteLogin(login)"><i class="bi bi-trash"></i></button>
+            </td>
+        </tr>
+    </table>
+
+    <p class="text-secondary">All times shown for timezone <span class="fst-italic">${TIMEZONE}</span>.</p>
+
+</div>
+{% endblock %}

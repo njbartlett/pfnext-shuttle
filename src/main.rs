@@ -3,7 +3,6 @@
 extern crate rocket;
 
 use std::collections::HashSet;
-use std::env;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
 
@@ -11,13 +10,13 @@ use chrono::{DateTime, FixedOffset};
 
 use dotenv::dotenv;
 
-use log::{info, warn};
+use log::info;
 
-use rocket::fs::{relative, NamedFile};
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
-use rocket::{Build, Request, Rocket, State};
+use rocket::{Build, Request, Rocket};
 use rocket_cors::{AllowedHeaders, AllowedOrigins, Cors, CorsOptions};
+use rocket_dyn_templates::Template;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Executor;
@@ -26,6 +25,7 @@ use user_agent_parser::{self, UserAgentParser};
 
 use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
+use crate::templates::Templates;
 
 mod activities;
 mod backup;
@@ -35,24 +35,12 @@ mod transaction_log;
 mod loginsession;
 mod mock_chrono;
 mod sessions;
+mod templates;
 mod users;
 mod whereclause;
 
-#[rocket::get("/<path..>")]
-async fn static_files(
-    app_env: &State<AppEnv>,
-    path: PathBuf
-) -> Option<NamedFile> {
-    let root = relative!("/");
-    let mut path = Path::new(root).join(&app_env.static_path).join(path);
-    if path.is_dir() {
-        path.push("index.html");
-    }
-
-    NamedFile::open(path).await.ok()
-}
 #[catch(401)]
-pub fn unauthorized(request: &Request) -> Custom<String> {
+pub fn api_unauthorized(request: &Request) -> Custom<String> {
     let auth_error = request.local_cache::<Option<AuthenticationError>, _>(|| None);
     match auth_error {
         Some(err) => match err {
@@ -73,11 +61,6 @@ pub fn unauthorized(request: &Request) -> Custom<String> {
             "Failed to authenticate user".to_string(),
         ),
     }
-}
-
-#[catch(404)]
-pub fn notfound(_request: &Request) -> Custom<String> {
-    Custom(Status::NotFound, "not found".to_string())
 }
 
 #[launch]
@@ -114,14 +97,23 @@ async fn launch() -> Rocket<Build> {
         .unwrap();
     info!("Imported schema into database.");
 
+    // Load navigation data and templates customization
+    let templates = Templates::load("templates/pages.toml").unwrap();
+    let templates_fairing = Template::custom(|engines| {
+        engines.tera.autoescape_on(vec![".html", ".xml", ".js"]);
+    });
+
     // Configure Rocket
     rocket::build()
         .manage(config)
         .manage(app_env)
         .manage(pool)
         .manage(user_agent_parser)
-        .mount("/", routes![static_files])
-        .register("/api", catchers![unauthorized, notfound])
+        .manage(templates)
+        .mount("/", crate::templates::routes())
+        .register("/", crate::templates::catchers())
+        .attach(templates_fairing)
+        .register("/api", catchers![api_unauthorized])
         .mount(
             "/api",
             routes![

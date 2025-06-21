@@ -1,0 +1,217 @@
+{% extends "default_layout" %}
+
+{% block content %}
+<div class="container">
+    <!-- Header -->
+    <header>
+        <div class="container">
+            <div class="p-3 pb-md-4 mx-auto text-center">
+                <h1 class="display-4 fw-normal text-body-emphasis">About Us</h1>
+                
+                <p class="fs-5 text-body-secondary">
+                    <strong>Another Level C.I.C.</strong> is a community fitness company based in Barnet and Enfield, North London. We achieve results and forge bonds by being outdoors and supporting each other.
+                </p>
+                
+                <p class="fs-5 text-body-secondary">Registered as a Community Interest Company, all profits are reinvested to improve our service to the community.</p>
+                
+            </div>
+        </div>
+    </header>
+
+    <!-- Session Gallery -->
+    <div class="bg-body-tertiary py-3">
+        <div class="container text-center">
+            <h2 id="sessions" class="display-5 text-body-emphasis">Session Types</h2>
+
+            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">
+                <!-- HIIT -->
+                <div id="session_hiit" class="col">
+                    <div class="card shadow-sm border-primary">
+                        <div class="card-header py-3 text-bg-primary">
+                            <h4 class="my-0 fw-normal">HIIT</h4>
+                        </div>
+                        <img src="/img/session_hiit.jpeg">
+                        <div class="card-body">
+                            <p class="card-text">Short bursts of intense exercise!</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- OTM -->
+                <div id="session_otm" class="col">
+                    <div class="card shadow-sm border-primary">
+                        <div class="card-header py-3 text-bg-primary">
+                            <h4 class="my-0 fw-normal">On The Move</h4>
+                        </div>
+                        <img src="/img/session_otm.png">
+                        <div class="card-body">
+                            <p class="card-text">Our classic outdoor session combines bodyweight exercises with running.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Strong-->
+                <div id="session_strong" class="col">
+                    <div class="card shadow-sm border-primary">
+                        <div class="card-header py-3 text-bg-primary">
+                            <h4 class="my-0 fw-normal">Strong</h4>
+                        </div>
+                        <img src="/img/session_strong.jpeg">
+                        <div class="card-body">
+                            <p class="card-text">Using weights and other equipment to improve strength and muscle tone.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Run Club-->
+                <div id="session_runclub" class="col">
+                    <div class="card shadow-sm border-primary">
+                        <div class="card-header py-3">
+                            <h4 class="my-0 fw-normal">Running Club</h4>
+                        </div>
+                        <img src="/img/session_runclub.png">
+                        <div class="card-body">
+                            <p class="card-text">Training runs and team participation in events (open to non-members).</p>
+                        </div>
+                    </div>
+                </div>
+            
+                <!-- Cycle Squad-->
+                <div id="session_cyclesquad" class="col">
+                    <div class="card shadow-sm border-primary">
+                        <div class="card-header py-3">
+                            <h4 class="my-0 fw-normal">Cycle Squad</h4>
+                        </div>
+                        <img src="/img/session_cyclesquad.jpg">
+                        <div class="card-body">
+                            <p class="card-text">Training rides and team participation in sportives and other events (open to non-members).</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Locations Gallery -->
+    <div class="container mt-5">
+        <h2 id="locations" class="display-5 text-center text-body-emphasis">Locations</h2>
+        <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">
+            <div id="location_oak_hill" class="col">
+                <div class="card shadow-sm">
+                    <div class="card-header py-3">
+                        <h4 class="my-0 fw-normal">Oak Hill Park, Barnet</h4>
+                    </div>
+                    <img src="/img/oak_hill.jpg">
+                    <div class="card-body">
+                        <p class="card-text">We meet at the flower pots near to the car park, accessible from Parkside Gardens.</p>
+                        <div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill"></i> Access to the car park has been restricted after sunset, you may need to find parking on nearby streets.</div>
+                        <div class="dropdown text-end">
+                            <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-geo-alt-fill"></i> Open in Maps</button>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="https://osm.org/go/euu9IIRX?m=" target="_blank"><img src="/img/openstreetmap.svg" class="icon">&nbsp;Open Street Map</a></li>
+                                <li><a class="dropdown-item" href="https://maps.app.goo.gl/CWbpefUSK1Gr4v9t8" target="_blank"><i class="bi bi-google"></i>&nbsp;Google Maps</a></li>
+                                <li><a class="dropdown-item" href="https://beta.maps.apple.com/?address=Parkside+Gardens%2C+East+Barnet%2C+EN4+8JS%2C+England&auid=10387191451427826655&ll=51.6384387%2C-0.1546591&lsp=9902&q=Oak+Hill+Park" target="_blank"><i class="bi bi-apple"></i>&nbsp;Apple Maps</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="location_trent_park" class="col">
+                <div class="card shadow-sm">
+                    <div class="card-header py-3">
+                        <h4 class="my-0 fw-normal">Trent Park, Enfield</h4>
+                    </div>
+                    <img src="/img/dukes_pyramid.jpg">
+                    <div class="card-body">
+                        <p class="card-text">We meet at the gate on the western end of Limes Avenue (near to Go Ape, the Trent Park Café and public toilets).</p>
+                        <p>Access by car is only possible from the Cockfosters Road entrance.</p>
+                        <div class="dropdown text-end">
+                            <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-geo-alt-fill"></i> Open in Maps</button>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="https://osm.org/go/euu9NZ_Mx-?m=" target="_blank"><img src="/img/openstreetmap.svg" class="icon">&nbsp;Open Street Map</a></li>
+                                <li><a class="dropdown-item" href="https://maps.app.goo.gl/cv16jQLxXbJkukHA6" target="_blank"><i class="bi bi-google"></i>&nbsp;Google Maps</a></li>
+                                <li><a class="dropdown-item" href="https://beta.maps.apple.com/?address=Cockfosters+Road%2C+Greater+London%2C+EN4+0PS%2C+England&auid=10388443129569111574&ll=51.6573088%2C-0.1375747&lsp=9902&q=Trent+Country+Park" target="_blank"><i class="bi bi-apple"></i>&nbsp;Apple Maps</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trainer Gallery -->
+    <div class="container mt-5">
+        <h2 id="trainers" class="display-5 text-center text-body-emphasis">Our Trainers</h2>
+
+        <div id="trainer_angela" class="card shadow-sm border-primary my-3">
+            <h5 class="card-header text-bg-primary">Angela Charalambous</h5>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-10">
+                        <p class="card-text">
+                            Angela is a fully qualified L2 &amp; L3 Fitness Instructor and Personal Trainer and Hatton
+                            Academy Certified Boxing for Fitness instructor. She is passionate, enthusiastic,
+                            disciplined and strives to get the best out of everyone no matter their ability. As a busy
+                            mum of three who also works for the family business, Angela rediscovered her love for sport
+                            and exercise back in 2011 under the guidance of her late friend and mentor Andy Jones.
+                        </p><p>
+                            Angela’s classes are challenging but rewarding, she will keep you motivated and
+                            encourage you to keep pushing and believing in yourself. There is no room in her vocabulary
+                            for the words “I can’t” only “I’ll try”!
+                        </p>
+                    </div>
+                    <div class="col-2">
+                        <img src="/img/angela.jpg" class="img-fluid rounded-circle">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="trainer_javier" class="card card-shadow-sm border-primary my-3">
+            <h5 class="card-header text-bg-primary">Javier Suarez</h5>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-10">
+                        <h5 id="javier">Javier Suarez</h5>
+                        <p class="card-text">
+                            Javier is a total enthusiast about fitness and human movement. Currently serving as a
+                            firefighter with the London Fire Brigade, Javier always manages to squeeze in time to share his
+                            passion for training with others. With years of experience, Javier has worked for several
+                            fitness providers such as British Military Fitness where was in charge of the whole West
+                            London operation.
+                        </p><p>
+                            His qualifications include: L4 Strength and Conditioning coach; L3 Personal Trainer; L2
+                            Fitness Instructor; Senior Kettlebells trainer.
+                        </p>
+                    </div>
+                    <div class="col-2">
+                        <img src="/img/javier.jpg" class="img-fluid rounded-circle">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="trainer_andy" class="card card-shadow-sm my-3">
+            <h5 class="card-header">Andy Jones</h5>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-10">
+                        <h5 id="andy">Andy Jones</h5>
+                        <p class="card-text">
+                            Andy was the founder of PowerFit Outdoors, a former lead instructor with British Military Fitness, a mountain expedition leader, and a great friend and mentor to many members of our community.
+                        </p>
+                        <p>
+                            Andy passed away in 2024 and is very deeply missed by us all.
+                        </p>
+                    </div>
+                    <div class="col-2">
+                        <img src="/img/andy.jpg" class="img-fluid rounded-circle">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+{% endblock content %}

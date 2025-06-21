@@ -1,9 +1,3 @@
-FROM jekyll/jekyll AS jekyll-builder
-WORKDIR /app
-COPY jekyll /app
-RUN chmod -R 777 /app
-RUN JEKYLL_ENV=production jekyll build --verbose --trace
-
 FROM rust:1.87.0 AS rust-builder
 WORKDIR /app
 COPY Cargo.toml /app/
@@ -12,8 +6,9 @@ RUN cargo build --release
 
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
-COPY --from=jekyll-builder /app/_site /app/static
 COPY --from=rust-builder /app/target/release/pfnext /app/pfnext
+COPY templates /app/templates
+COPY static /app/static
 COPY schema.sql /app/schema.sql
 COPY Config.toml /app/Config.toml
 COPY user_agents.yaml /app/user_agents.yaml
