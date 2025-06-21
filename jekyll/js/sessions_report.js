@@ -2,12 +2,30 @@ const hashStr = window.location.hash
 const urlParams = hashStr ? new URLSearchParams(hashStr.substring(1)) : new URLSearchParams()
 
 const filter_data = reactive({
-    from: urlParams.has("from") ? urlParams.get("from") : startOfMonth(new Date()),
-    to: urlParams.has("to") ? urlParams.get("to") : endOfMonth(new Date()),
+    from: urlParams.has("from") ? urlParams.get("from") : startOfMonthYYYYMMDD(new Date()),
+    to: urlParams.has("to") ? urlParams.get("to") : endOfMonthYYYYMMDD(new Date()),
     trainer_id: urlParams.has("trainer_id") ? urlParams.get("trainer_id") : null
 })
 const trainer_list = ref([])
 const session_data = ref([])
+
+function startOfMonthYYYYMMDD() {
+    let now = new Date()
+    let d = new Date()
+    d.setYear(now.getFullYear())
+    d.setMonth(now.getMonth())
+    d.setDate(1)
+    return d.toISOString().split("T")[0]
+}
+
+function endOfMonthYYYYMMDD() {
+    let now = new Date()
+    let d = new Date()
+    d.setYear(now.getFullYear())
+    d.setMonth(now.getMonth() + 1)
+    d.setDate(0)
+    return d.toISOString().split("T")[0]
+}
 
 function loadSessions() {
     var params = new URLSearchParams()
