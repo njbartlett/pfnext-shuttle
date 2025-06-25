@@ -12,7 +12,7 @@ use chrono::Utc;
 use password_auth::verify_password;
 use rand::{thread_rng, RngCore};
 use rocket::{
-    http::{private::cookie::Expiration, Cookie, CookieJar, SameSite, Status}, request::{FromRequest, Outcome}, response::status::{Custom, NoContent}, serde::json::Json, Request, State
+    http::{private::cookie::Expiration, Cookie, CookieJar, SameSite, Status}, request::{FromRequest, Outcome}, response::status::{Custom, NoContent}, serde::json::Json, Request, Route, State
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, query, FromRow, PgPool, Postgres, QueryBuilder, Row};
@@ -23,15 +23,26 @@ const SESSION_ID: &str = "sessionid";
 const ADMIN: &str = "admin";
 const SESSION_DURATION: Duration = Duration::days(7);
 
+pub fn routes() -> Vec<Route> {
+    routes![
+        delete_session_by_id,
+        get_session_by_id,
+        get_sessions,
+        login,
+        logout,
+        verify_session,
+    ]
+}
+
 #[derive(Debug, PartialEq, Clone)]
-pub(crate) enum AuthenticationError {
+pub enum AuthenticationError {
     MissingSession,
     MissingDatabase,
     DatabaseError(String)
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub(crate) enum LoginError {
+enum LoginError {
     InvalidLogin,
     ResetRequired,
     Internal(String)
@@ -47,15 +58,15 @@ impl Display for LoginError {
     }
 }
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
-pub(crate) struct LoginSession {
-    pub(crate) sessionid: String,
-    pub(crate) uid: i64,
-    pub(crate) name: String,
-    pub(crate) email: String,
-    pub(crate) roles: Vec<String>,
-    pub(crate) loggedin: Option<DateTime<FixedOffset>>,
-    pub(crate) loggedin_from: Option<String>,
-    pub(crate) expiry: DateTime<FixedOffset>
+pub struct LoginSession {
+    pub sessionid: String,
+    pub uid: i64,
+    pub name: String,
+    pub email: String,
+    pub roles: Vec<String>,
+    pub loggedin: Option<DateTime<FixedOffset>>,
+    pub loggedin_from: Option<String>,
+    pub expiry: DateTime<FixedOffset>
 }
 
 #[rocket::async_trait]
@@ -134,7 +145,7 @@ impl LoginSession {
         return QueryBuilder::new("SELECT s.id AS sessionid, s.loggedin, s.loggedin_from, s.expiry, p.id AS uid, p.name, p.email, p.roles FROM loginsession s JOIN person p ON s.uid = p.id");
     }
 
-    pub(crate) async fn load_all(pool: &PgPool) -> Result<Vec<LoginSession>, sqlx::Error> {
+    async fn load_all(pool: &PgPool) -> Result<Vec<LoginSession>, sqlx::Error> {
         let mut qb = Self::query_base();
         qb.push(" ORDER BY s.loggedin ASC");
         qb.build_query_as()
@@ -142,7 +153,7 @@ impl LoginSession {
             .await
     }
 
-    pub(crate) async fn load(pool: &PgPool, sessionid: &str) -> Result<Option<LoginSession>, sqlx::Error> {
+    async fn load(pool: &PgPool, sessionid: &str) -> Result<Option<LoginSession>, sqlx::Error> {
         let mut qb = Self::query_base();
         let mut wc = WhereClause::init();
         
@@ -153,7 +164,7 @@ impl LoginSession {
             .await
     }
 
-    pub(crate) async fn delete(&self, pool: &PgPool) -> Result<bool, sqlx::Error> {
+    async fn delete(&self, pool: &PgPool) -> Result<bool, sqlx::Error> {
         let result = query("DELETE FROM loginsession WHERE id = $1 RETURNING id")
             .bind(self.sessionid.clone())
             .execute(pool)
@@ -161,7 +172,7 @@ impl LoginSession {
         Ok(result.rows_affected() > 0)
     }
 
-    pub(crate) async fn login(pool: &PgPool, email: &str, password: &str, ipinfo: &Option<String>) -> Result<LoginSession, LoginError> {
+    async fn login(pool: &PgPool, email: &str, password: &str, ipinfo: &Option<String>) -> Result<LoginSession, LoginError> {
         let now = Utc::now().fixed_offset();
         Self::clear_expired(pool, &now).await;
 
@@ -212,7 +223,7 @@ impl LoginSession {
         })
     }
 
-    pub(crate) async fn relogin(&self, pool: &PgPool, password: &str, ipinfo: &Option<String>) -> Result<LoginSession, LoginError> {
+    async fn relogin(&self, pool: &PgPool, password: &str, ipinfo: &Option<String>) -> Result<LoginSession, LoginError> {
         // Fetch login record
         let login_record = UserLoginRecord::load_by_email(pool, &self.email)
             .await
@@ -253,11 +264,11 @@ impl LoginSession {
         })
     }
 
-    pub(crate) fn has_role(&self, required_role: &str) -> bool {
+    pub fn has_role(&self, required_role: &str) -> bool {
         self.roles.iter().any(|r| r == required_role)
     }
 
-    pub(crate) fn is_admin(&self) -> bool {
+    pub fn is_admin(&self) -> bool {
         self.has_role(ADMIN)
     }
 
@@ -299,13 +310,13 @@ async fn log_login(pool: &PgPool, email: &String, ipinfo: &Option<String>, succe
 }
 
 #[derive(Deserialize)]
-pub struct LoginRequest {
+struct LoginRequest {
     email: String,
     password: String,
 }
 
 #[derive(Serialize)]
-pub struct LoggedInUser {
+struct LoggedInUser {
     id: i64,
     name: String,
     email: String,
@@ -313,7 +324,7 @@ pub struct LoggedInUser {
 }
 
 #[derive(Debug)]
-pub(crate) struct ClientInfo<'a> {
+struct ClientInfo<'a> {
     location: String,
     user_agent_product: user_agent_parser::Product<'a>,
     user_agent_os: user_agent_parser::OS<'a>,
@@ -422,7 +433,7 @@ where
 
 
 #[post("/login", data = "<login_request>")]
-pub async fn login(
+async fn login(
     pool: &State<PgPool>,
     cookies: &CookieJar<'_>,
     existing_login: Option<LoginSession>,
@@ -472,7 +483,7 @@ pub async fn login(
 }
 
 #[post("/logout")]
-pub async fn logout(
+async fn logout(
     pool: &State<PgPool>,
     login: Option<LoginSession>,
     cookies: &CookieJar<'_>
@@ -494,27 +505,27 @@ pub async fn logout(
 }
 
 #[get("/verify_session")]
-pub async fn verify_session(
+async fn verify_session(
     _login: LoginSession
 ) -> Result<NoContent, Custom<String>> {
     Ok(NoContent)
 }
 
 #[derive(Serialize)]
-pub struct LoginSessionAugmented {
-    pub(crate) sessionid: String,
-    pub(crate) uid: i64,
-    pub(crate) name: String,
-    pub(crate) email: String,
-    pub(crate) roles: Vec<String>,
-    pub(crate) loggedin: Option<DateTime<FixedOffset>>,
-    pub(crate) loggedin_from: Option<String>,
-    pub(crate) expiry: DateTime<FixedOffset>,
-    pub(crate) is_current: bool
+struct LoginSessionAugmented {
+    sessionid: String,
+    uid: i64,
+    name: String,
+    email: String,
+    roles: Vec<String>,
+    loggedin: Option<DateTime<FixedOffset>>,
+    loggedin_from: Option<String>,
+    expiry: DateTime<FixedOffset>,
+    is_current: bool
 }
 
 impl LoginSessionAugmented {
-    pub(crate) fn augment(session: &LoginSession, is_current: bool) -> LoginSessionAugmented {
+    fn augment(session: &LoginSession, is_current: bool) -> LoginSessionAugmented {
         LoginSessionAugmented {
             sessionid: session.sessionid.clone(),
             uid: session.uid,
@@ -530,7 +541,7 @@ impl LoginSessionAugmented {
 }
 
 #[get("/loginsession")]
-pub async fn get_sessions(
+async fn get_sessions(
     pool: &State<PgPool>,
     login: LoginSession
 ) -> Result<Json<Vec<LoginSessionAugmented>>, Custom<String>> {
@@ -549,7 +560,7 @@ pub async fn get_sessions(
 }
 
 #[get("/loginsession/<id>")]
-pub async fn get_session_by_id(
+async fn get_session_by_id(
     pool: &State<PgPool>,
     login: LoginSession,
     id: &str
@@ -565,7 +576,7 @@ pub async fn get_session_by_id(
 }
 
 #[delete("/loginsession/<id>")]
-pub async fn delete_session_by_id(
+async fn delete_session_by_id(
     pool: &State<PgPool>,
     login: LoginSession,
     id: &str
@@ -687,7 +698,7 @@ mod tests {
 
     }
 
-    pub(crate) async fn count_session_rows(pool: &PgPool) -> i64 {
+    async fn count_session_rows(pool: &PgPool) -> i64 {
         let count_record = query("SELECT COUNT(*) AS c FROM loginsession")
             .fetch_one(pool)
             .await.unwrap();

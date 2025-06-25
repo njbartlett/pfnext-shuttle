@@ -4,21 +4,33 @@ use rocket::http::Status;
 use rocket::response::status::{Created, Custom, NoContent};
 use rocket::serde::json::Json;
 use rocket::serde::Deserialize;
-use rocket::State;
+use rocket::{Route, State};
 use serde::Serialize;
 use sqlx::postgres::PgRow;
-use sqlx::{query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::{query, query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
 use crate::loginsession::LoginSession;
 use crate::parse_opt_date;
 
+pub fn routes() -> Vec<Route> {
+    routes![
+        list_sessions,
+        get_session,
+        create_session,
+        delete_session,
+        list_locations,
+        list_session_types,
+        update_session,
+    ]
+}
+
 #[derive(FromRow, Serialize, Clone, Debug, PartialEq)]
-pub(crate) struct SessionType {
-    pub(crate) id: i32,
-    pub(crate) name: String,
-    pub(crate) requires_trainer: bool,
-    pub(crate) cost: i16,
-    pub(crate) deprecated: bool
+pub struct SessionType {
+    pub id: i32,
+    pub name: String,
+    pub requires_trainer: bool,
+    pub cost: i16,
+    pub deprecated: bool
 }
 
 impl SessionType {
@@ -32,36 +44,36 @@ impl SessionType {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub(crate) struct SessionTrainer {
-    pub(crate) id: i64,
-    pub(crate) name: String,
-    pub(crate) email: String,
-    pub(crate) url: Option<String>
+struct SessionTrainer {
+    id: i64,
+    name: String,
+    email: String,
+    url: Option<String>
 }
 
 #[derive(FromRow, Serialize, Clone, Debug, PartialEq)]
-pub(crate) struct SessionLocation {
-    pub(crate) id: i32,
-    pub(crate) name: String,
-    pub(crate) address: String,
-    pub(crate) url: Option<String>
+pub struct SessionLocation {
+    pub id: i32,
+    pub name: String,
+    pub address: String,
+    pub url: Option<String>
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub(crate)  struct SessionFullRecord {
-    pub(crate)  id: i64,
-    pub(crate)  datetime: DateTime<Utc>,
-    pub(crate)  duration_mins: i32,
-    pub(crate)  session_type: SessionType,
-    pub(crate)  location: Option<SessionLocation>,
-    pub(crate)  trainer: Option<SessionTrainer>,
-    pub(crate)  booked: bool,
-    pub(crate)  attended: bool,
-    pub(crate)  booking_count: i64,
-    pub(crate)  max_booking_count: Option<i64>,
-    pub(crate)  attended_count: Option<i64>,
-    pub(crate)  notes: Option<String>,
-    pub(crate)  cost: i16
+struct SessionFullRecord {
+    id: i64,
+    datetime: DateTime<Utc>,
+    duration_mins: i32,
+    session_type: SessionType,
+    location: Option<SessionLocation>,
+    trainer: Option<SessionTrainer>,
+    booked: bool,
+    attended: bool,
+    booking_count: i64,
+    max_booking_count: Option<i64>,
+    attended_count: Option<i64>,
+    notes: Option<String>,
+    cost: i16
 }
 
 impl FromRow<'_, PgRow> for SessionFullRecord {
@@ -114,7 +126,7 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct NewSession {
+struct NewSession {
     datetime: DateTime<Utc>,
     duration_mins: i32,
     session_type_id: i32,
@@ -140,7 +152,7 @@ impl NewSession {
 }
 
 #[get("/sessions?<from>&<to>&<trainer_id>&<attended>")]
-pub async fn list_sessions(
+async fn list_sessions(
     pool: &State<PgPool>,
     login: Option<LoginSession>,
     from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool
@@ -163,7 +175,7 @@ pub async fn list_sessions(
 }
 
 #[get("/sessions/<session_id>?<attended>")]
-pub async fn get_session(
+async fn get_session(
     pool: &State<PgPool>, login: LoginSession,
     session_id: i64, attended: bool
 ) -> Result<Json<SessionFullRecord>, Custom<String>> {
@@ -236,17 +248,12 @@ fn build_session_query(
     Ok(())
 }
 
-#[derive(FromRow, Serialize)]
-pub(crate) struct IdRecord {
-    pub(crate) id: i64
-}
-
 #[post("/sessions", data="<new_session>")]
-pub async fn create_session(
+async fn create_session(
     pool:  &State<PgPool>,
     login: LoginSession,
     new_session: Json<NewSession>
-) -> Result<Created<Json<IdRecord>>, Custom<String>> {
+) -> Result<Created<Json<i64>>, Custom<String>> {
     // Admins can create any session. Trainers can only create sessions with themselves as the trainer.
     // Nobody else can create sessions.
     if !login.has_role("admin") {
@@ -263,7 +270,7 @@ pub async fn create_session(
         .await
         .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 
-    let id_record: IdRecord = query_as("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id")
+    let id_row = query("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id")
         .bind(&new_session.datetime)
         .bind(&new_session.duration_mins)
         .bind(&new_session.session_type_id)
@@ -276,12 +283,13 @@ pub async fn create_session(
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
         .ok_or_else(|| Custom(Status::Conflict, "no new record created".to_string()))?;
-    info!("Created session id {}", id_record.id);
-    Ok(Created::new(format!("/sessions/{}", id_record.id)).body(Json(id_record)))
+    let id = id_row.try_get("id").map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    info!("Created session id {}", id);
+    Ok(Created::new(format!("/sessions/{}", id)).body(Json(id)))
 }
 
 #[delete("/sessions/<session_id>")]
-pub async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_id: i64) -> Result<NoContent, Custom<String>> {
+async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_id: i64) -> Result<NoContent, Custom<String>> {
     let mut qb = QueryBuilder::new("DELETE FROM session WHERE id = ");
     qb.push_bind(session_id);
 
@@ -294,18 +302,20 @@ pub async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_i
         }
     }
     qb.push(" RETURNING id");
-    let id_record: IdRecord = qb.build_query_as()
+    let id: i64 = qb.build()
         .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not deletable by current user", session_id)))?;
-    info!("Deleted session id {}", id_record.id);
+        .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not deletable by current user", session_id)))?
+        .try_get("id")
+        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    info!("Deleted session id {}", id);
 
     Ok(NoContent)
 }
 
 #[put("/sessions/<session_id>", data="<new_session>")]
-pub async fn update_session(
+async fn update_session(
     pool: &State<PgPool>,
     login: LoginSession,
     session_id: i64,
@@ -352,17 +362,18 @@ pub async fn update_session(
         .await
         .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 
-    let id_record: IdRecord = qb.build_query_as()
+    let id: i64 = qb.build()
         .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not updatable by current user", session_id)))?;
-    info!("Updating session id {} with data {:?}", id_record.id, new_session);
+        .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not updatable by current user", session_id)))?
+        .try_get("id").map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    info!("Updating session id {} with data {:?}", id, new_session);
     Ok(NoContent)
 }
 
 #[get("/locations")]
-pub async fn list_locations(pool: &State<PgPool>) -> Result<Json<Vec<SessionLocation>>, Custom<String>> {
+async fn list_locations(pool: &State<PgPool>) -> Result<Json<Vec<SessionLocation>>, Custom<String>> {
     query_as("SELECT id, name, address, url FROM location")
         .fetch_all(pool.inner())
         .await
@@ -371,7 +382,7 @@ pub async fn list_locations(pool: &State<PgPool>) -> Result<Json<Vec<SessionLoca
 }
 
 #[get("/session_types?<deprecated>")]
-pub async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
+async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT id, name, requires_trainer, cost, deprecated FROM session_type");
     if let Some(deprecated) = deprecated {
         qb.push(" WHERE deprecated = ");

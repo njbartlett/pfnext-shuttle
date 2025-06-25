@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use rocket::http::Status;
+use rocket::{http::Status, Route};
 use rocket::response::status::Custom;
 use rocket::serde::json::Json;
 use rocket::State;
@@ -8,8 +8,12 @@ use sqlx::{query_as, FromRow, PgPool};
 
 use crate::loginsession::LoginSession;
 
+pub fn routes() -> Vec<Route> {
+    routes![backup_all]
+}
+
 #[derive(FromRow, Serialize, Debug)]
-pub struct PersonRow {
+struct PersonRow {
     id: i64,
     name: String,
     email: String,
@@ -20,7 +24,7 @@ pub struct PersonRow {
 }
 
 #[derive(FromRow, Serialize, Debug)]
-pub struct SessionTypeRow {
+struct SessionTypeRow {
     id: i32,
     name: String,
     requires_trainer: bool,
@@ -29,7 +33,7 @@ pub struct SessionTypeRow {
 }
 
 #[derive(FromRow, Serialize, Debug)]
-pub struct LocationRow {
+struct LocationRow {
     id: i32,
     name: String,
     address: String,
@@ -37,7 +41,7 @@ pub struct LocationRow {
 }
 
 #[derive(FromRow, Serialize, Debug)]
-pub struct SessionRow {
+struct SessionRow {
     id: i64,
     datetime: DateTime<Utc>,
     duration_mins: i32,
@@ -50,7 +54,7 @@ pub struct SessionRow {
 }
 
 #[derive(FromRow, Serialize, Debug)]
-pub struct BookingRow {
+struct BookingRow {
     person_email: String,
     session_datetime: DateTime<Utc>,
     session_location_name: Option<String>,
@@ -58,7 +62,7 @@ pub struct BookingRow {
 }
 
 #[derive(Serialize, Debug)]
-pub struct AllTables {
+struct AllTables {
     session_type: Vec<SessionTypeRow>,
     location: Vec<LocationRow>,
     person: Vec<PersonRow>,
@@ -67,7 +71,7 @@ pub struct AllTables {
 }
 
 #[get("/backup")]
-pub async fn backup_all(pool: &State<PgPool>, login: LoginSession) -> Result<Json<AllTables>, Custom<String>> {
+async fn backup_all(pool: &State<PgPool>, login: LoginSession) -> Result<Json<AllTables>, Custom<String>> {
     if !login.is_admin() {
         return Err(Custom(Status::Forbidden, "admin role required".to_string()));
     }

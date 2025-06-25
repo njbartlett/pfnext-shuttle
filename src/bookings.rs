@@ -6,7 +6,7 @@ use rocket::http::Status;
 use rocket::response::status::{Created, Custom, NoContent};
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
-use rocket::State;
+use rocket::{Route, State};
 use serde::Deserialize;
 use sqlx::postgres::{PgQueryResult, PgRow};
 use sqlx::{query, query_as, raw_sql, Error, FromRow, PgPool, QueryBuilder, Row};
@@ -23,15 +23,25 @@ const ROLE_FULL_MEMBER: &str = "member";
 const ROLE_TRAINER: &str = "trainer";
 const ROLE_LIMITED_MEMBER: &str = "limited-member";
 
+pub fn routes() -> Vec<Route> {
+    routes![
+        list_bookings,
+        create_booking,
+        delete_booking,
+        update_booking,
+        get_attendance_stats,
+    ]
+}
+
 #[derive(Serialize, Deserialize, FromRow, Debug, Clone, PartialEq)]
-pub struct SessionBooking {
+struct SessionBooking {
     person_id: i64,
     session_id: i64,
     credits_used: Option<i16>
 }
 
 #[derive(Serialize, Debug, PartialEq)]
-pub struct SessionBookingFull {
+struct SessionBookingFull {
     person_id: i64,
     person_name: String,
     person_email: String,
@@ -79,7 +89,7 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
 }
 
 #[get("/bookings?<session_id>&<person_id>&<from>&<to>")]
-pub async fn list_bookings(
+async fn list_bookings(
     pool: &State<PgPool>,
     login: LoginSession,
     session_id: Option<i64>,
@@ -162,7 +172,7 @@ async fn take_result_from_stream<'a>(stream: &mut BoxStream<'a, Result<PgQueryRe
 }
 
 #[post("/bookings", data="<booking>")]
-pub async fn create_booking(
+async fn create_booking(
     pool: &State<PgPool>,
     config: &State<Config>,
     login: LoginSession,
@@ -394,7 +404,7 @@ async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_i
 }
 
 #[delete("/bookings?<session_id>&<person_id>")]
-pub async fn delete_booking(
+async fn delete_booking(
     pool: &State<PgPool>,
     login: LoginSession,
     person_id: i64, session_id: i64
@@ -432,12 +442,12 @@ pub async fn delete_booking(
 }
 
 #[derive(Deserialize)]
-pub struct BookingUpdate {
+struct BookingUpdate {
     attended: bool
 }
 
 #[put("/bookings?<session_id>&<person_id>", data="<booking_update>")]
-pub async fn update_booking(
+async fn update_booking(
     pool: &State<PgPool>,
     login: LoginSession,
     person_id: i64, session_id: i64,
@@ -458,7 +468,7 @@ pub async fn update_booking(
 }
 
 #[derive(Serialize, FromRow)]
-pub struct AttendanceStat {
+struct AttendanceStat {
     person_id: i64,
     name: String,
     email: String,
@@ -466,7 +476,7 @@ pub struct AttendanceStat {
 }
 
 #[get("/stats/attendance?<from>&<to>&<session_type>")]
-pub async fn get_attendance_stats(
+async fn get_attendance_stats(
     pool: &State<PgPool>,
     login: LoginSession,
     from: Option<String>, to: Option<String>, session_type: Vec<i32>

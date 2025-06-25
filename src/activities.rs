@@ -4,7 +4,7 @@ use futures::future::try_join_all;
 use rocket::http::Status;
 use rocket::response::status::{Created, Custom, NoContent};
 use rocket::serde::json::Json;
-use rocket::State;
+use rocket::{Route, State};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgRow;
 use sqlx::{query, query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
@@ -22,12 +22,24 @@ use chrono::Utc;
 
 const DATE_FORMAT: &str = "%Y-%m-%d";
 
+pub fn routes() -> Vec<Route> {
+    routes![
+        list_activity_types,
+        list_challenges,
+        get_challenge,
+        get_activity,
+        list_activities,
+        create_activity,
+        delete_activity,
+    ]
+}
+
 #[derive(FromRow, Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ActivityType {
-    pub id: i32,
-    pub name: String,
-    pub units: String,
-    pub step_size: f32
+struct ActivityType {
+    id: i32,
+    name: String,
+    units: String,
+    step_size: f32
 }
 
 impl ActivityType {
@@ -115,7 +127,7 @@ impl FromRow<'_, PgRow> for ChallengeRecord {
 
 
 #[derive(Serialize, Clone, FromRow, Debug)]
-pub struct MemberActivitySummary {
+struct MemberActivitySummary {
     id: Option<i64>,
     name: Option<String>,
     total_amount: f32
@@ -141,7 +153,7 @@ impl MemberActivitySummary {
 }
 
 #[derive(Serialize, Debug)]
-pub struct ChallengeFull {
+struct ChallengeFull {
     id: i64,
     name: String,
     start: NaiveDate,
@@ -190,7 +202,7 @@ impl ChallengeFull {
 }
 
 #[get("/activity_types")]
-pub async fn list_activity_types(pool: &State<PgPool>) -> Result<Json<Vec<ActivityType>>, Custom<String>> {
+async fn list_activity_types(pool: &State<PgPool>) -> Result<Json<Vec<ActivityType>>, Custom<String>> {
     ActivityType::query(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
@@ -198,7 +210,7 @@ pub async fn list_activity_types(pool: &State<PgPool>) -> Result<Json<Vec<Activi
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct NewActivity {
+struct NewActivity {
     person_id: i64,
     challenge_id: i64,
     date: NaiveDate,
@@ -206,7 +218,7 @@ pub struct NewActivity {
 }
 
 impl NewActivity {
-    pub async fn save(&self, pool: &PgPool) -> Result<i64, Error> {
+    async fn save(&self, pool: &PgPool) -> Result<i64, Error> {
         query("INSERT INTO activity (person_id, challenge_id, date, amount) VALUES ($1, $2, $3, $4) RETURNING id")
             .bind(self.person_id).bind(self.challenge_id).bind(self.date).bind(self.amount)
             .fetch_one(pool)
@@ -216,7 +228,7 @@ impl NewActivity {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Activity {
+struct Activity {
     id: i64,
     person_id: i64,
     person_name: String,
@@ -283,7 +295,7 @@ impl Activity {
 }
 
 #[get("/activities?<challenge_id>&<person_id>")]
-pub async fn list_activities(
+async fn list_activities(
     pool: &State<PgPool>,
     login: LoginSession,
     challenge_id: Option<i64>,
@@ -308,7 +320,7 @@ fn check_challenge_permission(login: &LoginSession, person_id: &Option<i64>) -> 
 }
 
 #[get("/challenges?<person_id>&<date_today>&<leaderboard_limit>")]
-pub async fn list_challenges(
+async fn list_challenges(
     pool: &State<PgPool>,
     config: &State<Config>,
     login: LoginSession,
@@ -346,7 +358,7 @@ async fn expand_record_if_active(pool: &PgPool, r: &ChallengeRecord, today: &Nai
 }
 
 #[get("/challenges/<id>?<person_id>&<leaderboard_limit>")]
-pub async fn get_challenge(
+async fn get_challenge(
     pool: &State<PgPool>,
     login: LoginSession,
     id: i64,
@@ -365,7 +377,7 @@ pub async fn get_challenge(
 }
 
 #[get("/activities/<activity_id>")]
-pub async fn get_activity(
+async fn get_activity(
     pool: &State<PgPool>,
     login: LoginSession,
     activity_id: i64
@@ -381,7 +393,7 @@ pub async fn get_activity(
 }
 
 #[post("/activities", data = "<activity>")]
-pub async fn create_activity(
+async fn create_activity(
     pool: &State<PgPool>,
     login: LoginSession,
     activity: Json<NewActivity>
@@ -395,7 +407,7 @@ pub async fn create_activity(
 }
 
 #[delete("/activities/<activity_id>")]
-pub async fn delete_activity(
+async fn delete_activity(
     pool: &State<PgPool>,
     login: LoginSession,
     activity_id: i64

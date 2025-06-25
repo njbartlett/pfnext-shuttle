@@ -4,7 +4,7 @@ extern crate rocket;
 
 use std::collections::HashSet;
 use std::fs::read_to_string;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::{DateTime, FixedOffset};
 
@@ -14,7 +14,7 @@ use log::info;
 
 use rocket::http::{Method, Status};
 use rocket::response::status::Custom;
-use rocket::{Build, Request, Rocket};
+use rocket::{Build, Request, Rocket, Route};
 use rocket_cors::{AllowedHeaders, AllowedOrigins, Cors, CorsOptions};
 use rocket_dyn_templates::Template;
 
@@ -40,7 +40,7 @@ mod users;
 mod whereclause;
 
 #[catch(401)]
-pub fn api_unauthorized(request: &Request) -> Custom<String> {
+fn api_unauthorized(request: &Request) -> Custom<String> {
     let auth_error = request.local_cache::<Option<AuthenticationError>, _>(|| None);
     match auth_error {
         Some(err) => match err {
@@ -110,50 +110,19 @@ async fn launch() -> Rocket<Build> {
         .manage(pool)
         .manage(user_agent_parser)
         .manage(templates)
+        .attach(templates_fairing)
         .mount("/", crate::templates::routes())
         .register("/", crate::templates::catchers())
-        .attach(templates_fairing)
         .register("/api", catchers![api_unauthorized])
-        .mount(
-            "/api",
-            routes![
-                loginsession::delete_session_by_id,
-                loginsession::get_session_by_id,
-                loginsession::get_sessions,
-                loginsession::login,
-                loginsession::logout,
-                loginsession::verify_session,
-                users::register_user,
-                users::request_pwd_reset,
-                users::reset_pwd,
-                users::get_user,
-                users::list_users,
-                users::delete_user,
-                users::update_user,
-                users::patch_user,
-                sessions::list_sessions,
-                sessions::get_session,
-                sessions::create_session,
-                sessions::delete_session,
-                sessions::list_locations,
-                sessions::list_session_types,
-                sessions::update_session,
-                bookings::list_bookings,
-                bookings::create_booking,
-                bookings::delete_booking,
-                bookings::update_booking,
-                bookings::get_attendance_stats,
-                activities::list_activity_types,
-                activities::list_challenges,
-                activities::get_challenge,
-                activities::get_activity,
-                activities::list_activities,
-                activities::create_activity,
-                activities::delete_activity,
-                transaction_log::read_log,
-                backup::backup_all
-            ],
-        )
+        .mount("/api", vec![
+            activities::routes(),
+            bookings::routes(),
+            loginsession::routes(),
+            sessions::routes(),
+            users::routes(),
+            transaction_log::routes(),
+            backup::routes()
+        ].into_iter().flatten().collect::<Vec<Route>>())
 }
 
 fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, Custom<String>> {

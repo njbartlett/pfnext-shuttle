@@ -1,14 +1,31 @@
 use crate::{loginsession::LoginSession, parse_opt_date};
 use chrono::{DateTime, Utc};
-use rocket::http::Status;
+use rocket::{http::Status, Route};
 use rocket::response::status::Custom;
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::State;
 use sqlx::{query, FromRow, PgPool, QueryBuilder, Row};
 
+pub fn routes() -> Vec<Route> {
+    routes![read_log]
+}
+
+pub async fn append_log(pool: &PgPool, originator: &Option<String>, event_type: &str, detail: &str) -> Result<i64, Custom<String>> {
+    let timestamp: DateTime<Utc> = Utc::now();
+    query("INSERT INTO eventlog (datetime, person, type, detail) VALUES ($1, $2, $3, $4) RETURNING id")
+    .bind(timestamp)
+    .bind(originator.as_ref().map(|s| s.as_str()).unwrap_or("<missing>"))
+    .bind(event_type)
+    .bind(detail)
+    .fetch_one(pool)
+    .await
+    .and_then(|r| r.try_get("id"))
+    .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+}
+
 #[derive(FromRow, Serialize, Debug)]
-pub struct LogRow {
+struct LogRow {
     id: i64,
     datetime: DateTime<Utc>,
     person: String,
@@ -16,21 +33,8 @@ pub struct LogRow {
     detail: String
 }
 
-pub async fn append_log(pool: &PgPool, originator: &Option<String>, event_type: &str, detail: &str) -> Result<i64, Custom<String>> {
-    let timestamp: DateTime<Utc> = Utc::now();
-    query("INSERT INTO eventlog (datetime, person, type, detail) VALUES ($1, $2, $3, $4) RETURNING id")
-        .bind(timestamp)
-        .bind(originator.as_ref().map(|s| s.as_str()).unwrap_or("<missing>"))
-        .bind(event_type)
-        .bind(detail)
-        .fetch_one(pool)
-        .await
-        .and_then(|r| r.try_get("id"))
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-}
-
 #[get("/log?<from>&<to>")]
-pub async fn read_log(
+async fn read_log(
     pool: &State<PgPool>,
     login: LoginSession,
     from: Option<String>,

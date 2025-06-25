@@ -11,7 +11,7 @@ use rocket::http::{Header, Status};
 use rocket::response::status::{Accepted, Custom, NoContent};
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
-use rocket::State;
+use rocket::{Route, State};
 use sqlx::postgres::PgRow;
 use sqlx::{query, query_as, raw_sql, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 use urlencoding::encode;
@@ -33,15 +33,28 @@ const INVALID_LOGIN_MESSAGE: &str = "incorrect username or password";
 const TEMP_PASSWORD_MINIMUM_RESEND_WAIT: Duration = Duration::minutes(-2);
 const TEMP_PASSWORD_EXPIRY: Duration = Duration::minutes(10);
 
+pub fn routes() -> Vec<Route> {
+    routes![
+        register_user,
+        request_pwd_reset,
+        reset_pwd,
+        get_user,
+        list_users,
+        delete_user,
+        update_user,
+        patch_user,
+    ]
+}
+
 #[derive(Serialize, FromRow, Clone, Debug)]
 pub struct UserLoginRecord {
-    pub(crate) id: i64,
-    pub(crate) name: String,
-    pub(crate) email: String,
-    pub(crate) phone: Option<String>,
-    pub(crate) pwd: Option<String>,
-    pub(crate) roles: String,
-    pub(crate) credits: i16
+    pub id: i64,
+    pub name: String,
+    pub email: String,
+    pub phone: Option<String>,
+    pub pwd: Option<String>,
+    pub roles: String,
+    pub credits: i16
 }
 
 impl UserLoginRecord {
@@ -60,20 +73,20 @@ impl UserLoginRecord {
 }
 
 #[derive(Deserialize)]
-pub struct LoginRequest {
+struct LoginRequest {
     email: String,
     password: String,
 }
 
 #[derive(Responder)]
 #[response(status = 200, content_type = "application/json")]
-pub struct LoginResponse {
+struct LoginResponse {
     inner: Json<LoggedInUser>,
     cookie: Header<'static>
 }
 
 #[derive(Serialize)]
-pub struct LoggedInUser {
+struct LoggedInUser {
     id: i64,
     name: String,
     email: String,
@@ -106,14 +119,14 @@ fn verify_user(login_record: UserLoginRecord, password: &str) -> Result<UserLogi
 }
 
 #[derive(Deserialize)]
-pub struct UpdatePasswordRequest {
+struct UpdatePasswordRequest {
     username: String,
     current_password: String,
     new_password: String
 }
 
 #[derive(Deserialize, Debug)]
-pub struct NewUserRequest {
+struct NewUserRequest {
     name: String,
     email: String,
     phone: Option<String>,
@@ -130,14 +143,14 @@ struct UserUpdated {
 }
 
 #[derive(Deserialize)]
-pub struct PasswordResetRequest {
+struct PasswordResetRequest {
     email: String,
     website_url: String,
     reset_url: String
 }
 
 #[post("/request_pwd_reset", data="<reset_request>")]
-pub async fn request_pwd_reset(
+async fn request_pwd_reset(
     state: &State<PgPool>,
     config: &State<Config>,
     app_env: &State<AppEnv>,
@@ -180,7 +193,7 @@ pub async fn request_pwd_reset(
 }
 
 #[post("/register_user", data="<new_user>")]
-pub async fn register_user(
+async fn register_user(
     state: &State<PgPool>,
     config: &State<Config>,
     app_env: &State<AppEnv>,
@@ -281,7 +294,7 @@ async fn create_temp_password(pool: &PgPool, user_id: i64) -> Result<String, Cus
 
 
 #[derive(Deserialize)]
-pub struct UserPasswordReset {
+struct UserPasswordReset {
     email: String,
     temp_password: String,
     new_password: String,
@@ -295,7 +308,7 @@ struct TempPasswordRecord {
 }
 
 #[post("/reset_pwd", data="<user_pwd_reset>")]
-pub async fn reset_pwd(
+async fn reset_pwd(
     state: &State<PgPool>,
     config: &State<Config>,
     app_env: &State<AppEnv>,
@@ -357,7 +370,7 @@ pub async fn reset_pwd(
 }
 
 #[derive(Serialize, Debug, PartialEq)]
-pub struct UserListingEntry {
+struct UserListingEntry {
     id: i64,
     name: String,
     email: String,
@@ -409,7 +422,7 @@ async fn query_users(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<UserList
 }
 
 #[get("/users/<user_id>")]
-pub async fn get_user(
+async fn get_user(
     pool: &State<PgPool>,
     login: LoginSession,
     user_id: i64
@@ -425,7 +438,7 @@ pub async fn get_user(
 }
 
 #[get("/users/list?<role>")]
-pub async fn list_users(
+async fn list_users(
     pool: &State<PgPool>,
     login: LoginSession,
     role: Option<String>
@@ -448,13 +461,13 @@ pub async fn list_users(
 }
 
 #[derive(Deserialize)]
-pub struct UserDeletionRequest {
+struct UserDeletionRequest {
     password: Option<String>,
     website_url: String
 }
 
 #[delete("/users/<user_id>", data="<deletion>")]
-pub async fn delete_user(
+async fn delete_user(
     state: &State<PgPool>,
     config: &State<Config>,
     app_env: &State<AppEnv>,
@@ -504,7 +517,7 @@ pub async fn delete_user(
 }
 
 #[derive(Deserialize, Debug)]
-pub struct UserUpdate {
+struct UserUpdate {
     name: String,
     email: String,
     phone: Option<String>,
@@ -516,7 +529,7 @@ pub struct UserUpdate {
 }
 
 #[put("/users/<user_id>", data="<update>")]
-pub async fn update_user(
+async fn update_user(
     state: &State<PgPool>,
     login: LoginSession,
     user_id: i64,
@@ -545,7 +558,7 @@ pub async fn update_user(
 }
 
 #[derive(Deserialize, Debug)]
-pub struct UserPatch {
+struct UserPatch {
     name: Option<String>,
     phone: Option<String>,
     emergency_name: Option<String>,
@@ -553,7 +566,7 @@ pub struct UserPatch {
     medical_info: Option<String>
 }
 #[patch("/users/<user_id>", data="<patch>")]
-pub async fn patch_user(
+async fn patch_user(
     pool: &State<PgPool>,
     login: LoginSession,
     user_id: i64,
@@ -664,7 +677,6 @@ mod tests {
     use rocket::response::status::Custom;
     use rocket::State;
     use sqlx::{query, query_as, Column, Executor, FromRow, PgPool, Row};
-    use crate::backup::PersonRow;
     use crate::users::{get_user, list_users};
     use crate::loginsession::LoginSession;
 
@@ -754,9 +766,7 @@ mod tests {
         let user1 = create_person(&pool, "joe@example.com", None, "member", 0).await;
         let user2 = create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        dump_persons(&pool).await;
         let result = list_users(State::from(&pool), create_login(user1, "user1§", "member"), None).await.unwrap();
-
         assert_eq!(1, result.len());
         assert_eq!("joe@example.com", result[0].email);
     }
@@ -774,12 +784,4 @@ mod tests {
         assert_eq!(false, result.get(1).unwrap().pwd_defined);
     }
 
-    async fn dump_persons(pool: &PgPool) {
-        query_as("SELECT * FROM person")
-            .fetch_all(pool)
-            .await
-            .unwrap()
-            .into_iter()
-            .for_each(|row: PersonRow| println!("### Person: {:?}", row));
-    }
 }
