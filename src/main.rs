@@ -64,6 +64,11 @@ fn api_unauthorized(request: &Request) -> Custom<String> {
     }
 }
 
+#[catch(404)]
+fn api_notfound(_: &Request) -> Custom<String> {
+    Custom(Status::NotFound, "not found".to_string())
+}
+
 #[launch]
 async fn launch() -> Rocket<Build> {
     dotenv().ok();
@@ -114,7 +119,7 @@ async fn launch() -> Rocket<Build> {
         .attach(templates_fairing)
         .mount("/", crate::templates::routes())
         .register("/", crate::templates::catchers())
-        .register("/api", catchers![api_unauthorized])
+        .register("/api", catchers![api_unauthorized, api_notfound])
         .mount("/api", vec![
             activities::routes(),
             bookings::routes(),
