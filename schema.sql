@@ -82,6 +82,13 @@ CREATE TABLE IF NOT EXISTS booking (
     PRIMARY KEY (person_id, session_id)
 );
 
+CREATE TABLE IF NOT EXISTS waitlist (
+    id bigserial PRIMARY KEY,
+    person_id bigint NOT NULL REFERENCES person ON DELETE CASCADE,
+    session_id bigint NOT NULL REFERENCES session ON DELETE CASCADE,
+    CONSTRAINT waitlist_booking_unique UNIQUE (person_id, session_id)
+);
+
 CREATE TABLE IF NOT EXISTS eventlog (
     id bigserial PRIMARY KEY,
     datetime timestamptz NOT NULL,

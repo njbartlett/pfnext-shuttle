@@ -1,6 +1,7 @@
 const session = ref(null)
 const bookings = ref([])
 const adding_user = ref(null)
+const waitlist = ref([])
 const page_return_path = ref("sessions.html")
 
 // Reference data
@@ -15,6 +16,10 @@ async function loadSession(sessionId) {
 
 async function loadSessionAttendees(sessionId) {
     httpGetJson("/bookings?session_id=" + sessionId, json => bookings.value = json)
+}
+
+async function loadSessionWaitlist(sessionId) {
+    httpGetJson("/waitlist?session_id=" + sessionId, json => waitlist.value = json)
 }
 
 async function loadAllUsersTables() {
@@ -58,7 +63,10 @@ async function removeMember(sessionId, personId) {
     let params = new URLSearchParams()
     params.append("person_id", personId)
     params.append("session_id", sessionId)
-    httpCall("/bookings?" + params.toString(), 'DELETE', null, res => loadSessionAttendees(sessionId))
+    httpCall("/bookings?" + params.toString(), 'DELETE', null, res => {
+        loadSessionAttendees(sessionId)
+        loadSessionWaitlist(sessionId)
+    })
 }
 
 async function toggleAttendance(booking) {
@@ -71,11 +79,21 @@ async function toggleAttendance(booking) {
     }, null)
 }
 
+async function removeWaitlistEntry(waitlist_entry) {
+    let params = new URLSearchParams()
+    params.append("person_id", waitlist_entry.person_id)
+    params.append("session_id", waitlist_entry.session_id)
+    httpCall("/waitlist?" + params.toString(), "DELETE", null, res => {
+        return loadSessionAttendees(waitlist_entry.session_id).then(_ => loadSessionWaitlist(waitlist_entry.session_id))
+    })
+}
+
 const searchParams = new URLSearchParams(window.location.search)
 const sessionId = searchParams.get("id");
 if (sessionId) {
     loadSession(sessionId)
     loadSessionAttendees(sessionId)
+    loadSessionWaitlist(sessionId)
     loadAllUsersTables()
 } else {
     http_err.value = "missing session id"
@@ -85,8 +103,9 @@ let app = createApp({
     setup() {
         return {
             http_err, loggedin, page_return_path,
-            session, bookings, adding_user, all_user_data,
-            isAdmin, onLogout, displayTime, displayDate, addMemberInput, addMember, removeMember, toggleAttendance, encodeLoginReturnUrl, goBack
+            session, bookings, adding_user, all_user_data, waitlist,
+            isAdmin, onLogout, displayTime, displayDate, addMemberInput, addMember, removeMember, toggleAttendance, encodeLoginReturnUrl, goBack,
+            removeWaitlistEntry
         }
     }
 })

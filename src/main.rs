@@ -34,6 +34,7 @@ mod config;
 mod transaction_log;
 mod loginsession;
 mod mock_chrono;
+mod notifications;
 mod sessions;
 mod templates;
 mod users;

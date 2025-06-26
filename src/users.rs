@@ -1,10 +1,6 @@
 use std::ops::Add;
 
 use chrono::{DateTime, Duration, Utc};
-use mail_send::mail_builder::headers::address::Address;
-use mail_send::mail_builder::MessageBuilder;
-use mail_send::smtp::message::{IntoMessage, Message};
-use mail_send::{Credentials, SmtpClientBuilder};
 use password_auth::{generate_hash, verify_password};
 use passwords::PasswordGenerator;
 use rocket::http::{Header, Status};
@@ -18,6 +14,7 @@ use urlencoding::encode;
 
 use crate::config::{AppEnv, Config};
 use crate::loginsession::LoginSession;
+use crate::notifications::{send_admin_email, send_email, send_email_async};
 
 const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
     length: 6,
@@ -177,17 +174,8 @@ async fn request_pwd_reset(
     let temp_password = create_temp_password(state.inner(), user_record.id).await?;
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &reset_request.reset_url, encode(&user_record.email), encode(&temp_password));
     let text = format!(include_str!("reset_email.txt"), &config.inner().branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
-    let sender = Address::new_address(Some(&config.inner().email_sender_name), &config.inner().email_sender_address);
-    let reply_to = Address::new_address(Some(&config.email_replyto_name), &config.email_replyto_address);
-    let message = MessageBuilder::new()
-        .from(sender.clone())
-        .reply_to(reply_to)
-        .to(Address::new_address(Some(&user_record.name), &user_record.email))
-        .subject(format!("Password Reset for {}", &config.inner().branding))
-        .text_body(text)
-        .into_message()
+    send_email(config, app_env, &user_record.name, &user_record.email, &format!("Password Reset for {}", &config.inner().branding), &text)
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    send_email(message, config, app_env).await?;
 
     Ok(Accepted(format!("Password reset email sent to {}. Please check your spam folder if not received!", &user_record.email)))
 }
@@ -223,36 +211,21 @@ async fn register_user(
     let temp_password = create_temp_password(state.inner(), user_updated.id).await?;
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &new_user.reset_url, encode(&new_user.email), encode(&temp_password));
     let text = format!(include_str!("register_email.txt"), &config.branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
-    let sender = Address::new_address(Some(&config.email_sender_name), &config.email_sender_address);
-    let reply_to = Address::new_address(Some(&config.email_replyto_name), &config.email_replyto_address);
-
-    let message = MessageBuilder::new()
-        .from(sender.clone())
-        .reply_to(reply_to.clone())
-        .to(Address::new_address(Some(&new_user.name), &new_user.email))
-        .subject(format!("New User Registration for {}", &config.branding))
-        .text_body(text)
-        .into_message()
+    send_email_async(config, app_env, &new_user.name, &new_user.email, &format!("New User Registration for {}", &config.branding), &text)
+        .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    send_email(message, config, app_env).await?;
 
     // Send notification email to admin
-    let notification_message = MessageBuilder::new()
-        .from(sender.clone())
-        .reply_to(reply_to)
-        .to(config.email_admin_notifications.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
-        .subject(format!("New User Registration for {}", &config.branding))
-        .text_body(format!(include_str!("register_notify_email.txt"),
-            &new_user.name,
-            &new_user.email,
-            &new_user.phone.as_ref().unwrap_or(&"<unspecified>".to_string()),
-            &new_user.emergency_name.as_ref().unwrap_or(&"<unspecified>".to_string()),
-            &new_user.emergency_phone.as_ref().unwrap_or(&"<unspecified>".to_string()),
-            &new_user.medical_info.as_ref().unwrap_or(&"None provided".to_string())
-        ))
-        .into_message()
+    let text = format!(include_str!("register_notify_email.txt"),
+        &new_user.name,
+        &new_user.email,
+        &new_user.phone.as_ref().unwrap_or(&"<unspecified>".to_string()),
+        &new_user.emergency_name.as_ref().unwrap_or(&"<unspecified>".to_string()),
+        &new_user.emergency_phone.as_ref().unwrap_or(&"<unspecified>".to_string()),
+        &new_user.medical_info.as_ref().unwrap_or(&"None provided".to_string())
+    );
+    send_admin_email(config, app_env, &format!("New User Registration for {}", &config.branding), &text)
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    send_email(notification_message, config, app_env).await?;
 
     Ok(Accepted(format!("New user instructions email sent to {}. Please check your spam folder if not received!", &new_user.email)))
 }
@@ -352,19 +325,7 @@ async fn reset_pwd(
 
     // Send acknowledgement email
     let text = format!(include_str!("post_reset_email.txt"), &user_record.name, &user_record.email, &user_pwd_reset.website_url);
-    let sender = Address::new_address(Some(&config.email_sender_name), &config.email_sender_address);
-    let reply_to = Address::new_address(Some(&config.email_replyto_name), &config.email_replyto_address);
-    let message = MessageBuilder::new()
-        .from(sender.clone())
-        .reply_to(reply_to.clone())
-        .to(Address::new_address(Some(&user_record.name), &user_record.email))
-        .subject(format!("Password Changed for {}", &config.branding))
-        .text_body(text)
-        .into_message()
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    let _ = send_email(message, config, app_env)
-        .await
-        .inspect_err(|e| error!("Failed to send password change email to {}: {:?}", &user_record.email, e));
+    let _ = send_email(config, app_env, &user_record.name, &user_record.email, &format!("Password Changed for {}", &config.branding), &text);
 
     Ok(Accepted(format!("Updated password for user with email {}", &user_record.email)))
 }
@@ -500,18 +461,7 @@ async fn delete_user(
 
     // Send an email to the user confirming their account has been deleted
     let text = format!(include_str!("post_delete_profile_email.txt"), &login_record.email, &deletion.website_url);
-    let sender = Address::new_address(Some(&config.email_sender_name), &config.email_sender_address);
-    let message = MessageBuilder::new()
-        .from(sender.clone())
-        .reply_to(sender)
-        .to(Address::new_address(Some(&login_record.name), &login_record.email))
-        .subject(format!("User Profile Deleted for {}", &config.branding))
-        .text_body(text)
-        .into_message()
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-    let _ = send_email(message, config, app_env)
-        .await
-        .inspect_err(|e| error!("Failed to send deletion email to {}: {:?}", &login_record.email, e));
+    let _ = send_email(config, app_env, &login_record.name, &login_record.email, &format!("User Profile Deleted for {}", &config.branding), &text);
 
     Ok(NoContent)
 }
@@ -649,28 +599,6 @@ fn parse_roles(roles_str: &str) -> Vec<String> {
     }
 }
 
-async fn send_email<'x>(
-    message: Message<'x>,
-    config: &Config,
-    app_env: &AppEnv
-) -> Result<(), Custom<String>> {
-    // Open the client
-    info!("Connecting to SMTP server at {}:{}...", &config.smtp_host, &config.smtp_port);
-    let mut client = SmtpClientBuilder::new(&config.smtp_host, config.smtp_port)
-        .implicit_tls(false)
-        .credentials(Credentials::new(&app_env.smtp_username, &app_env.smtp_password))
-        .connect()
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, format!("Failed to connect to SMTP server: {}", e.to_string())))?;
-    info!("Connected to SMTP server");
-
-    // Send the message
-    println!("Sending message: {:?}", message);
-    client.send(message)
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-}
-
 mod tests {
     use chrono::{Days, Utc};
     use rocket::http::Status;
@@ -678,7 +606,7 @@ mod tests {
     use rocket::State;
     use sqlx::{query, query_as, Column, Executor, FromRow, PgPool, Row};
     use crate::users::{get_user, list_users};
-    use crate::loginsession::LoginSession;
+    use crate::loginsession::{LoginSession, Roles};
 
     const DEFAULT_PASSWORD: &str = "password";
     const DEFAULT_PASSWORD_HASH: Option<&str> = Some("$argon2id$v=19$m=19456,t=2,p=1$X6SS0kJdO6uW3snBe7t1hA$gcYt1rDiSi+f1Rh0tQK+xzgF6ou7zzEbY/2XW33z3YE");
@@ -704,7 +632,7 @@ mod tests {
             uid,
             name: name.to_string(),
             email: format!("{}@example.com", name),
-            roles: vec![role.to_string()],
+            roles: Roles::parse(role),
             loggedin: None, loggedin_from: None,
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }

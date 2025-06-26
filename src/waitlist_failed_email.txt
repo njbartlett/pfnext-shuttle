@@ -1,0 +1,9 @@
+Dear {},
+
+You previously joined the waiting list for the {} session at {} on {} at {}.
+
+Unfortunately we were unable to make an automatic booking for this session for the following reason:
+
+{}
+
+Your space on the waiting list has been removed.

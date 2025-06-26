@@ -10,35 +10,61 @@
             <button type="button" class="btn-close" aria-label="Close" @click="goBack()"></button>
         </div>
     </div>
-    <div class="card-body">
-        <p>${bookings.length} member(s) booked ${session.session_type.name} session at ${displayTime(session.datetime)} on ${displayDate(session.datetime)}<span v-if="session.location"> at ${session.location.name}</span>.</p>
-        <table class="table table-hover table-sm">
-            <thead>
-                <tr>
-                    <th>Member</th>
-                    <th>Attended?</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-            <tr v-for="booking in bookings">
-                <td>${booking.person_name}</td>
-                <td><form><input type="checkbox" class="form-check larger align-middle" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
-                <td><button type="button" class="btn btn-outline-danger btn-sm float-end" @click="removeMember(session.id, booking.person_id)"><i class="bi bi-trash"></i></button></td>
-            </tr>
+    <ul class="list-group list-group-flush">
+        <li class="list-group-item">
+            <h2>Bookings</h2>
+            <p>${bookings.length} member(s) booked ${session.session_type.name} session at ${displayTime(session.datetime)} on ${displayDate(session.datetime)}<span v-if="session.location"> at ${session.location.name}</span>:</p>
+            <table class="table table-hover table-sm">
+                <thead>
+                    <tr>
+                        <th>Member</th>
+                        <th>Attended?</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="booking in bookings" class="align-middle">
+                        <td>${booking.person_name}</td>
+                        <td><form><input type="checkbox" class="form-check larger align-middle" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
+                        <td><button type="button" class="btn btn-outline-danger btn-sm float-end" @click="removeMember(session.id, booking.person_id)"><i class="bi bi-trash-fill"></i></button></td>
+                    </tr>
+                </tbody>
+            </table>
+    
+            <form>
+                <div class="input-group m-0 p-0">
+                    <span class="input-group-text">+</span>
+                    <input id="addMemberToSessionInput" type="search" class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="addMemberInput">
+                    <button class="btn btn-primary" :disabled="!adding_user" @click.prevent="addMember(session.id, adding_user.id)"><i class="bi bi-arrow-up-square-fill"></i>&nbsp;Book</button>
+                </div>
+                <datalist id="addMemberToSessionOptions">
+                    <option v-if="all_user_data && all_user_data.name_email_to_user" v-for="user_name_email in all_user_data.name_email_to_user.keys()" :value="user_name_email">
+                </datalist>
+            </form>
+        </li>
 
-        </table>
-
-        <form>
-            <div class="input-group m-0 p-0">
-                <span class="input-group-text">+</span>
-                <input id="addMemberToSessionInput" type="search" class="form-control" list="addMemberToSessionOptions" id="addMemberToSessionDataList" placeholder="Type member name to search&hellip;" @input.prevent="addMemberInput">
-                <button class="btn btn-primary" :disabled="!adding_user" @click.prevent="addMember(session.id, adding_user.id)">Add</button>
-            </div>
-            <datalist id="addMemberToSessionOptions">
-                <option v-if="all_user_data && all_user_data.name_email_to_user" v-for="user_name_email in all_user_data.name_email_to_user.keys()" :value="user_name_email">
-            </datalist>
-        </form>
-    </div> <!-- end card body -->
+        <li class="list-group-item" v-if="waitlist.length > 0">
+            <h2 class="my-2">Waitlist</h2>
+            <table class="table table-hover table-sm">
+                <thead>
+                    <tr>
+                        <th>&num;</th>
+                        <th>Member</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="waitlist_entry in waitlist" class="align-middle">
+                        <td>${waitlist_entry.rank}</td>
+                        <td width="100%">${waitlist_entry.person_name}</td>
+                        <td>
+                            <button type="button" class="btn btn-outline-danger btn-sm" @click="removeWaitlistEntry(waitlist_entry)" title="Remove"><i class="bi bi-trash-fill"></i></button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </li>
+    </ul>
+    
 </div> <!-- end card -->
 {% endblock %}

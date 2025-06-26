@@ -136,7 +136,7 @@ mod tests {
     use rocket::State;
     use sqlx::{query, Executor, PgPool, Row};
 
-    use crate::loginsession::LoginSession;
+    use crate::loginsession::{LoginSession, Roles};
 
     fn create_login(name: &str, role: &str) -> LoginSession {
         LoginSession {
@@ -144,7 +144,7 @@ mod tests {
             uid: 0,
             name: name.to_string(),
             email: format!("{}@example.com", name),
-            roles: vec![role.to_string()],
+            roles: Roles::parse(role),
             loggedin: None, loggedin_from: None,
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }

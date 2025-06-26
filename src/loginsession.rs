@@ -15,7 +15,7 @@ use rocket::{
     http::{private::cookie::Expiration, Cookie, CookieJar, SameSite, Status}, request::{FromRequest, Outcome}, response::status::{Custom, NoContent}, serde::json::Json, Request, Route, State
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgRow, query, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::{postgres::{PgRow, PgTypeInfo}, query, Decode, FromRow, PgPool, Postgres, QueryBuilder, Row, Type};
 
 use crate::{transaction_log::append_log, users::UserLoginRecord, whereclause::{Operator, WhereClause}};
 
@@ -58,12 +58,51 @@ impl Display for LoginError {
     }
 }
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+pub struct Roles(Vec<String>);
+
+impl Roles {
+    pub fn has_role(&self, required_role: &str) -> bool {
+        self.0.iter().any(|r| r == required_role)
+    }
+    pub fn is_admin(&self) -> bool {
+        self.has_role(ADMIN)
+    }
+    pub fn parse(roles_str: &str) -> Self {
+        let parsed_roles: Vec<String> = roles_str
+            .split(",")
+            .map(|s| s.to_string())
+            .collect();
+        Self(if vec![String::from("")].eq(&parsed_roles) {
+                Vec::new()
+            } else {
+                parsed_roles
+            }
+        )
+    }
+}
+impl Into<Vec<String>> for Roles {
+    fn into(self) -> Vec<String> {
+        self.0
+    }
+}
+impl Decode<'_, Postgres> for Roles {
+    fn decode(value: <Postgres as sqlx::Database>::ValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        Ok(Self::parse(value.as_str()?))
+    }
+}
+impl Type<Postgres> for Roles {
+    fn type_info() -> <Postgres as sqlx::Database>::TypeInfo {
+        PgTypeInfo::with_name("TEXT")
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct LoginSession {
     pub sessionid: String,
     pub uid: i64,
     pub name: String,
     pub email: String,
-    pub roles: Vec<String>,
+    pub roles: Roles,
     pub loggedin: Option<DateTime<FixedOffset>>,
     pub loggedin_from: Option<String>,
     pub expiry: DateTime<FixedOffset>
@@ -126,7 +165,7 @@ impl FromRow<'_, PgRow> for LoginSession {
             uid: row.try_get("uid")?,
             name: row.try_get("name")?,
             email: row.try_get("email")?,
-            roles: row.try_get("roles").map(|r| parse_roles(r))?,
+            roles: row.try_get("roles").map(|r| Roles::parse(r))?,
             loggedin: row.try_get("loggedin")?,
             loggedin_from: row.try_get("loggedin_from")?,
             expiry: row.try_get("expiry")?
@@ -216,7 +255,7 @@ impl LoginSession {
             uid: login_record.id,
             name: login_record.name,
             email: login_record.email,
-            roles: parse_roles(&login_record.roles),
+            roles: Roles::parse(&login_record.roles),
             loggedin: Some(now),
             loggedin_from: ipinfo.clone(),
             expiry: expiry.fixed_offset()
@@ -265,7 +304,7 @@ impl LoginSession {
     }
 
     pub fn has_role(&self, required_role: &str) -> bool {
-        self.roles.iter().any(|r| r == required_role)
+        self.roles.has_role(required_role)
     }
 
     pub fn is_admin(&self) -> bool {
@@ -285,19 +324,6 @@ impl LoginSession {
     }
 
 
-}
-
-fn parse_roles(roles_str: &str) -> Vec<String> {
-    let parsed_roles = roles_str
-        .split(",")
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
-
-    if vec![String::from("")].eq(&parsed_roles) {
-        Vec::new()
-    } else {
-        parsed_roles
-    }
 }
 
 async fn log_login(pool: &PgPool, email: &String, ipinfo: &Option<String>, success: bool) {
@@ -467,7 +493,7 @@ async fn login(
         id: login_session.uid,
         name: login_session.name,
         email: login_session.email,
-        roles: login_session.roles
+        roles: login_session.roles.0
     };
     
     // Add session cookie
@@ -513,11 +539,11 @@ async fn verify_session(
 
 #[derive(Serialize)]
 struct LoginSessionAugmented {
-    sessionid: String,
     uid: i64,
+    sessionid: String,
     name: String,
     email: String,
-    roles: Vec<String>,
+    roles: Roles,
     loggedin: Option<DateTime<FixedOffset>>,
     loggedin_from: Option<String>,
     expiry: DateTime<FixedOffset>,

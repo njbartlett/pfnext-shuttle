@@ -92,6 +92,12 @@ impl AppEnv {
         })
     }
 }
+#[cfg(test)]
+impl Default for AppEnv {
+    fn default() -> Self {
+        Self { database_url: Default::default(), access_token_key: Default::default(), refresh_token_key: Default::default(), smtp_username: Default::default(), smtp_password: Default::default(), cors_allowed: Default::default(), rocket_secret_key: Default::default(), static_path: Default::default() }
+    }
+}
 
 fn field_from_env(field_name: &str) -> Result<String, String> {
     env::var(field_name).map_err(|e| format!("{}: {}", e, field_name))

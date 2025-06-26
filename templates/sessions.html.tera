@@ -6,7 +6,7 @@
     <div class="mt-2 mx-auto text-center">
         <h1 class="display-4 fw-normal text-body-emphasis">{{page_title}}</h1>
     </div>    
-    
+
     <!-- All computed content behind a v-cloak-->
     <div v-cloak>
 
@@ -75,40 +75,7 @@
                     </td>
 
                     <!-- Member book/cancel and admin controls -->
-                    <td v-if="loggedin">
-                        <div class="btn-group">
-                            <div v-if="isPast(session.datetime)">
-                                <div v-if="session.booked">
-                                    <!-- Booked session in the past -->
-                                    <button v-if="session.attended" class="btn btn-sm btn-outline-success" disabled><i class="bi bi-check2-circle"> Attended</i></button>
-                                    <button v-else class="btn btn-sm btn-outline-danger" disabled><i class="bi bi-x-circle"> Didn't Attend</i></button>
-                                </div>
-                            </div>
-                            <div v-else>
-                                <div v-if="session.booked">
-                                    <!-- Booked session in the future -->
-                                    <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                                        Booked!
-                                    </button>
-                                    <ul class="dropdown-menu">
-                                        <li><a class="dropdown-item link-danger" href="#" @click.prevent="cancelBooking(session)"><i class="bi bi-trash"></i>&nbsp;Cancel</a></li>
-                                    </ul>
-                                </div>
-                                <button v-else type="button" class="btn btn-primary btn-sm" @click="bookSession(session)">Book</button>
-                            </div>
-                            <!-- Admin Controls -->
-                            <div v-if="isAdmin()" class="dropup">
-                                <button class="btn btn-sm btn-outline-primary dropdown-toggle ms-1" type="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</button>
-                                <ul class="dropdown-menu">
-                                    <li><a class="dropdown-item" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a></li>
-                                    <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#edit=' + session.id" class="dropdown-item"><i class="bi bi-pencil"></i> Edit</a></li>
-                                    <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#copy=' + session.id" class="dropdown-item"><i class="bi bi-copy"></i> Copy</a></li>
-                                    <li><button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#deleteConfirmDialog" @click="onClickDeleteSession(session)"><i class="bi bi-trash"></i> Delete</button></li>
-                                </ul>
-                            </div>
-                            <a v-else v-if="isUserTrainerOfSession(session)" class="btn btn-outline-primary btn-sm" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a>
-                        </div> <!-- Booking/admin button group -->
-                    </td>
+                    <td>{% include "session_controls" %}</td>
                 </tr>
                 <tr v-if="session.notes" class="border-bottom" :class="{'session-past': isPast(session.datetime)}">
                     <td colspan="4">${session.notes}</td>
@@ -149,38 +116,8 @@
                                 <span v-else><i class="bi bi-person-arms-up"></i>&nbsp;${session.trainer.name}</span>
                             </div>
                             <div v-if="session.notes" class="text-wrap" style="max-width: 15rem;">${session.notes}</div>
-                            <!-- Member Booked -->
-                            <div v-if="loggedin" class="mt-2">
-                                <span v-if="session.booked">                        
-                                    <span v-if="isPast(session.datetime)" class="me-1">
-                                        <span v-if="session.attended" class="text-success"><i class="bi bi-check2-circle">&nbsp;Attended</i></span>
-                                        <span v-else class="text-danger"><i class="bi bi-x-circle">&nbsp;Didn't Attend</i></span>
-                                    </span>
-                                    <div v-else class="btn-group me-1">
-                                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                                            Booked!
-                                        </button>
-                                        <ul class="dropdown-menu">
-                                            <li><a class="dropdown-item link-danger" href="#" @click.prevent="cancelBooking(session)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a></li>
-                                        </ul>
-                                    </div>
-                                </span>
-                                <!-- Member Not Booked -->
-                                <button v-else v-if="!isPast(session.datetime)" type="button" class="btn btn-primary btn-sm me-1" @click="bookSession(session)">Book</button>
-                                <!-- Admin Dropdown -->
-                                <div v-if="isAdmin()" class="btn-group dropup">
-                                    <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                                        Admin
-                                    </button>
-                                    <ul class="dropdown-menu">
-                                        <li><a class="dropdown-item" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a></li>
-                                        <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#edit=' + session.id" class="dropdown-item"><i class="bi bi-pencil"></i> Edit</a></li>
-                                        <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#copy=' + session.id" class="dropdown-item"><i class="bi bi-copy"></i> Copy</a></li>
-                                        <li><button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#deleteConfirmDialog" @click="onClickDeleteSession(session)"><i class="bi bi-trash"></i> Delete</button></li>
-                                    </ul>
-                                </div>
-                                <a v-else v-if="isUserTrainerOfSession(session)" class="btn btn-outline-primary btn-sm" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a>
-                            </div>
+
+                            {% include "session_controls" %}
                         </div>
                     </td>
                 </tr>
@@ -220,7 +157,7 @@
     
         <!-- Use credits confirm dialog -->
         <div class="modal fade" id="spendCreditsConfirmDialog" tabindex="-1" aria-labelledby="spendCreditsConfirmModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
+            <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">
                     <div class="modal-header bg-primary">
                         <h5 class="modal-title" id="spendCreditsConfirmModalLabel"><i class="bi bi-exclamation-triangle-fill"></i>&nbsp;Book with Credits</h5>
@@ -236,6 +173,31 @@
                 </div>
             </div>
         </div> <!-- use credits confirm dialog -->
+
+        <!-- Join waitlist confirm dialog -->
+        <div class="modal fade" id="joinWaitlistConfirmDialog" tabindex="-1" aria-labelledby="joinWaitlistConfirmLabel">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-warning text-bg-warning">
+                        <h5 class="modal-title" id="joinWaitlistConfirmLabel"><i class="bi bi-hourglass-split"></i>&nbsp;Joined Waitlist</h5>
+                        <button type="button" class="btn-close text-bg-warning" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body" v-if="waitlist_joined">
+                        <p class="text-center fs-5">You have joined the waiting list at position</p>
+                        <p class="text-center fs-1">${waitlist_joined.rank}</p>
+                        <hr>
+                        <p class="text-secondary">If a space becomes available for you, it will be booked automatically and you will be notified by email.</p>
+                        
+                        <p class="text-secondary" v-if="waitlist_joined.cost > 0">
+                            <strong>NB:</strong> You must have a valid membership or sufficient Pay As You Go credits, otherwise the booking will fail and you will lose your waiting list place.
+                        </p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Got it!</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div> <!-- computed content-->
 
 </div> <!-- Main Container-->

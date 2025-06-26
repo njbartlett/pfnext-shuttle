@@ -441,7 +441,7 @@ mod tests {
 
     use crate::activities::{Activity, ChallengeFull, NewActivity};
     use crate::config::Config;
-    use crate::loginsession::LoginSession;
+    use crate::loginsession::{LoginSession, Roles};
     use crate::mock_chrono::set_timestamp_rfc3339;
 
     const DUMMY_SESSION_ID: &str = "xxx";
@@ -462,7 +462,7 @@ mod tests {
             uid,
             name: name.to_string(),
             email: format!("{}@example.com", name),
-            roles: vec![role.to_string()],
+            roles: Roles::parse(role),
             loggedin: None, loggedin_from: None,
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }

@@ -6,8 +6,8 @@ use rocket::serde::json::Json;
 use rocket::serde::Deserialize;
 use rocket::{Route, State};
 use serde::Serialize;
-use sqlx::postgres::PgRow;
-use sqlx::{query, query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::postgres::{PgArguments, PgRow};
+use sqlx::{query, query_as, Arguments, Error, Execute, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
 use crate::loginsession::LoginSession;
 use crate::parse_opt_date;
@@ -68,6 +68,7 @@ struct SessionFullRecord {
     location: Option<SessionLocation>,
     trainer: Option<SessionTrainer>,
     booked: bool,
+    waitlist_rank: Option<i64>,
     attended: bool,
     booking_count: i64,
     max_booking_count: Option<i64>,
@@ -115,6 +116,7 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
             location,
             trainer,
             booked: row.try_get("booked").ok().unwrap_or(false),
+            waitlist_rank: row.try_get("waitlist_rank").ok(),
             attended: row.try_get("attended").ok().unwrap_or(false),
             booking_count: row.try_get("booking_count")?,
             max_booking_count: row.try_get("max_booking_count").ok(),
@@ -203,10 +205,10 @@ fn build_session_query(
     show_attended: bool,
     qb: &mut QueryBuilder<Postgres>
 ) -> Result<(), Custom<String>> {
-    qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, s.cost, \
-        t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated, \
-        loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, loc.url AS location_url, \
-        trainer.id AS trainer_id, trainer.name AS trainer_name, trainer.email AS trainer_email, trainer.url AS trainer_url, \
+    qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, s.cost,
+        t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated,
+        loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, loc.url AS location_url,
+        trainer.id AS trainer_id, trainer.name AS trainer_name, trainer.email AS trainer_email, trainer.url AS trainer_url,
         (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count, s.max_booking_count AS max_booking_count");
 
     if show_attended {
@@ -221,6 +223,10 @@ fn build_session_query(
         qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.attended = true AND booking.person_id = ");
         qb.push_bind(booking_person_id);
         qb.push(") THEN true ELSE false END AS attended");
+
+        qb.push(", (SELECT waitlist_rank FROM (SELECT ROW_NUMBER() OVER (ORDER BY w.id ASC) AS waitlist_rank, person_id, session_id FROM waitlist w WHERE w.session_id = s.id ORDER BY w.id ASC) AS waitlist_sub WHERE waitlist_sub.person_id = ");
+        qb.push_bind(booking_person_id);
+        qb.push(")");
     }
 
     qb.push(" FROM session as s \
@@ -293,8 +299,8 @@ async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_id: i
     let mut qb = QueryBuilder::new("DELETE FROM session WHERE id = ");
     qb.push_bind(session_id);
 
-    if !login.roles.contains(&"admin".to_string()) {
-        if login.roles.contains(&"trainer".to_string()) {
+    if !login.is_admin() {
+        if login.has_role("trainer") {
             qb.push(" AND trainer = ");
             qb.push_bind(login.uid);
         } else {
@@ -399,23 +405,74 @@ async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> R
 
 #[cfg(test)]
 mod tests {
+    use chrono::{Days, Utc};
     use rocket::State;
-    use sqlx::{query_as, Executor, FromRow, PgPool};
-    use crate::sessions::list_sessions;
+    use sqlx::{query, query_as, Executor, FromRow, PgPool};
+    use crate::{loginsession::{LoginSession, Roles}, sessions::list_sessions, users::UserLoginRecord};
 
     #[derive(FromRow)]
     struct BigintRecord {
         id: i64
     }
 
-    #[sqlx::test]
+    #[sqlx::test(fixtures("../schema.sql"))]
     async fn browse_sessions_not_logged_in(pool: PgPool) {
-        pool.execute(include_str!("../schema.sql")).await.unwrap();
         let _session_id: BigintRecord = query_as("insert into session (datetime, duration_mins, session_type) values ('2025-01-01 00:00:00+0', 60, 1) returning id")
             .fetch_one(&pool)
             .await.unwrap();
         let sessions = list_sessions(State::from(&pool), None, None, None, None, false).await.unwrap();
         assert_eq!(1, sessions.len());
     }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/sessions.sql"))]
+    async fn session_list_includes_waitlist_rank(pool: PgPool) {
+        let user1 = UserLoginRecord::load_by_email(&pool, "user1@example.com").await.unwrap().unwrap();
+
+        // Session with no waitlist
+        let login = create_login(user1.id, &user1.name, "member");
+        let session= list_sessions(
+            State::from(&pool),
+            Some(login.clone()),
+            Some("2025-01-01T00:00:00Z".to_string()),
+            Some("2025-01-01T23:59:59Z".to_string()),
+            None,
+            false
+        ).await.unwrap().0.into_iter().next().unwrap();
+        assert_eq!(None, session.waitlist_rank, "waitlist rank should be null (not on waitlist)");
+
+        // Add 1 other member and ourselves to the waitlist
+        query("INSERT INTO waitlist (person_id, session_id) SELECT p.id, $1 FROM person AS p WHERE p.email = 'user2@example.com'")
+            .bind(session.id)
+            .execute(&pool).await.unwrap();
+        query("INSERT INTO waitlist (person_id, session_id) VALUES ($1, $2)")
+            .bind(user1.id)
+            .bind(session.id)
+            .execute(&pool).await.unwrap();
+
+        // Requery sessions
+        let session= list_sessions(
+            State::from(&pool),
+            Some(login),
+            Some("2025-01-01T00:00:00Z".to_string()),
+            Some("2025-01-01T23:59:59Z".to_string()),
+            None,
+            false
+        ).await.unwrap().0.into_iter().next().unwrap();
+        assert_eq!(Some(2), session.waitlist_rank, "waitlist rank should be 2nd");
+
+    }
+
+    fn create_login(uid: i64, name: &str, role: &str) -> LoginSession {
+        LoginSession {
+            sessionid: "xxx".to_string(),
+            uid,
+            name: name.to_string(),
+            email: format!("{}@example.org", name),
+            roles: Roles::parse(role),
+            loggedin: None, loggedin_from: None,
+            expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
+        }
+    }
+
 
 }

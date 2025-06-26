@@ -71,7 +71,7 @@ mod tests {
     use chrono::{DateTime, Days, Duration, Utc};
     use rocket::{http::Status, response::status::Custom, State};
     use sqlx::{query, query_as, Executor, PgPool, Row};
-    use crate::loginsession::LoginSession;
+    use crate::loginsession::{LoginSession, Roles};
 
     const DUMMY_SESSION_ID: &str = "xxx";
 
@@ -81,7 +81,7 @@ mod tests {
             uid: -1,
             name: name.to_string(),
             email: format!("{}@example.com", name),
-            roles: vec![role.to_string()],
+            roles: Roles::parse(role),
             loggedin: None, loggedin_from: None,
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }

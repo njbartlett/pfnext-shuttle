@@ -1,0 +1,5 @@
+Dear {},
+
+You previously joined the waiting list for the {} session at {} on {} at {}.
+
+Since then, a space has become available and you have been booked automatically. See you there!

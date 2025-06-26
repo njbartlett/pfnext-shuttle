@@ -19,6 +19,7 @@ const session_pagination = ref({
 })
 const view_mode = ref('cal')
 const payment_confirm = ref(null)
+const waitlist_joined = ref(null)
 
 // ADMIN ONLY DATA
 const deleting_session = ref({
@@ -74,6 +75,30 @@ async function bookSession(session, credits_used) {
         error.text().then(error_text => {
             http_err.value = error_text
         })
+    })
+}
+
+async function joinWaitlist(session) {
+    const cost = session.cost
+    return httpCall("/waitlist", "POST", {
+        person_id: loggedin.value.id,
+        session_id: session.id
+    }, res => res.json()).then(json => {
+        waitlist_joined.value = json
+        waitlist_joined.value["cost"] = cost
+
+        let modal = new bootstrap.Modal(document.getElementById('joinWaitlistConfirmDialog'))
+        modal.show()
+        return loadSessions()
+    })
+}
+
+async function leaveWaitlist(session) {
+    let params = new URLSearchParams()
+    params.append("person_id", loggedin.value.id)
+    params.append("session_id", session.id)
+    return httpCall("/waitlist?" + params.toString(), "DELETE", null, res => {
+        return loadSessions()
     })
 }
 
@@ -278,6 +303,7 @@ let app = createApp({
             session_data, session_pagination, view_mode, payment_confirm,
             bookSession, cancelBooking, setSessionPage,
             daysOfWeek, sessionsByTime,
+            joinWaitlist, leaveWaitlist, waitlist_joined,
 
             // Misc callbacks and utility functions
             deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, resetPagination, displayDate, displayTime, displayDateCalendar, isPast, isAdmin, isTrainer, isUserTrainerOfSession, encodeLoginReturnUrl
