@@ -125,9 +125,9 @@ async function saveSession(session, createAnother) {
         if (!res.ok) throw res
         if (res.status === 201) {
             // Created new session, load it in edit mode
-            res.json().then(json => {
+            res.text().then(text => {
                 let urlParams = new URLSearchParams()
-                urlParams.set(createAnother ? "copy" : "edit", json.id)
+                urlParams.set(createAnother ? "copy" : "edit", parseInt(text))
                 window.location.hash = urlParams.toString()
                 loadSession()
             })
