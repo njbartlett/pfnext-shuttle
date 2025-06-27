@@ -1,3 +1,7 @@
+const sort_params = ref({
+    field: 'person_name',
+    ascending: true
+})
 const session = ref(null)
 const bookings = ref([])
 const adding_user = ref(null)
@@ -15,7 +19,10 @@ async function loadSession(sessionId) {
 }
 
 async function loadSessionAttendees(sessionId) {
-    httpGetJson("/bookings?session_id=" + sessionId, json => bookings.value = json)
+    httpGetJson("/bookings?session_id=" + sessionId, json => {
+        bookings.value = json
+        sortByField(bookings.value, sort_params.value.field, sort_params.value.ascending)
+    })
 }
 
 async function loadSessionWaitlist(sessionId) {
@@ -76,7 +83,9 @@ async function toggleAttendance(booking) {
     params.append("session_id", booking.session_id)
     httpCall("/bookings?" + params.toString(), "PUT", {
         attended: new_attended
-    }, null)
+    }, res => {
+        sortByField(bookings.value, sort_params.value.field, sort_params.value.ascending)
+    })
 }
 
 async function removeWaitlistEntry(waitlist_entry) {
@@ -86,6 +95,16 @@ async function removeWaitlistEntry(waitlist_entry) {
     httpCall("/waitlist?" + params.toString(), "DELETE", null, res => {
         return loadSessionAttendees(waitlist_entry.session_id).then(_ => loadSessionWaitlist(waitlist_entry.session_id))
     })
+}
+
+function applySort(field, ascending = true) {
+    sort_params.value = {
+        field: field,
+        ascending: ascending
+    }
+    if (bookings.value != null) {
+        sortByField(bookings.value, field, ascending)
+    }
 }
 
 const searchParams = new URLSearchParams(window.location.search)
@@ -104,8 +123,8 @@ let app = createApp({
         return {
             http_err, loggedin, page_return_path,
             session, bookings, adding_user, all_user_data, waitlist,
-            isAdmin, onLogout, displayTime, displayDate, addMemberInput, addMember, removeMember, toggleAttendance, encodeLoginReturnUrl, goBack,
-            removeWaitlistEntry
+            isAdmin, onLogout, displayTime, displayDate, displayDateTime, addMemberInput, addMember, removeMember, toggleAttendance, encodeLoginReturnUrl, goBack,
+            removeWaitlistEntry, sort_params, applySort
         }
     }
 })

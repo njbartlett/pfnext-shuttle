@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Days, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Days, FixedOffset, NaiveTime, TimeZone};
 use chrono_tz::Tz;
 use rocket::futures::stream::BoxStream;
 use rocket::futures::StreamExt;
@@ -9,7 +9,7 @@ use rocket::serde::Serialize;
 use rocket::{Route, State};
 use serde::Deserialize;
 use sqlx::postgres::{PgQueryResult, PgRow};
-use sqlx::{query, query_as, raw_sql, Error, FromRow, PgPool, QueryBuilder, Row};
+use sqlx::{query, query_as, raw_sql, Error, Execute, FromRow, PgPool, QueryBuilder, Row};
 use std::fmt::{Display, Formatter};
 
 use crate::config::{AppEnv, Config};
@@ -18,6 +18,11 @@ use crate::transaction_log::append_log;
 use crate::loginsession::{LoginSession, Roles};
 use crate::parse_opt_date;
 use crate::sessions::{SessionLocation, SessionType};
+
+#[cfg(test)]
+use crate::mock_chrono::Utc;
+#[cfg(not(test))]
+use chrono::Utc;
 
 const ROLE_FULL_MEMBER: &str = "member";
 const ROLE_TRAINER: &str = "trainer";
@@ -49,12 +54,13 @@ struct SessionBookingFull {
     person_name: String,
     person_email: String,
     session_id: i64,
-    session_datetime: DateTime<Utc>,
+    session_datetime: DateTime<FixedOffset>,
     session_duration_mins: i32,
     session_location: Option<SessionLocation>,
     session_type: SessionType,
     attended: bool,
-    credits_used: i16
+    credits_used: i16,
+    booked_timestamp: Option<DateTime<FixedOffset>>
 }
 
 impl FromRow<'_, PgRow> for SessionBookingFull {
@@ -69,6 +75,7 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
             }),
             None => None
         };
+        println!("{row:?}");
 
         Ok(SessionBookingFull {
             person_id: row.try_get("person_id")?,
@@ -86,7 +93,8 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
                 deprecated: row.try_get("session_type_deprecated")?
             },
             attended: row.try_get("attended").ok().unwrap_or(false),
-            credits_used: row.try_get("credits_used").ok().unwrap_or(0)
+            credits_used: row.try_get("credits_used").ok().unwrap_or(0),
+            booked_timestamp: row.try_get("booked_timestamp").inspect_err(|e| println!("ERROR: {e}"))?
         })
     }
 }
@@ -126,7 +134,7 @@ async fn list_bookings(
     }
 
     // Build the Query
-    let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, b.credits_used, \
+    let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, b.credits_used, b.booked_timestamp, \
                 s.datetime AS session_datetime, s.duration_mins AS session_duration_mins, s.location AS session_location_id, l.name AS session_location_name, l.address AS session_location_address, l.url AS session_location_url, \
                 s.session_type AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated, b.attended \
             FROM booking as b \
@@ -308,7 +316,7 @@ struct PersonSessionBookingDetails {
     person_email: String,
     person_roles: Roles,
     person_credits: CreditsCost,
-    datetime: DateTime<Utc>,
+    datetime: DateTime<FixedOffset>,
     cost: i16,
     session_id: i64,
     session_type_name: String,
@@ -351,10 +359,10 @@ impl PersonSessionBookingDetails {
 struct MemberExistingBooking {
     person_id: i64,
     session_id: i64,
-    datetime: DateTime<Utc>
+    datetime: DateTime<FixedOffset>
 }
 
-async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezone: &Tz, uid: i64, session_datetime: &DateTime<Utc>) -> Result<(), Custom<String>> {
+async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezone: &Tz, uid: i64, session_datetime: &DateTime<FixedOffset>) -> Result<(), Custom<String>> {
     // Get the date/time of the session and work out the start and end of the week that the session occurs in
     let datetime_in_local = timezone.from_utc_datetime(&session_datetime.naive_utc());
     let start_of_week_local = datetime_in_local
@@ -387,12 +395,15 @@ async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezo
     Ok(())
 }
 
-async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, credits_used: i16) -> Result<(), Custom<String>> {
-    query_as("INSERT INTO booking (person_id, session_id, credits_used) VALUES ($1, $2, $3) RETURNING person_id, session_id")
+async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, credits_used: CreditsCost) -> Result<(), Custom<String>> {
+    let now = Utc::now();
+    let q = query_as("INSERT INTO booking (person_id, session_id, credits_used, booked_timestamp) VALUES ($1, $2, $3, $4) RETURNING person_id, session_id")
         .bind(person_id)
         .bind(session_id)
         .bind(credits_used)
-        .fetch_one(pool)
+        .bind(now);
+    println!("Executing: {}", q.sql());
+    q.fetch_one(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
 }
@@ -404,27 +415,29 @@ struct SessionWithMaxBookingCount {
 }
 
 async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, max_bookings: i64, credits_used: CreditsCost) -> Result<(), Custom<String>> {
+    let time_now_iso8601 = Utc::now().to_rfc3339();
     // Atomically update the booking table to insert a new booking if and only if the count of
     // bookings for the referenced session is less than the maximum. Adapted from this StackOverflow
     // answer: https://dba.stackexchange.com/a/167283
-    // NB simple string interpolation without prepared statements is safe because the arguments all
-    // are numeric.
-    let sql = format!("BEGIN; \
-        SELECT id FROM session WHERE id = {} FOR NO KEY UPDATE; \
-        INSERT INTO booking (person_id, session_id, credits_used) \
-        SELECT {}, {}, {} FROM booking \
-        WHERE session_id = {} \
-        HAVING count(*) < {} \
-        ON CONFLICT DO NOTHING \
-        RETURNING person_id, session_id; \
-        END;", session_id, person_id, session_id, credits_used, session_id, max_bookings);
-    info!("Executing raw SQL: {}", &sql);
-    let mut result_stream = raw_sql(sql.as_str()).execute_many(pool);
+    //
+    // NB simple string interpolation without prepared statements is safe for numeric arguments and for the generated time string
+    let sql = format!("BEGIN;
+        SELECT id FROM session WHERE id = {session_id} FOR NO KEY UPDATE;
+        INSERT INTO booking (person_id, session_id, credits_used, booked_timestamp)
+            SELECT {person_id}, {session_id}, {credits_used}, '{time_now_iso8601}'
+            FROM booking
+            WHERE session_id = {session_id}
+            HAVING count(*) < {max_bookings}
+        ON CONFLICT DO NOTHING
+        RETURNING person_id, session_id;
+        COMMIT; END;
+    ");
+    debug!("Executing raw SQL: {}", &sql);
+    let mut result_stream = raw_sql(&sql).execute_many(pool);
 
     let _ = take_result_from_stream(&mut result_stream).await?; // result from BEGIN;
     let _ = take_result_from_stream(&mut result_stream).await?; // result from SELECT..FOR UPDATE;
     let insert_result = take_result_from_stream(&mut result_stream).await?; // result from INSERT..RETURNING;
-    let _ = take_result_from_stream(&mut result_stream).await?; // result from COMMIT;
     info!("Insert result: {:?}", insert_result);
 
     if insert_result.rows_affected() == 0 {
@@ -786,16 +799,17 @@ async fn _promote_waitlist(
 #[cfg(test)]
 mod tests {
     use std::ops::Add;
-    use chrono::{DateTime, Days, TimeDelta, Utc};
+    use chrono::{DateTime, Days, FixedOffset, TimeDelta};
     use rocket::http::Status;
     use rocket::serde::json::Json;
     use rocket::response::status::Custom;
     use rocket::State;
     use sqlx::{query, query_as, Executor, FromRow, PgPool, Row};
     use crate::loginsession::{LoginSession, Roles};
+    use crate::mock_chrono::{set_timestamp_datetime, set_timestamp_rfc3339, Utc};
     use crate::notifications;
     use crate::users::UserLoginRecord;
-    use crate::bookings::{self, add_waitlist, delete_booking, list_bookings, list_waitlist, BookingUpdate, SessionBooking, WaitlistEntry};
+    use crate::bookings::{add_waitlist, delete_booking, list_bookings, list_waitlist, BookingUpdate, SessionBooking, WaitlistEntry};
     use crate::config::{AppEnv, Config};
 
     #[derive(FromRow)]
@@ -819,11 +833,11 @@ mod tests {
         member_id.id
     }
 
-    async fn create_session(pool: &PgPool, datetime: &DateTime<Utc>, trainer_id: i64, session_type_name: &str, location_name: &str) -> i64 {
+    async fn create_session(pool: &PgPool, datetime: &DateTime<FixedOffset>, trainer_id: i64, session_type_name: &str, location_name: &str) -> i64 {
         create_session_max_bookings(pool, datetime, trainer_id, session_type_name, location_name, None).await
     }
 
-    async fn create_session_max_bookings(pool: &PgPool, datetime: &DateTime<Utc>, trainer_id: i64, session_type_name: &str, location_name: &str, max_bookings: Option<i64>) -> i64 {
+    async fn create_session_max_bookings(pool: &PgPool, datetime: &DateTime<FixedOffset>, trainer_id: i64, session_type_name: &str, location_name: &str, max_bookings: Option<i64>) -> i64 {
         let session_type_id: IntRecord = query_as("select id from session_type where name = $1")
             .bind(session_type_name)
             .fetch_one(pool).await.unwrap();
@@ -847,10 +861,12 @@ mod tests {
     }
 
     async fn create_booking(pool: &PgPool, member_id: i64, session_id: i64, credits_used: Option<i16>) {
-        let _session_id_record: BigintRecord = query_as("insert into booking (person_id, session_id, credits_used) values ($1, $2, $3) returning session_id as id")
+        let timestamp = Utc::now().fixed_offset();
+        let _session_id_record: BigintRecord = query_as("insert into booking (person_id, session_id, credits_used, booked_timestamp) values ($1, $2, $3, $4) returning session_id as id")
             .bind(member_id)
             .bind(session_id)
             .bind(credits_used)
+            .bind(timestamp)
             .fetch_one(pool).await.unwrap();
     }
 
@@ -882,7 +898,8 @@ mod tests {
     async fn book_session_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let session_time = Utc::now().add(TimeDelta::days(1));
+        set_timestamp_rfc3339("2025-01-01T00:00:00Z");
+        let session_time = DateTime::parse_from_rfc3339("2025-01-01T08:00:00Z").unwrap();
 
         let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
         let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
@@ -907,7 +924,7 @@ mod tests {
     async fn cancel_booking_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let session_time = Utc::now().add(TimeDelta::days(1));
+        let session_time = Utc::now().fixed_offset().add(TimeDelta::days(1));
         let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
@@ -929,7 +946,7 @@ mod tests {
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
         let member1_id = create_person(&pool, "Test User", "member1@example.org", "member", 0).await;
         let member2_id = create_person(&pool, "Test User", "member2@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = crate::bookings::SessionBooking {
             person_id: member1_id,
             session_id,
@@ -950,7 +967,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
-        let session_time = Utc::now().add(TimeDelta::days(1));
+        let session_time = Utc::now().fixed_offset().add(TimeDelta::days(1));
         let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
@@ -969,7 +986,7 @@ mod tests {
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
         let member1_id = create_person(&pool, "Test User", "member1@example.org", "member", 0).await;
         let member2_id = create_person(&pool, "Test User", "member2@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member1_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
 
@@ -986,7 +1003,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Member User", "member1@example.org", "member", 0).await;
-        let session_time = Utc::now().add(TimeDelta::days(1));
+        let session_time = Utc::now().fixed_offset().add(TimeDelta::days(1));
         let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = crate::bookings::SessionBooking {
             person_id: member_id,
@@ -1008,7 +1025,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Member User", "member1@example.org", "member", 0).await;
-        let session_time = Utc::now().add(TimeDelta::days(1));
+        let session_time = Utc::now().fixed_offset().add(TimeDelta::days(1));
         let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
@@ -1027,7 +1044,7 @@ mod tests {
         let trainer1_id = create_person(&pool, "Test User", "trainer1@example.org", "member,trainer", 0).await;
         let trainer2_id = create_person(&pool, "Test User", "trainer2@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member1@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(1, count_bookings(&pool).await);
 
@@ -1045,7 +1062,7 @@ mod tests {
         let trainer1_id = create_person(&pool, "Test User", "trainer1@example.org", "member,trainer", 0).await;
         let trainer2_id = create_person(&pool, "Test User", "trainer2@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member1@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
         let booking = crate::bookings::SessionBooking {
             person_id: member_id,
             session_id,
@@ -1066,7 +1083,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
-        let session_time = Utc::now().add(TimeDelta::days(1));
+        let session_time = Utc::now().fixed_offset().add(TimeDelta::days(1));
         let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = crate::bookings::SessionBooking {
             person_id: member_id,
@@ -1088,7 +1105,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = crate::bookings::SessionBooking {
             person_id: member_id,
             session_id,
@@ -1113,7 +1130,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Member User", "member@example.org", "limited-member", 0).await;
-        let datetime = Utc::now().add(TimeDelta::days(1));
+        let datetime = Utc::now().fixed_offset().add(TimeDelta::days(1));
         let session_id_1 = create_session(&pool, &datetime, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking_1 = crate::bookings::SessionBooking {
             person_id: member_id,
@@ -1170,7 +1187,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Member User", "member@example.org", "limited-member", 0).await;
-        let tomorrow = Utc::now().add(TimeDelta::days(1));
+        let tomorrow = Utc::now().fixed_offset().add(TimeDelta::days(1));
         let next_week = tomorrow.add(TimeDelta::weeks(1));
         let session_id_1 = create_session(&pool, &tomorrow, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking_1 = crate::bookings::SessionBooking {
@@ -1213,7 +1230,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "", 5).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = crate::bookings::SessionBooking {
             person_id: member_id,
             session_id,
@@ -1240,7 +1257,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "PAYG User", "member@example.org", "", 5).await;
-        let session_datetime = Utc::now().add(TimeDelta::days(1));
+        let session_datetime = Utc::now().fixed_offset().add(TimeDelta::days(1));
         let session_id = create_session(&pool, &session_datetime, trainer_id, "HIIT", "Oak Hill Park").await;
         let booking = crate::bookings::SessionBooking {
             person_id: member_id,
@@ -1293,7 +1310,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "PAYG User", "member@example.org", "", 5).await;
-        let session_id = create_session_max_bookings(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park", Some(0)).await;
+        let session_id = create_session_max_bookings(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park", Some(0)).await;
         let booking = crate::bookings::SessionBooking {
             person_id: member_id,
             session_id,
@@ -1323,16 +1340,20 @@ mod tests {
     async fn list_bookings_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
+        let now = DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z").unwrap();
+        set_timestamp_datetime(&now);
+
         let admin_id = create_person(&pool, "Test User", "admin@example.org", "member,trainer", 0).await;
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
 
         let login = create_login(admin_id, "admin", "admin");
         let bookings = crate::bookings::list_bookings(State::from(&pool), login, Some(session_id), None, None, None).await.unwrap();
 
         assert_eq!(1,  bookings.len());
+        assert_eq!(Some(now), bookings.get(0).unwrap().booked_timestamp);
     }
 
     #[sqlx::test]
@@ -1341,7 +1362,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
 
         let login = create_login(member_id, "Test User", "");
@@ -1356,7 +1377,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
 
         let login = create_login(trainer_id, "trainer", "trainer");
@@ -1372,7 +1393,7 @@ mod tests {
         let trainer1_id = create_person(&pool, "Test User", "trainer1@example.org", "trainer", 0).await;
         let trainer2_id = create_person(&pool, "Test User", "trainer2@example.org", "trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
 
         let login = create_login(trainer2_id, "trainer", "trainer");
@@ -1388,7 +1409,7 @@ mod tests {
         let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
@@ -1403,7 +1424,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
@@ -1419,7 +1440,7 @@ mod tests {
 
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
@@ -1435,7 +1456,7 @@ mod tests {
         let trainer1_id = create_person(&pool, "Test User", "trainer1@example.org", "trainer", 0).await;
         let trainer2_id = create_person(&pool, "Test User", "trainer2@example.org", "trainer", 0).await;
         let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
-        let session_id = create_session(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park").await;
         create_booking(&pool, member_id, session_id, None).await;
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
@@ -1457,7 +1478,7 @@ mod tests {
         let user2_login = create_login(user2_id, "User2", "member");
 
         // Create session with max bookings = 1 and 1 booked user
-        let session_id = create_session_max_bookings(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park", Some(1)).await;
+        let session_id = create_session_max_bookings(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park", Some(1)).await;
         create_booking(&pool, user1_id, session_id, None).await;
         
         // User2 tries to book => fails
@@ -1494,7 +1515,7 @@ mod tests {
         let user2_login = create_login(user2_id, "User2", "");
 
         // Create session with max bookings = 1 and 1 booked user
-        let session_id = create_session_max_bookings(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park", Some(1)).await;
+        let session_id = create_session_max_bookings(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park", Some(1)).await;
         create_booking(&pool, user1_id, session_id, None).await;
         
         // User 2 joins waitlist
@@ -1528,7 +1549,7 @@ mod tests {
         let user3_login = create_login(user3_id, "User3", "member");
 
         // Create session with max bookings = 1 and 1 booked user
-        let session_id = create_session_max_bookings(&pool, &Utc::now().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park", Some(1)).await;
+        let session_id = create_session_max_bookings(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer1_id, "HIIT", "Oak Hill Park", Some(1)).await;
         create_booking(&pool, user1_id, session_id, None).await;
         
         // Users 2 & 3 joins waitlist

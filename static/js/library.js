@@ -126,6 +126,9 @@ function displayTime(datetimestr) {
 }
 
 function displayDateTime(datetimestr) {
+    if (datetimestr === null) {
+        return null
+    }
     const datetime = new Date(datetimestr)
     return datetime.toLocaleDateString("en-GB", {
         timeZone: TIMEZONE,
@@ -223,6 +226,28 @@ function goBack() {
         window.history.back()
     }
 
+}
+
+function sortByField(arr, field, ascending = true) {
+    return arr.sort((a, b) => {
+        const valA = a[field];
+        const valB = b[field];
+
+        // Handle null or undefined values
+        const aIsNull = valA == null;
+        const bIsNull = valB == null;
+
+        if (aIsNull && bIsNull) return 0;
+        if (aIsNull) return ascending ? -1 : 1;
+        if (bIsNull) return ascending ? 1 : -1;
+
+        // Compare numbers or strings
+        if (typeof valA === "string" && typeof valB === "string") {
+        return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+
+        return ascending ? valA - valB : valB - valA;
+    });
 }
 
 // END library.js
