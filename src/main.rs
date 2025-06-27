@@ -143,7 +143,7 @@ fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, 
 
 fn _configure_cors(app_env: &AppEnv) -> Cors {
     let allowed_origins = AllowedOrigins::some_regex::<&String>(&[&app_env.cors_allowed]);
-    println!("Initializing CORS with allowed domain(s): {:?}", &allowed_origins);
+    info!("Initializing CORS with allowed domain(s): {:?}", &allowed_origins);
     CorsOptions {
         allowed_origins,
         allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete, Method::Put, Method::Patch]

@@ -75,7 +75,6 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
             }),
             None => None
         };
-        println!("{row:?}");
 
         Ok(SessionBookingFull {
             person_id: row.try_get("person_id")?,
@@ -94,7 +93,7 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
             },
             attended: row.try_get("attended").ok().unwrap_or(false),
             credits_used: row.try_get("credits_used").ok().unwrap_or(0),
-            booked_timestamp: row.try_get("booked_timestamp").inspect_err(|e| println!("ERROR: {e}"))?
+            booked_timestamp: row.try_get("booked_timestamp")?
         })
     }
 }
@@ -397,13 +396,12 @@ async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezo
 
 async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, credits_used: CreditsCost) -> Result<(), Custom<String>> {
     let now = Utc::now();
-    let q = query_as("INSERT INTO booking (person_id, session_id, credits_used, booked_timestamp) VALUES ($1, $2, $3, $4) RETURNING person_id, session_id")
+    query_as("INSERT INTO booking (person_id, session_id, credits_used, booked_timestamp) VALUES ($1, $2, $3, $4) RETURNING person_id, session_id")
         .bind(person_id)
         .bind(session_id)
         .bind(credits_used)
-        .bind(now);
-    println!("Executing: {}", q.sql());
-    q.fetch_one(pool)
+        .bind(now)
+        .fetch_one(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
 }

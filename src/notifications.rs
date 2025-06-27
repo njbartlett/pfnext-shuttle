@@ -154,7 +154,6 @@ fn save_to_sent_messages(mb: MessageBuilder<'_>) {
             _ => None
         })
         .unwrap_or("<<missing text>>".to_string());
-    println!("SENDING To: {}, Subject: {}; Text: {}", to, subject, text);
     MOCK_SENT_MESSAGES.with_borrow_mut(|vec| vec.push((to, subject, text)));
 
 }
@@ -168,7 +167,7 @@ async fn internal_send_message<'a>(
         .connect()
         .await?;
     info!("Connected to SMTP server, sending message...");
-    client.send(message).await;
+    client.send(message).await?;
     info!("Sent message over SMTP");
     
     Ok(())
