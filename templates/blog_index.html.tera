@@ -1,0 +1,44 @@
+{% extends "default_layout" %}
+
+{% block content %}
+<div class="container">
+    <div class="mt-2 mx-auto text-center">
+        <h1 class="display-4 fw-normal text-body-emphasis">{{page.title}}</h1>
+    </div>   
+    
+    <!-- Admin Only Card -->
+    <div v-cloak v-if="isEditor()" class="alert alert-warning my-3 position-relative">
+        <div class="position-absolute top-0 end-0"><i class="bi bi-lightning-fill" title="Admin/Editor Only"></i></div>
+
+        <div class="d-flex">
+        <a class="btn btn-primary btn-sm mx-1" href="edit/new"><i class="bi bi-feather"></i>&nbsp;New Post</a>
+
+        {% if index_mode == 'AllPosts' %}
+            <a class="btn btn-outline-primary btn-sm mx-1" href="index.html">Show Only Published</a>
+        </div> <!-- end of d-flex -->
+        <div class="mt-3">Showing all published and unpublished posts.</div>
+        {% else %}
+            <a class="btn btn-outline-primary btn-sm mx-1" href="index.html?mode=allposts">Show All</a>
+        </div> <!-- end of d-flex -->
+        <div class="mt-3">Showing published posts as of {{now() | date(format="%d %B %Y")}}.</div>
+        {% endif %}
+    </div>
+   
+    <ul class="list-group">
+        {% for post in posts %}        
+            <li class="list-group-item d-flex justify-content-between align-items-start">
+                <div class="ms-2 me-auto">
+                    <div class="fw-bold fs-5"><a href="posts/{{post.title | urlencode}}.html" class="stretched-link">{{post.title}}</a></div>
+                    By {{post.author_name}} <span class="fst-italic">{% if post.published_at %}on {{post.published_at | date(format="%d %B %Y")}}{% else %}(unpublished){% endif %}</span>.        
+                </div>
+                {# <span class="badge text-bg-primary rounded-pill">14</span> #}
+                {# <a href="posts/{{post.id}}.html">{{post.title}}</a> by {{post.author}} <span class="fst-italic">{% if post.published %}on {{post.published | date(format="%d %B %Y")}}{% else %}(unpublished){% endif %}</span>. #}
+            </li>
+        {% else %}
+            <p>There are no posts currently available.</p>
+        {% endfor %}
+    </ul>
+
+</div>
+
+{% endblock %}

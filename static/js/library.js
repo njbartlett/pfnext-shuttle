@@ -81,7 +81,7 @@ function onLogout() {
         if (typeof afterLogout === "function") {
             afterLogout()
         } else {
-            window.location.href = 'index.html'
+            window.location.href = '/'
         }
     })
 }

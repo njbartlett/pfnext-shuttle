@@ -3,7 +3,7 @@
 {% block loggedin_content %}
 <div class="container">
     <div class="mt-2 mx-auto text-center">
-        <h1 class="display-4 fw-normal text-body-emphasis">{{page_title}}</h1>
+        <h1 class="display-4 fw-normal text-body-emphasis">{{page.title}}</h1>
     </div>    
 
     <!-- Query Params -->

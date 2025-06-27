@@ -1,0 +1,130 @@
+{% extends "loggedin_layout" %}
+
+{% block extra_head %}
+<script src="/js/tinymce_prod/tinymce.min.js" referrerpolicy="origin"></script>
+<style>
+    div.tox-tinymce {
+        border: 0;
+        border-radius: 0px;
+    }
+</style>
+{% endblock %}
+
+{% block loggedin_content %}
+<div class="container">
+
+    <div class="mt-2 mx-auto text-center">
+        <h1 class="display-4 fw-normal text-body-emphasis">{{page.title}}</h1>
+    </div>
+
+    {#     
+    <pre>
+        postMeta: ${postMeta}
+        saveStatus: ${saveStatus}
+    </pre>
+    #}
+
+    <div class="card my-2 border border-primary">
+        <div class="card-header d-flex pe-2 align-items-center">
+            <span class="fs-5">Post Info</span>
+            <div class="ms-auto"><span v-if="saveStatus.message" class="fst-italic text-success">${saveStatus.message}</span></div>
+            <button class="btn btn-sm btn-primary ms-2" @click="savePost()" :disabled="!saveStatus.dirty || !postMetaValidation.ready">Save</button>
+            <button class="btn btn-sm btn-outline-danger ms-1" @click="cancelEditing()">Close</button>
+        </div>
+        <div class="card-body">
+            <form>
+                <div class="row">
+                    <div class="col-sm-6">
+                        <label for="titleInput" class="form-label">Title</label>
+                        <input type="text" class="form-control" id="titleInput" v-model="postMeta.title" :class="{'is-invalid': postMetaValidation.title}">
+                        <div class="invalid-feedback"><i class="bi bi-exclamation-circle"></i> ${postMetaValidation.title}</div>
+                    </div>                
+                    <div class="col-sm-3">
+                        <label for="editPubDate" class="form-label">Publication Date</label>
+                        <input id="editPubDate" class="form-control" type="date" v-model="postMeta.pubDate" aria-describedby="editPubHelp" :class="{'is-invalid': postMetaValidation.pubDate}">
+                        {# <div id="editPubHelp" class="form-text"><i class="bi bi-info-circle"></i> When publication date is unspecified, the post is left unpublished.</div> #}
+                        <div class="invalid-feedback"><i class="bi bi-exclamation-circle"></i> ${postMetaValidation.pubDate}</div>
+                    </div>
+                    <div class="col-sm-3">
+                        <label for="editPubTime" class="form-label">Publication Time</label>
+                        <input id="editPubTime" class="form-control" type="time" v-model="postMeta.pubTime" :class="{'is-invalid': postMetaValidation.pubTime}">
+                        <div class="invalid-feedback"><i class="bi bi-exclamation-circle"></i> ${postMetaValidation.pubTime}</div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-sm-6"></div>
+                    <div id="editPubHelp" class="form-text col-sm-6"><i class="bi bi-info-circle"></i> When publication date is unspecified, the post is left unpublished.</div>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div class="card my-2 border border-secondary">
+        <div class="card-header d-flex align-items-center">
+            <span class="fs-5">Post Content</span>
+        </div>
+        <textarea id="editor" class="card-body">{{post_content}}</textarea>
+    </div>
+
+</div>    
+{% endblock%}
+
+{% block extra_script %}
+<script>
+    {% if post_id %}
+    postMeta.postId = {{post_id}}
+    {% endif %}
+
+    postMeta.title = '{{post_title}}'
+
+    {% if post_published %}
+    postMeta.pubDate = '{{post_published | date(format = "%Y-%m-%d") }}'
+    postMeta.pubTime = '{{post_published | date(format = "%H:%M") }}'
+    {% endif %}
+
+    watch(postMeta, newData => updatedPostMeta(newData, postMetaValidation.value))
+
+    function setInitOptionsForTheme(theme) {
+        if (theme == 'dark') {
+            initOptions.skin = 'oxide-dark'
+            initOptions.content_css = 'dark'
+        } else {
+            initOptions.skin = 'oxide'
+            initOptions.content_css = 'default'
+        }
+    }
+
+    function onThemeSwitch(theme) {
+        setInitOptionsForTheme(theme)
+        tinymce.activeEditor.destroy()
+        tinymce.init(initOptions)
+    }
+
+    let initOptions = {
+        selector: '#editor',
+        license_key: 'gpl',
+        plugins: 'advlist link image lists',
+        images_upload_url: '/blog/blobs',
+        menubar: 'edit view insert format',
+        placeholder: 'Type here...',
+        setup: (editor) => {
+            editor.on('change', (e) => {
+                updatedPostMeta(postMeta, postMetaValidation.value)
+            })
+        },
+    }
+    let theme = document.documentElement.getAttribute('data-bs-theme')
+    setInitOptionsForTheme(theme)
+
+    tinymce.init(initOptions);
+
+    window.addEventListener('beforeunload', (event) => {
+        if (saveStatus.value.dirty) {
+            // Cancel the event as stated by the standard.
+            event.preventDefault();
+            // Chrome requires returnValue to be set.
+            event.returnValue = '';
+        }
+    });
+
+</script>
+{% endblock %}

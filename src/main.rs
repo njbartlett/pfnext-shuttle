@@ -2,20 +2,7 @@
 #[macro_use]
 extern crate rocket;
 
-mod activities;
-mod backup;
-mod bookings;
-mod common;
-mod config;
-mod transaction_log;
-mod loginsession;
-mod mock_chrono;
-mod notifications;
-mod sessions;
-mod templates;
-mod users;
-mod whereclause;
-
+use std::fmt::Display;
 use std::fs::read_to_string;
 use std::path::Path;
 
@@ -37,6 +24,20 @@ use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
 use crate::templates::Templates;
 
+mod activities;
+mod backup;
+mod blog;
+mod bookings;
+mod common;
+mod config;
+mod transaction_log;
+mod loginsession;
+mod mock_chrono;
+mod notifications;
+mod sessions;
+mod templates;
+mod users;
+mod whereclause;
 
 #[catch(401)]
 fn api_unauthorized(request: &Request) -> Custom<String> {
@@ -117,6 +118,7 @@ async fn launch() -> Rocket<Build> {
         .attach(templates_fairing)
         .mount("/", crate::templates::routes())
         .register("/", crate::templates::catchers())
+        .mount("/blog", blog::routes())
         .register("/api", catchers![api_unauthorized, api_notfound])
         .mount("/api", vec![
             activities::routes(),
@@ -128,4 +130,3 @@ async fn launch() -> Rocket<Build> {
             backup::routes()
         ].into_iter().flatten().collect::<Vec<Route>>())
 }
-

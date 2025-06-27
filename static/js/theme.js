@@ -20,10 +20,13 @@
   }
 
   const setTheme = theme => {
+    let inferredTheme = theme
     if (theme === 'auto') {
-      document.documentElement.setAttribute('data-bs-theme', (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'))
-    } else {
-      document.documentElement.setAttribute('data-bs-theme', theme)
+      inferredTheme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+    }
+    document.documentElement.setAttribute('data-bs-theme', inferredTheme)
+    if (typeof onThemeSwitch === 'function') {
+      onThemeSwitch(inferredTheme)
     }
   }
 

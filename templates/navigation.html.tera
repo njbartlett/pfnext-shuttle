@@ -18,28 +18,16 @@
         <div id="navbarContent" class="collapse navbar-collapse">
             <ul class="navbar-nav me-auto">
                 <!-- General Pages -->
-                {% for item in navigation %}
+                {% for item in common.navigation %}
                     <li class="nav-item">
-                        <a class="nav-link"
-                            {% if page_url == item.url %}
-                                active aria-current="page"
-                            {% else %}
-                                href="{{item.url}}"
-                            {% endif %}>{{item.title}}</a>
+                        <a class="nav-link" {% if common.url == item.url %} active aria-current="page" {% else %} href="{{item.url}}" {% endif %}>{{item.title}}</a>
                     </li>
                 {% endfor %}
 
-                {#
-                <!-- Blog Posts -->
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Posts</a>
-                    <ul class="dropdown-menu">
-                        {% for post in site.posts %}
-                            <li><a class="dropdown-item" href="{{ post.url }}">{{ post.title }}</a></li>
-                        {% endfor %}
-                    </ul>
+                {# Blog posts are handled a bit differently #}
+                <li class="nav-item">
+                    <a class="nav-link" {% if common.url == '/blog/index.html' %} active aria-current="page" {% else %} href="/blog/index.html" {% endif %}>Posts</a>
                 </li>
-                #}
 
                 <!-- Admin only links -->
                 <li v-cloak v-if="isAdmin()" class="nav-item dropdown">
@@ -50,7 +38,8 @@
                         <li><a class="dropdown-item" href="/loginlist.html"><i class="bi bi-person-lines-fill"></i>&nbsp;Logged-in Users</a></li>
                         <li><a class="dropdown-item" href="/sessions_report.html"><i class="bi bi-file-earmark-text"></i>&nbsp;Sessions Report</a></li>
                         <li><a class="dropdown-item" href="/stats.html"><i class="bi bi-bar-chart-fill"></i>&nbsp;Attendance Stats</a></li>
-                        <li><a class="dropdown-item" href="/logs.html"><i class="bi bi-journal-text"></i>&nbsp;Logs</a></li>                        
+                        <li><a class="dropdown-item" href="/logs.html"><i class="bi bi-journal-text"></i>&nbsp;Logs</a></li>
+                        <li><a class="dropdown-item" href="/blog/edit/new"><i class="bi bi-feather"></i>&nbsp;Create Blog Post</a></li>
                     </ul>
                 </li>
                 <li class="nav-item"><a class="nav-link" href="https://chat.whatsapp.com/CPjp84Qz6uM5t9Oq88Qb4Q" target="_blank" title="WhatsApp Help Channel"><i class="bi bi-question-circle"></i>&nbsp;Help</a></li>
@@ -73,7 +62,7 @@
             <!-- Login/Register if not Logged In -->
             <div v-cloak v-else class="btn-group" role="group">
                 <a id="navbarRegister" class="btn btn-outline-success rounded-pill-left" href="/register.html">Register</a>
-                <a id="navbarLogin" class="btn btn-outline-success rounded-pill-right" href="/login.html?return={{page_url}}">Login</a>
+                <a id="navbarLogin" class="btn btn-outline-success rounded-pill-right" href="/login.html?return={{common.url}}">Login</a>
             </div>
             
             <!-- Theme Selector -->

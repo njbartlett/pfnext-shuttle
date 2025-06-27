@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use indexmap::IndexMap;
-use rocket::{fs::NamedFile, http::Status, response::Redirect, Catcher, Request, Route, State};
+use rocket::{fs::NamedFile, http::Status, request::{FromRequest, Outcome}, response::Redirect, Catcher, Request, Route, State};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
 
@@ -22,20 +22,54 @@ impl<'r> rocket::response::Responder<'r, 'static> for ContentResponse {
     }
 }
 
-#[derive(Serialize)]
-struct NavBarPage<'a> {
-    title: &'a str,
-    url: &'a str
+#[derive(Debug, Serialize)]
+pub struct NavBarPage<'a> {
+    pub title: &'a str,
+    pub url: &'a str
 }
-#[derive(Serialize)]
-struct PageContext<'a> {
+#[derive(Debug, Serialize)]
+pub struct CommonPageContext<'a> {
     branding: &'a str,
-    page_title: &'a str,
-    page_url: &'a str,
-    page_scripted: bool,
-    template_name: &'a str,
-    prod: bool,
     navigation: Vec<NavBarPage<'a>>,
+    prod: bool,
+    url: &'a str,
+}
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for CommonPageContext<'r> {
+    type Error = String;
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        let config = request.rocket().state::<Config>();
+        if config.is_none() {
+            return Outcome::Error((Status::InternalServerError, "missing Config in request state".to_string()));
+        }
+        let config = config.unwrap();
+
+        let templates = request.rocket().state::<Templates>();
+        if templates.is_none() {
+            return Outcome::Error((Status::InternalServerError, "missing Templates in request state".to_string()));
+        }
+        let templates = templates.unwrap();
+
+        Outcome::Success(Self {
+            branding: &config.branding,
+            navigation: templates.get_navbar(),
+            prod: cfg!(not(debug_assertions)),
+            url: request.uri().path().as_str()
+        })
+    }
+}
+#[derive(Debug, Serialize)]
+pub struct PageContext<'a> {
+    pub title: &'a str,
+    pub scripted: bool,
+    pub template_name: &'a str,
+}
+
+#[derive(Serialize)]
+struct NavigablePageContext<'a> {
+    common: CommonPageContext<'a>,
+    page: PageContext<'a>
 }
 
 #[derive(Serialize, Debug)]
@@ -55,7 +89,7 @@ impl Templates {
     fn get_page(&self, path: &str) -> Option<&TemplatePage> {
         self.page_map.get(path)
     }
-    fn get_navbar<'a>(&'a self) -> Vec<NavBarPage<'a>> {
+    pub fn get_navbar<'a>(&'a self) -> Vec<NavBarPage<'a>> {
         self.page_map.iter()
             .filter(|(_, page)| page.navigable)
             .map(|(url, page)| NavBarPage { url: url, title: &page.title }).collect()
@@ -89,26 +123,27 @@ impl Templates {
 
 #[rocket::get("/<path..>")]
 async fn template_files(
-    config: &State<Config>,
+    common_context: CommonPageContext<'_>,
     templates: &State<Templates>,
     path: PathBuf
 ) -> Result<ContentResponse, Status> {
-    if let Some(template_page) = templates.get_page(&path.display().to_string()) {
+    let template_path = format!("/{}", path.display());
+    if let Some(template_page) = templates.get_page(&template_path) {
         info!("Matched template page {:?}", template_page);
         let template_name = template_page.url
             .strip_suffix(".html")
+            .and_then(|s| s.strip_prefix("/"))
             .unwrap_or(&template_page.url)
             .to_string();
-        let context = PageContext {
-            branding: &config.branding,
-            page_url: &template_page.url,
-            page_title: &template_page.title,
-            page_scripted: template_page.scripted,
+        let page_context = PageContext {
             template_name: &template_name,
-            prod: cfg!(not(debug_assertions)),
-            navigation: templates.get_navbar()
+            title: &template_page.title,
+            scripted: template_page.scripted,
         };
-        Ok(ContentResponse::Template(Template::render(template_name.clone(), context)))
+        Ok(ContentResponse::Template(Template::render(template_name.clone(), NavigablePageContext {
+            common: common_context,
+            page: page_context
+        })))
     } else {
         let static_path = Path::new("static").join(&path);
         info!("No matching template for path {:?}, trying static path: {:?}", path, static_path);
@@ -125,13 +160,19 @@ fn index_redirect() -> Redirect {
 }
 
 #[catch(404)]
-fn not_found(
+async fn not_found(
     req: &Request<'_>
 ) -> Template {
-    let config = req.rocket().state::<Config>().unwrap();
-    let templates = req.rocket().state::<Templates>().unwrap();
-    Template::render("404", PageContext {
-        branding: &config.branding, page_title: "Not Found", page_url: "404.html", page_scripted: false, template_name: "404", prod: cfg!(not(debug_assertions)), navigation: templates.get_navbar()
+    let common_context = CommonPageContext::from_request(req)
+        .await
+        .unwrap();
+    Template::render("404", NavigablePageContext {
+        common: common_context,
+        page: PageContext {
+            template_name: "404",
+            title: "Not Found",
+            scripted: false,
+        }
     })
 }
 

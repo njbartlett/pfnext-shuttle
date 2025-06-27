@@ -1,28 +1,28 @@
 [home]
 title = "Home"
-url = "index.html"
+url = "/index.html"
 nav = true
 
 [about]
 title = "About"
-url = "about.html"
+url = "/about.html"
 nav = true
 script = false
 
 [pricing]
 title = "Pricing"
-url = "pricing.html"
+url = "/pricing.html"
 nav = true
 script = false
 
 [sessions]
 title = "Sessions"
-url = "sessions.html"
+url = "/sessions.html"
 nav = true
 
 [challenges]
 title = "Challenges"
-url = "challenges.html"
+url = "/challenges.html"
 nav = true
 
 [activities]
@@ -32,48 +32,48 @@ nav = true
 
 [bookings]
 title = "Bookings"
-url = "bookings.html"
+url = "/bookings.html"
 
 [login]
 title = "Login"
-url = "login.html"
+url = "/login.html"
 
 [register]
 title = "Register"
-url = "register.html"
+url = "/register.html"
 
 [passwordreset]
 title = "Password Reset"
-url = "passwordreset.html"
+url = "/passwordreset.html"
 
 [profile]
 title = "Profile"
-url = "profile.html"
+url = "/profile.html"
 
 [attendance]
 title = "Session Attendance"
-url = "attendance.html"
+url = "/attendance.html"
 
 [edit_session]
 title = "Create/Edit Session"
-url = "edit_session.html"
+url = "/edit_session.html"
 
 [members]
 title = "Member Directory"
-url = "members.html"
+url = "/members.html"
 
 [logs]
 title = "Logs"
-url = "logs.html"
+url = "/logs.html"
 
 [login_list]
 title = "Login List"
-url = "loginlist.html"
+url = "/loginlist.html"
 
 [stats]
 title = "Attendance Stats"
-url = "stats.html"
+url = "/stats.html"
 
 [sessions_report]
 title = "Sessions Report"
-url = "sessions_report.html"
+url = "/sessions_report.html"

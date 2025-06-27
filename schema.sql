@@ -1,6 +1,4 @@
--- DROP TABLE IF EXISTS person;
-
--- user tables
+-- User tables
 CREATE TABLE IF NOT EXISTS person (
     id bigserial PRIMARY KEY,
     name text NOT NULL,
@@ -29,6 +27,7 @@ CREATE TABLE IF NOT EXISTS loginsession (
 );
 
 -- location table and data
+
 CREATE TABLE IF NOT EXISTS location (
     id serial PRIMARY KEY,
     name varchar(255) UNIQUE NOT NULL,
@@ -42,7 +41,8 @@ VALUES
     ('Trent Park', 'Trent Park, London EN4 0PS')
 ON CONFLICT DO NOTHING;
 
--- session tables
+-- Sessions and bookings
+
 CREATE TABLE IF NOT EXISTS session_type (
 	id serial4 NOT NULL,
 	name varchar(255) NOT NULL,
@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS waitlist (
     CONSTRAINT waitlist_booking_unique UNIQUE (person_id, session_id)
 );
 
+-- Event Log
+
 CREATE TABLE IF NOT EXISTS eventlog (
     id bigserial PRIMARY KEY,
     datetime timestamptz NOT NULL,
@@ -98,6 +100,8 @@ CREATE TABLE IF NOT EXISTS eventlog (
     type text NOT NULL,
     detail text NOT NULL DEFAULT ''
 );
+
+-- Challenges and activities against challenges
 
 CREATE TABLE IF NOT EXISTS activity_type (
     id serial PRIMARY KEY,
@@ -137,3 +141,22 @@ CREATE TABLE IF NOT EXISTS activity (
     amount real NOT NULL
 );
 
+-- Blog posts and media blobs
+
+CREATE TABLE IF NOT EXISTS post (
+    id bigserial PRIMARY KEY,
+    title text NOT NULL UNIQUE,
+    author_id bigint NOT NULL REFERENCES person,
+    created_at timestamptz NOT NULL,
+    last_editor_id bigint NOT NULL REFERENCES person,
+    last_edited_at timestamptz NOT NULL,
+    published_at timestamptz,
+    content text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS blobs (
+    id text NOT NULL PRIMARY KEY,
+    mime_type text NOT NULL,
+    oid oid NOT NULL UNIQUE,
+    created timestamptz NOT NULL
+);
