@@ -2,7 +2,6 @@
 #[macro_use]
 extern crate rocket;
 
-use std::collections::HashSet;
 use std::fs::read_to_string;
 use std::path::Path;
 
@@ -12,10 +11,9 @@ use dotenv::dotenv;
 
 use log::info;
 
-use rocket::http::{Method, Status};
+use rocket::http::Status;
 use rocket::response::status::Custom;
 use rocket::{Build, Request, Rocket, Route};
-use rocket_cors::{AllowedHeaders, AllowedOrigins, Cors, CorsOptions};
 use rocket_dyn_templates::Template;
 
 use sqlx::postgres::PgPoolOptions;
@@ -139,23 +137,4 @@ fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, 
     Ok(Some(parsed.map_err(|e| {
         Custom(Status::UnprocessableEntity, e.to_string())
     })?))
-}
-
-fn _configure_cors(app_env: &AppEnv) -> Cors {
-    let allowed_origins = AllowedOrigins::some_regex::<&String>(&[&app_env.cors_allowed]);
-    info!("Initializing CORS with allowed domain(s): {:?}", &allowed_origins);
-    CorsOptions {
-        allowed_origins,
-        allowed_methods: vec![Method::Get, Method::Post, Method::Options, Method::Head, Method::Delete, Method::Put, Method::Patch]
-            .into_iter()
-            .map(From::from)
-            .collect(),
-        allowed_headers: AllowedHeaders::All,
-        expose_headers: HashSet::from(["Location".to_string()]),
-        allow_credentials: true,
-        ..Default::default()
-    }
-    .to_cors()
-    .map_err(|e| format!("Failed to create CORS options: {}", e))
-    .unwrap()
 }

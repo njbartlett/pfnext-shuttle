@@ -1,13 +1,10 @@
 #[cfg(test)]
 use std::cell::RefCell;
-use std::future::{Future, IntoFuture};
 
 use mail_send::mail_builder::headers::address::Address;
 use mail_send::mail_builder::MessageBuilder;
 use mail_send::{Error, SmtpClientBuilder, Credentials};
 use mail_send::smtp::message::{IntoMessage, Message};
-
-use tokio::task::JoinHandle;
 
 use crate::config::{AppEnv, Config};
 

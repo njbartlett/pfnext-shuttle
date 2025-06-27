@@ -134,11 +134,6 @@ impl<'r> FromRequest<'r> for LoginSession {
         }
         let pool = pool.unwrap();
 
-        // Get the client address
-        let client_info = request.guard::<ClientInfo>().await
-            .succeeded()
-            .map(|i| i.to_string());
-
         // Load the session record
         let load_result = LoginSession::load(&pool, &sessionid).await;
         if load_result.is_err() {
@@ -262,7 +257,7 @@ impl LoginSession {
         })
     }
 
-    async fn relogin(&self, pool: &PgPool, password: &str, ipinfo: &Option<String>) -> Result<LoginSession, LoginError> {
+    async fn relogin(&self, pool: &PgPool, password: &str) -> Result<LoginSession, LoginError> {
         // Fetch login record
         let login_record = UserLoginRecord::load_by_email(pool, &self.email)
             .await
@@ -308,7 +303,7 @@ impl LoginSession {
     }
 
     pub fn is_admin(&self) -> bool {
-        self.has_role(ADMIN)
+        self.roles.is_admin()
     }
 
     async fn clear_expired(pool: &PgPool, now: &DateTime<FixedOffset>) {
@@ -469,7 +464,7 @@ async fn login(
     let client_info = &client_info.map(|i| i.to_string());
 
     let login_result = match existing_login {
-        Some(existing_login) => existing_login.relogin(pool, &login_request.password, &client_info).await.map_err(to_http_err),
+        Some(existing_login) => existing_login.relogin(pool, &login_request.password).await.map_err(to_http_err),
         None => LoginSession::login(pool, &login_request.email, &login_request.password, &client_info).await.map_err(to_http_err)
     };
     if let Err(login_err) = login_result {
@@ -632,7 +627,7 @@ fn to_http_err(e: LoginError) -> Custom<String> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, FixedOffset, Utc};
+    use chrono::{DateTime};
     use rocket::{http::Status, local::asynchronous::{Client, LocalResponse}, serde::json::json, Build,  Rocket};
     use sqlx::{query, Executor, PgPool, Row};
 
@@ -670,7 +665,7 @@ mod tests {
         set_timestamp_rfc3339("2030-01-01T00:00:30Z");
 
         // Try a login => expired session is deleted
-        let login = LoginSession::login(&pool, "user1@example.com", "password", &None).await.unwrap();
+        LoginSession::login(&pool, "user1@example.com", "password", &None).await.unwrap();
         assert_eq!(1, count_session_rows(&pool).await);
         assert_eq!(0, query("SELECT * FROM loginsession WHERE id = 'xxx'").execute(&pool).await.unwrap().rows_affected());
     }

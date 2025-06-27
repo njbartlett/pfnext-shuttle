@@ -7,16 +7,6 @@ use serde::Serialize;
 
 use crate::config::Config;
 
-#[cfg(not(debug_assertions))]
-fn is_prod() -> bool {
-    true
-}
-
-#[cfg(debug_assertions)]
-fn is_prod() -> bool {
-    false
-}
-
 #[derive(Debug)]
 enum ContentResponse {
     Template(Template),
@@ -115,7 +105,7 @@ async fn template_files(
             page_title: &template_page.title,
             page_scripted: template_page.scripted,
             template_name: &template_name,
-            prod: is_prod(),
+            prod: cfg!(not(debug_assertions)),
             navigation: templates.get_navbar()
         };
         Ok(ContentResponse::Template(Template::render(template_name.clone(), context)))
@@ -141,7 +131,7 @@ fn not_found(
     let config = req.rocket().state::<Config>().unwrap();
     let templates = req.rocket().state::<Templates>().unwrap();
     Template::render("404", PageContext {
-        branding: &config.branding, page_title: "Not Found", page_url: "404.html", page_scripted: false, template_name: "404", prod: is_prod(), navigation: templates.get_navbar()
+        branding: &config.branding, page_title: "Not Found", page_url: "404.html", page_scripted: false, template_name: "404", prod: cfg!(not(debug_assertions)), navigation: templates.get_navbar()
     })
 }
 

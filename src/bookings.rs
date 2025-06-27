@@ -9,7 +9,7 @@ use rocket::serde::Serialize;
 use rocket::{Route, State};
 use serde::Deserialize;
 use sqlx::postgres::{PgQueryResult, PgRow};
-use sqlx::{query, query_as, raw_sql, Error, Execute, FromRow, PgPool, QueryBuilder, Row};
+use sqlx::{query, query_as, raw_sql, Error, FromRow, PgPool, QueryBuilder, Row};
 use std::fmt::{Display, Formatter};
 
 use crate::config::{AppEnv, Config};
@@ -354,13 +354,6 @@ impl PersonSessionBookingDetails {
     }
 }
 
-#[derive(FromRow, Debug)]
-struct MemberExistingBooking {
-    person_id: i64,
-    session_id: i64,
-    datetime: DateTime<FixedOffset>
-}
-
 async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezone: &Tz, uid: i64, session_datetime: &DateTime<FixedOffset>) -> Result<(), Custom<String>> {
     // Get the date/time of the session and work out the start and end of the week that the session occurs in
     let datetime_in_local = timezone.from_utc_datetime(&session_datetime.naive_utc());
@@ -372,23 +365,23 @@ async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezo
         .checked_add_days(Days::new(7)).unwrap();
 
     // Find other bookings in the same week (only sessions with nonzero cost)
-    let existing_bookings: Vec<MemberExistingBooking> = query_as("SELECT b.person_id AS person_id, b.session_id AS session_id, s.datetime AS datetime, s.cost AS cost \
-            FROM booking AS b \
-            JOIN session AS s ON b.session_id = s.id \
-            WHERE b.person_id = $1 \
-            AND s.cost > 0 \
-            AND s.datetime >= $2 \
+    let existing_bookings_count: i64 = query("SELECT COUNT(*)
+            FROM booking AS b JOIN session AS s ON b.session_id = s.id
+            WHERE b.person_id = $1
+            AND s.cost > 0
+            AND s.datetime >= $2
             AND s.datetime < $3")
         .bind(uid)
         .bind(start_of_week_local)
         .bind(end_of_week_local)
-        .fetch_all(pool)
+        .fetch_one(pool)
         .await
+        .and_then(|r| r.try_get(0))
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 
     // Error if there is at least one existing booking
-    if !existing_bookings.is_empty() {
-        return Err(Custom(Status::Forbidden, format!("Cannot book session: member already has {} booking(s) in this week.", existing_bookings.len())));
+    if existing_bookings_count > 0 {
+        return Err(Custom(Status::Forbidden, format!("Cannot book session: member already has {} booking(s) in this week.", existing_bookings_count)));
     }
 
     Ok(())
@@ -404,12 +397,6 @@ async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id:
         .fetch_one(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-}
-
-#[derive(FromRow)]
-struct SessionWithMaxBookingCount {
-    id: i64,
-    max_booking_count: Option<i64>
 }
 
 async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, max_bookings: i64, credits_used: CreditsCost) -> Result<(), Custom<String>> {
