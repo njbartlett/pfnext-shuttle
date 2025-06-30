@@ -11,6 +11,8 @@ const admin_controls = reactive({
     leaderboard_limit: 12
 })
 
+const GRACE_DAYS = 1
+
 /**
  * Get the date as a yyyy-mm-dd string, corrected for the timezone.
  */
@@ -134,12 +136,15 @@ async function displayChallenges(json) {
 
 function updateNewActivityForChallenge(index, challenge) {
     var now = new Date(admin_controls.current_date)
+
     var start = new Date(challenge.start)
     var finish = new Date(challenge.finish)
+    var finish_with_grace = new Date(finish)
+    finish_with_grace.setDate(finish_with_grace.getDate() + GRACE_DAYS)
     
     let new_activity = null
     let validation = null
-    if (start <= now && now <= finish) {
+    if (start <= now && now <= finish_with_grace) {
         new_activity = {
             date: toDateString(now),
             amount: 0,
