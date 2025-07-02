@@ -270,19 +270,33 @@ const interval = setInterval(function() {
     return clearInterval(interval);
   }
 
-  const particleCount = 20;// * (timeLeft / duration);
+  const particleCount = 15 * (timeLeft / duration);
 
   // since particles fall down, start a bit higher than random
   confetti(
     Object.assign({}, defaults, {
       particleCount,
+      scalar: 2,
       origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 },
+      shapes: ["emoji"],
+      shapeOptions: {
+        emoji: {
+            value: ["⭐️","👍","💪🏻","💪🏾","💪","❤️", "🌈","💚","💙"]
+        }
+      }
     })
   );
   confetti(
     Object.assign({}, defaults, {
       particleCount,
+      scalar: 2,
       origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 },
+      shapes: ["emoji"],
+      shapeOptions: {
+        emoji: {
+            value: ["⭐️","👍","💪🏻","💪🏾","💪","❤️", "🌈","💚","💙"]
+        }
+      }
     })
   );
 }, 300);
