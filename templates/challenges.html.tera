@@ -1,5 +1,9 @@
 {% extends "loggedin_layout" %}
 
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/@tsparticles/confetti@3.0.3/tsparticles.confetti.bundle.min.js"></script>
+{% endblock %}
+
 {% block loggedin_content %}
 <div class="container">
 
