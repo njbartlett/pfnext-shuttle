@@ -7,8 +7,8 @@ CREATE OR REPLACE FUNCTION insert_activity(
 DECLARE
     new_activity_id BIGINT;
 BEGIN
-    INSERT INTO activity (person_id, challenge_id, date, amount)
-    SELECT p.id, c.id, date, amount
+    INSERT INTO activity (person_id, challenge_id, activity_type, date, amount)
+    SELECT p.id, c.id, c.activity_type, date, amount
     FROM person AS p CROSS JOIN challenge AS c
     WHERE p.name = person_name
     AND c.name = challenge_name

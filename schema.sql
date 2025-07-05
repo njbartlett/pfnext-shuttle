@@ -129,7 +129,8 @@ CREATE TABLE IF NOT EXISTS challenge (
 CREATE TABLE IF NOT EXISTS activity (
     id bigserial PRIMARY KEY,
     person_id bigint NOT NULL REFERENCES person ON DELETE CASCADE,
-    challenge_id bigint NOT NULL REFERENCES challenge,
+    challenge_id bigint REFERENCES challenge,
+    activity_type int NOT NULL REFERENCES activity_type,
     date date NOT NULL,
     amount real NOT NULL
 );

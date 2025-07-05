@@ -12,11 +12,11 @@ use sqlx::postgres::{PgQueryResult, PgRow};
 use sqlx::{query, query_as, raw_sql, Error, FromRow, PgPool, QueryBuilder, Row};
 use std::fmt::{Display, Formatter};
 
+use crate::common::parse_opt_date;
 use crate::config::{AppEnv, Config};
 use crate::notifications::send_email;
 use crate::transaction_log::append_log;
 use crate::loginsession::{LoginSession, Roles};
-use crate::parse_opt_date;
 use crate::sessions::{SessionLocation, SessionType};
 
 #[cfg(test)]

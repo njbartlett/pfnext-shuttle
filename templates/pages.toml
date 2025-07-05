@@ -25,6 +25,11 @@ title = "Challenges"
 url = "challenges.html"
 nav = true
 
+[activities]
+title = "Activities"
+url = "activities.html"
+nav = true
+
 [bookings]
 title = "Bookings"
 url = "bookings.html"

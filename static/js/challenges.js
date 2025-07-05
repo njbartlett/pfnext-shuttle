@@ -1,17 +1,20 @@
-const challenges = ref([])
+const GRACE_DAYS = 1
+const DEFAULT_LEADERBOARD_LIMIT = 10
+
+const past_challenges = ref([])
+const current_challenges = ref([])
+const future_challenges = ref([])
+
 const new_activities = reactive([])
 const new_activities_validation = ref([])
-const all_activities = ref([])
 
 const admin_all_user_data = ref([])
 const admin_controls_old = ref(null)
 const admin_controls = reactive({
     user: null,
     current_date: dateInTimezone(new Date()),
-    leaderboard_limit: 12
+    leaderboard_limit: DEFAULT_LEADERBOARD_LIMIT
 })
-
-const GRACE_DAYS = 1
 
 /**
  * Get the date as a yyyy-mm-dd string, corrected for the timezone.
@@ -30,11 +33,6 @@ function isSelectedUserId(id) {
     return admin_controls.user && admin_controls.user.id === id
 }
 
-async function loadChallengesAndActivities(user, current_date) {
-    loadAllActivities(user)
-    loadChallenges(user, current_date)
-}
-
 async function loadChallenges(user, current_date) {
     var search_params = new URLSearchParams()
     search_params.append("person_id", user.id)
@@ -43,32 +41,65 @@ async function loadChallenges(user, current_date) {
     httpGetJson("/challenges?" + search_params.toString(), displayChallenges)
 }
 
+const PAST_CHALLENGE = -1
+const CURRENT_CHALLENGE = 0
+const FUTURE_CHALLENGE = 1
+
+function getChallengeCurrency(challenge) {
+    const now = new Date(admin_controls.current_date)
+    var start = new Date(challenge.start)
+    var finish = new Date(challenge.finish)
+    var finish_with_grace = new Date(finish)
+    finish_with_grace.setDate(finish_with_grace.getDate() + GRACE_DAYS)
+    
+    if (finish_with_grace < now) {
+        return PAST_CHALLENGE
+    } else if (start > now) {
+        return FUTURE_CHALLENGE
+    } else {
+        return CURRENT_CHALLENGE
+    }
+}
+
 async function reloadChallenge(challenge_index, challenge_id) {
     var params = new URLSearchParams()
     params.append("person_id", admin_controls.user.id)
-    //params.append("leaderboard_limit", admin_controls.leaderboard_limit)
+    params.append("leaderboard_limit", admin_controls.leaderboard_limit)
     httpGetJson("/challenges/" + challenge_id + "?" + params.toString(), challenge => {
         if (challenge != null) {
-            updateNewActivityForChallenge(challenge_index, challenge)
-    
-            // Splice the activity into the existing challenges list
-            let found_index = -1
-            for (let index = challenges.value.length - 1; index >= 0; index--) {
-                if (challenges.value[index].id == challenge.id) {
-                    found_index = index
-                    break
-                }
-            }
-            if (found_index >= 0) {
-                challenges.value.splice(found_index, 1, challenge)
+            switch (getChallengeCurrency(challenge)) {
+                case PAST_CHALLENGE:
+                    spliceChallenge(challenge, past_challenges.value);
+                    break;
+                case CURRENT_CHALLENGE:
+                    updateNewActivityForChallenge(challenge_index, challenge);
+                    spliceChallenge(challenge, current_challenges.value);
+                    break;
+                case FUTURE_CHALLENGE:
+                    spliceChallenge(challenge, future_challenges.value);
+                    break;
             }
         }
     })
 }
 
+// Splice a challenge into an existing challenges list
+function spliceChallenge(challenge, challenges) {
+    let found_index = -1
+    for (let index = challenges.length - 1; index >= 0; index--) {
+        if (challenges[index].id == challenge.id) {
+            found_index = index
+            break
+        }
+    }
+    if (found_index >= 0) {
+        challenges.splice(found_index, 1, challenge)
+    }
+}
+
 function updateNewActivities(activities) {
     for (let index = 0; index < activities.length; index++) {
-        let challenge = challenges.value[index]
+        let challenge = current_challenges.value[index]
         let new_activity = activities[index]
         let val = new_activities_validation.value[index]
 
@@ -114,7 +145,7 @@ function updateAdminControls(newValue) {
         (newValue.user && newValue.user.id != admin_controls_old.value.user_id) ||
         newValue.current_date != admin_controls_old.value.current_date
     ) {
-        loadChallengesAndActivities(newValue.user, newValue.current_date)
+        loadChallenges(newValue.user, newValue.current_date)
     }
     admin_controls_old.value = {
         user_id: user.id,
@@ -123,49 +154,44 @@ function updateAdminControls(newValue) {
 }
 
 async function displayChallenges(json) {
-    challenges.value.length = 0
+    past_challenges.value.length = 0
+    current_challenges.value.length = 0
+    future_challenges.value.length = 0
     new_activities.length = 0
     new_activities_validation.value.length = 0
 
     for (let index = 0; index < json.length; index++) {
         let challenge = json[index]
-        updateNewActivityForChallenge(index, challenge)
-        challenges.value.push(challenge)
+        switch (getChallengeCurrency(challenge)) {
+            case PAST_CHALLENGE:
+                past_challenges.value.push(challenge)
+                break;
+            case CURRENT_CHALLENGE:
+                updateNewActivityForChallenge(index, challenge)
+                current_challenges.value.push(challenge)
+                break;
+            case FUTURE_CHALLENGE:
+                future_challenges.value.push(challenge)
+                break;
+        }
     }
 }
 
 function updateNewActivityForChallenge(index, challenge) {
-    var now = new Date(admin_controls.current_date)
-
-    var start = new Date(challenge.start)
-    var finish = new Date(challenge.finish)
-    var finish_with_grace = new Date(finish)
-    finish_with_grace.setDate(finish_with_grace.getDate() + GRACE_DAYS)
-    
-    let new_activity = null
-    let validation = null
-    if (start <= now && now <= finish_with_grace) {
-        new_activity = {
-            date: toDateString(now),
-            amount: 0,
-            units: challenge.activity_type.units,
-            step_size: challenge.activity_type.step_size,
-        }
-        validation = {
-            date: 'valid',
-            amount: 'valid',
-            ready: false,
-            error_msg: null
-        }
+    let new_activity = {
+        date: toDateString(new Date()),
+        amount: 0,
+        units: challenge.activity_type.units,
+        step_size: challenge.activity_type.step_size,
+    }
+    let validation = {
+        date: 'valid',
+        amount: 'valid',
+        ready: false,
+        error_msg: null
     }
     new_activities.splice(index, 1, new_activity)
     new_activities_validation.value.splice(index, 1, validation)
-}
-
-async function loadAllActivities(user) {
-    let params = new URLSearchParams()
-    params.append("person_id", user.id)
-    httpGetJson("/activities?" + params.toString(), json => all_activities.value = json)
 }
 
 async function submitActivity(challenge_index, challenge) {
@@ -184,37 +210,12 @@ async function submitActivity(challenge_index, challenge) {
         new_activities[challenge_index].amount = 0
     
         // Load the newly created activity record
-        loadActivityByLocation(res.headers.get('Location'))
+        loadAllActivities(admin_controls.user)
         // Reload the challenge to get the new progress indicators
         reloadChallenge(challenge_index, challenge.id)
     })
 }
 
-async function loadActivityByLocation(location) {
-    httpGetJson(location, activity => {
-        if (activity != null) {
-            // Splice the new activity into the user's all_activities table
-            all_activities.value.splice(0, 0, activity)
-        }
-    })
-}
-
-async function deleteActivity(activity, index) {
-    return fetch(SERVER_URL + "/activities/" + activity.id, {
-        method: 'DELETE',
-        credentials: 'include'
-    }).then(res => {
-        if (!res.ok) throw res
-        all_activities.value.splice(index, 1)
-
-        // Reload the challenge to get the updated progress bars
-        for (let challenge_index = 0; challenge_index < challenges.value.length; challenge_index++) {
-            if (challenges.value[challenge_index].id == activity.challenge_id) {
-                reloadChallenge(challenge_index, activity.challenge_id)
-            }
-        }
-    }).catch(handleHttpError)
-}
 
 function toDateString(dt) {
     return String(dt.getFullYear()).padStart(4, '0') + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0')
@@ -225,14 +226,22 @@ function calculateMemberBarWidth(member_summaries, index) {
     return displayPercent(percentage, 0)
 }
 
+function tabSelected(e) {
+    let targetTabId = e.delegateTarget.id
+    const params = new URLSearchParams()
+    params.append("tab", targetTabId)
+    history.replaceState("", "", '#' + params.toString())
+}
+
+
 let app = createApp({
     setup() {
         return {
             // Data
-            loggedin, http_err, admin_all_user_data, challenges, all_activities, new_activities, new_activities_validation, admin_controls,
+            loggedin, http_err, admin_all_user_data, past_challenges, current_challenges, future_challenges, new_activities, new_activities_validation, admin_controls,
 
             // Functions
-            submitActivity, deleteActivity,
+            submitActivity, tabSelected,
             isAdmin, displayDate, displayNumber, displayPercent, calculateMemberBarWidth, isChallengeStarted, isSelectedUserId, formatNameAndEmail,
             encodeLoginReturnUrl, onLogout
         }
@@ -254,49 +263,65 @@ loadAllUsers(users => {
     watch(admin_controls, updateAdminControls)
 })
 
-/* Fireworks!! */
-const duration = 60 * 1000,
-  animationEnd = Date.now() + duration,
-  defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
-
-function randomInRange(min, max) {
-  return Math.random() * (max - min) + min;
+function setSelectedTabFromHashString(hashStr) {
+    const hashParams = hashStr ? new URLSearchParams(hashStr.substring(1)) : new URLSearchParams()
+    const hashSelectedTab = hashParams.get('tab')
+    if (hashSelectedTab) {
+        let tab = new bootstrap.Tab('#' + hashSelectedTab);
+        tab.show()
+    }
 }
 
-const interval = setInterval(function() {
-  const timeLeft = animationEnd - Date.now();
+setSelectedTabFromHashString(window.location.hash)
+window.addEventListener('hashchange', e => {
+    setSelectedTabFromHashString(new URL(e.newURL).hash)
+})
 
-  if (timeLeft <= 0) {
-    return clearInterval(interval);
-  }
 
-  const particleCount = 15 * (timeLeft / duration);
+// Confetti on completion of a challenge
+//
+// const duration = 60 * 1000,
+//   animationEnd = Date.now() + duration,
+//   defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
 
-  // since particles fall down, start a bit higher than random
-  confetti(
-    Object.assign({}, defaults, {
-      particleCount,
-      scalar: 2,
-      origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 },
-      shapes: ["emoji"],
-      shapeOptions: {
-        emoji: {
-            value: ["⭐️","👍","💪🏻","💪🏾","💪","❤️", "🌈","💚","💙"]
-        }
-      }
-    })
-  );
-  confetti(
-    Object.assign({}, defaults, {
-      particleCount,
-      scalar: 2,
-      origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 },
-      shapes: ["emoji"],
-      shapeOptions: {
-        emoji: {
-            value: ["⭐️","👍","💪🏻","💪🏾","💪","❤️", "🌈","💚","💙"]
-        }
-      }
-    })
-  );
-}, 300);
+// function randomInRange(min, max) {
+//   return Math.random() * (max - min) + min;
+// }
+
+// const interval = setInterval(function() {
+//   const timeLeft = animationEnd - Date.now();
+
+//   if (timeLeft <= 0) {
+//     return clearInterval(interval);
+//   }
+
+//   const particleCount = 15 * (timeLeft / duration);
+
+//   // since particles fall down, start a bit higher than random
+//   confetti(
+//     Object.assign({}, defaults, {
+//       particleCount,
+//       scalar: 2,
+//       origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 },
+//       shapes: ["emoji"],
+//       shapeOptions: {
+//         emoji: {
+//             value: ["⭐️","👍","💪🏻","💪🏾","💪","❤️", "🌈","💚","💙"]
+//         }
+//       }
+//     })
+//   );
+//   confetti(
+//     Object.assign({}, defaults, {
+//       particleCount,
+//       scalar: 2,
+//       origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 },
+//       shapes: ["emoji"],
+//       shapeOptions: {
+//         emoji: {
+//             value: ["⭐️","👍","💪🏻","💪🏾","💪","❤️", "🌈","💚","💙"]
+//         }
+//       }
+//     })
+//   );
+// }, 300);

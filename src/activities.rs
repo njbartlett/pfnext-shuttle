@@ -7,11 +7,12 @@ use rocket::serde::json::Json;
 use rocket::{Route, State};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgRow;
-use sqlx::{query, query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::{query_as, query_scalar, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
+use crate::common::parse_opt_naive_date;
 use crate::config::Config;
 use crate::loginsession::LoginSession;
-use crate::whereclause::Operator::Equal;
+use crate::whereclause::Operator::{Equal, GreaterThan, GreaterThanOrEqual, LessThanOrEqual};
 use crate::whereclause::WhereClause;
 
 #[cfg(test)]
@@ -50,7 +51,7 @@ impl ActivityType {
     }
 }
 
-#[derive(Serialize, FromRow, Debug)]
+#[derive(Clone, Debug, Deserialize, FromRow, PartialEq, Serialize)]
 struct ChallengeRecord {
     id: i64,
     name: String,
@@ -212,29 +213,61 @@ async fn list_activity_types(pool: &State<PgPool>) -> Result<Json<Vec<ActivityTy
 #[derive(Serialize, Deserialize, Debug)]
 struct NewActivity {
     person_id: i64,
-    challenge_id: i64,
+    challenge_id: Option<i64>,
+    activity_type: Option<i32>,
     date: NaiveDate,
     amount: f32
 }
 
 impl NewActivity {
     async fn save(&self, pool: &PgPool) -> Result<i64, Error> {
-        query("INSERT INTO activity (person_id, challenge_id, date, amount) VALUES ($1, $2, $3, $4) RETURNING id")
-            .bind(self.person_id).bind(self.challenge_id).bind(self.date).bind(self.amount)
-            .fetch_one(pool)
-            .await
-            .and_then(|r| r.try_get("id"))
+        if let Some(activity_type) = self.activity_type {
+
+            // Check that the challenge ID activity matches
+            if let Some(challenge_id) = self.challenge_id {
+                let challenge_activity_type: i32 = query_scalar("SELECT activity_type FROM challenge WHERE id = $1")
+                    .bind(challenge_id)
+                    .fetch_one(pool)
+                    .await?;
+                if activity_type != challenge_activity_type {
+                    return Err(Error::InvalidArgument("activity_type clashes with challenge activity type".to_string()))
+                }
+            }
+
+            let sql = "INSERT INTO activity (person_id, challenge_id, activity_type, date, amount) VALUES ($1, $2, $3, $4, $5) RETURNING id";
+            query_scalar(sql)
+                .bind(self.person_id)
+                .bind(self.challenge_id)
+                .bind(activity_type)
+                .bind(self.date)
+                .bind(self.amount)
+                .fetch_one(pool)
+                .await
+        } else if let Some(challenge_id) = self.challenge_id {
+            let sql = "INSERT INTO activity (person_id, challenge_id, activity_type, date, amount) 
+                    SELECT  $1, $2, activity_type, $3, $4
+                    FROM challenge WHERE challenge.id = $2
+                    RETURNING id";
+            query_scalar(sql)
+                .bind(self.person_id)
+                .bind(challenge_id)
+                .bind(self.date)
+                .bind(self.amount)
+                .fetch_one(pool)
+                .await
+        } else {
+            Err(Error::InvalidArgument("either challenge_id or activity_type required".to_string()))
+        }
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct Activity {
     id: i64,
     person_id: i64,
     person_name: String,
     person_email: String,
-    challenge_id: i64,
-    challenge_name: String,
+    challenge: Option<ChallengeRecord>,
     activity_type: ActivityType,
     date: NaiveDate,
     amount: f32
@@ -242,13 +275,31 @@ struct Activity {
 
 impl FromRow<'_, PgRow> for Activity {
     fn from_row(r: &'_ PgRow) -> Result<Self, Error> {
+        let challenge = if let Some(challenge_id) = r.try_get("challenge_id")? {
+            Some(ChallengeRecord {
+                id: challenge_id,
+                name: r.try_get("challenge_name")?,
+                start: r.try_get("challenge_start")?,
+                finish: r.try_get("challenge_finish")?,
+                activity_type: ActivityType {
+                    id: r.try_get("challenge_activity_type_id")?,
+                    name: r.try_get("challenge_activity_type_name")?,
+                    units: r.try_get("challenge_activity_type_units")?,
+                    step_size: r.try_get("challenge_activity_type_step_size")?
+                },
+                goal: r.try_get("challenge_goal")?,
+                individual_goal: r.try_get("challenge_individual_goal")?,
+                total_all: 0.0, total_for_person: 0.0
+            })
+        } else {
+            None
+        };
         Ok(Activity {
             id: r.try_get("id")?,
             person_id: r.try_get("person_id")?,
             person_name: r.try_get("person_name")?,
             person_email: r.try_get("person_email")?,
-            challenge_id: r.try_get("challenge_id")?,
-            challenge_name: r.try_get("challenge_name")?,
+            challenge: challenge,
             activity_type: ActivityType {
                 id: r.try_get("activity_type_id")?,
                 name: r.try_get("activity_type_name")?,
@@ -263,24 +314,30 @@ impl FromRow<'_, PgRow> for Activity {
 
 impl Activity {
 
-    const ACTIVITY_QUERY_BASE: &str = "SELECT a.id, a.person_id, a.date, a.amount, \
-        p.name AS person_name, p.email AS person_email, \
-        c.id AS challenge_id, c.name AS challenge_name, \
-        t.id AS activity_type_id, t.name AS activity_type_name, t.units AS activity_type_units, t.step_size AS activity_type_step_size \
-        FROM activity AS a \
-        INNER JOIN person AS p ON a.person_id = p.id \
-        INNER JOIN challenge AS c ON a.challenge_id = c.id \
-        INNER JOIN activity_type AS t ON c.activity_type = t.id";
+    const ACTIVITY_QUERY_BASE: &str = "SELECT a.id, a.person_id, a.date, a.amount,
+            p.name AS person_name, p.email AS person_email,
+            c.id AS challenge_id, c.name AS challenge_name, c.start AS challenge_start, c.finish AS challenge_finish, c.goal AS challenge_goal, c.individual_goal AS challenge_individual_goal,
+            ct.id AS challenge_activity_type_id, ct.name AS challenge_activity_type_name, ct.units AS challenge_activity_type_units, ct.step_size AS challenge_activity_type_step_size,
+            t.id AS activity_type_id, t.name AS activity_type_name, t.units AS activity_type_units, t.step_size AS activity_type_step_size
+        FROM activity AS a
+        INNER JOIN person AS p ON a.person_id = p.id
+        LEFT JOIN challenge AS c ON a.challenge_id = c.id
+        LEFT JOIN activity_type AS ct ON c.activity_type = ct.id
+        LEFT JOIN activity_type AS t ON a.activity_type = t.id";
 
     async fn query(
         pool: &PgPool,
         challenge_id: Option<i64>,
-        person_id: Option<i64>
+        person_id: Option<i64>,
+        from: Option<NaiveDate>,
+        to: Option<NaiveDate>
     ) -> Result<Vec<Activity>, Error> {
         let mut qb = QueryBuilder::new(Self::ACTIVITY_QUERY_BASE);
         WhereClause::init()
             .opt_append_to(&mut qb, "a.challenge_id", Equal, challenge_id)
-            .opt_append_to(&mut qb, "a.person_id", Equal, person_id);
+            .opt_append_to(&mut qb, "a.person_id", Equal, person_id)
+            .opt_append_to(&mut qb, "a.date", GreaterThanOrEqual, from)
+            .opt_append_to(&mut qb, "a.date", LessThanOrEqual, to);
         qb.push(" ORDER BY a.date DESC, a.id DESC");
         qb.build_query_as().fetch_all(pool).await
     }
@@ -294,17 +351,19 @@ impl Activity {
     }
 }
 
-#[get("/activities?<challenge_id>&<person_id>")]
+#[get("/activities?<challenge_id>&<person_id>&<from>&<to>")]
 async fn list_activities(
     pool: &State<PgPool>,
     login: LoginSession,
     challenge_id: Option<i64>,
-    person_id: Option<i64>
+    person_id: Option<i64>,
+    from: Option<String>,
+    to: Option<String>
 ) -> Result<Json<Vec<Activity>>, Custom<String>> {
     if !login.is_admin() && Some(login.uid) != person_id {
         return Err(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()));
     }
-    Activity::query(pool, challenge_id, person_id)
+    Activity::query(pool, challenge_id, person_id, parse_opt_naive_date(from, DATE_FORMAT)?, parse_opt_naive_date(to, DATE_FORMAT)?)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
         .map(Json::from)
@@ -400,9 +459,12 @@ async fn create_activity(
 ) -> Result<Created<&'static str>, Custom<String>> {
     if !login.is_admin() && activity.person_id != login.uid {
         return Err(Custom(Status::Forbidden, "admin role required to create activities for other users".to_owned()));
-    }
+    }  
     let activity_id = activity.save(pool).await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| match e {
+            sqlx::Error::InvalidArgument(msg) => Custom(Status::UnprocessableEntity, msg.to_string()),
+            _ => Custom(Status::InternalServerError, e.to_string())
+        })?;
     Ok(Created::new(format!("/activities/{}", activity_id)))
 }
 
@@ -437,9 +499,9 @@ mod tests {
     use rocket::response::status::Custom;
     use rocket::serde::json::Json;
     use rocket::State;
-    use sqlx::{query, PgPool, Row};
+    use sqlx::{query_scalar, PgPool, Row};
 
-    use crate::activities::{Activity, ChallengeFull, NewActivity};
+    use crate::activities::{get_activity, list_activities, Activity, ChallengeFull, NewActivity};
     use crate::config::Config;
     use crate::loginsession::{LoginSession, Roles};
     use crate::mock_chrono::set_timestamp_rfc3339;
@@ -447,11 +509,10 @@ mod tests {
     const DUMMY_SESSION_ID: &str = "xxx";
     
     async fn find_person_id_by_name(pool: &PgPool, name: &str) -> i64 {
-        query("SELECT id FROM person WHERE name = $1")
+        query_scalar("SELECT id FROM person WHERE name = $1")
             .bind(name)
             .fetch_one(pool)
             .await
-            .and_then(|r| r.try_get("id"))
             .expect(&format!("failed to find user with name {}", name))
     }
 
@@ -469,19 +530,25 @@ mod tests {
     }
 
     async fn find_challenge_by_name(pool: &PgPool, name: &str) -> i64 {
-        query("SELECT id FROM challenge WHERE name = $1")
+        query_scalar("SELECT id FROM challenge WHERE name = $1")
             .bind(name)
             .fetch_one(pool)
             .await
-            .and_then(|r| r.try_get("id"))
             .expect(&format!("failed to find challenge with name {}", name))
+    }
+
+    async fn find_activity_type(pool: &PgPool, name: &str) -> i32 {
+        query_scalar("SELECT id FROM activity_type WHERE name = $1")
+            .bind(name)
+            .fetch_one(pool)
+            .await
+            .unwrap()
     }
     
     async fn count_activities(pool: &PgPool) -> i64 {
-        query("SELECT COUNT(*) AS id FROM activity")
+        query_scalar("SELECT COUNT(*) FROM activity")
             .fetch_one(pool)
             .await
-            .and_then(|r| r.try_get("id"))
             .unwrap()
     }
 
@@ -727,11 +794,10 @@ mod tests {
     async fn test_get_activity_self(pool: PgPool) {
         let login = find_user_login_by_name(&pool, "user1", "member").await;
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
-        let activity_id: i64 = query("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
+        let activity_id: i64 = query_scalar("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
             .bind(login.uid).bind(challenge)
             .fetch_one(&pool)
             .await
-            .and_then(|r| r.try_get("id"))
             .unwrap();
 
         let activity = crate::activities::get_activity(State::from(&pool), login, activity_id).await.unwrap().0;
@@ -742,11 +808,10 @@ mod tests {
     async fn test_get_activity_other_admin(pool: PgPool) {
         let user1 = find_person_id_by_name(&pool, "user1").await;
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
-        let activity_id: i64 = query("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
+        let activity_id: i64 = query_scalar("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
             .bind(user1).bind(challenge)
             .fetch_one(&pool)
             .await
-            .and_then(|r| r.try_get("id"))
             .unwrap();
 
         let login = find_user_login_by_name(&pool, "admin", "admin").await;
@@ -758,11 +823,10 @@ mod tests {
     async fn test_get_activity_other_nonadmin(pool: PgPool) {
         let user1 = find_person_id_by_name(&pool, "user1").await;
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
-        let activity_id: i64 = query("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
+        let activity_id: i64 = query_scalar("SELECT id FROM activity WHERE person_id = $1 AND challenge_id = $2 AND date = '2025-04-01'")
             .bind(user1).bind(challenge)
             .fetch_one(&pool)
             .await
-            .and_then(|r| r.try_get("id"))
             .unwrap();
 
         let login = find_user_login_by_name(&pool, "user2", "member").await;
@@ -776,7 +840,7 @@ mod tests {
         let user1 = find_person_id_by_name(&pool, "user1").await;
 
         let login = find_user_login_by_name(&pool, "user1", "member").await;
-        let list = crate::activities::list_activities(State::from(&pool), login, Some(challenge), Some(user1)).await.unwrap();
+        let list = crate::activities::list_activities(State::from(&pool), login, Some(challenge), Some(user1), None, None).await.unwrap();
         assert_eq!(2, list.len());
         assert_eq!("Hiking", list[0].activity_type.name);
         assert_eq!("user1", list[0].person_name);
@@ -788,7 +852,7 @@ mod tests {
         let user1 = find_person_id_by_name(&pool, "user1").await;
         let admin_login = find_user_login_by_name(&pool, "admin", "admin").await;
 
-        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), Some(user1)).await.unwrap();
+        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), Some(user1), None, None).await.unwrap();
         assert_eq!(2, list.len());
         assert_eq!("Hiking", list[0].activity_type.name);
         assert_eq!("user1", list[0].person_name);
@@ -799,7 +863,7 @@ mod tests {
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let admin_login = find_user_login_by_name(&pool, "admin", "admin").await;
 
-        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), None).await.unwrap();
+        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), None, None, None).await.unwrap();
         assert_eq!(3, list.len());
     }
 
@@ -809,7 +873,7 @@ mod tests {
         let user1 = find_person_id_by_name(&pool, "user1").await;
         let nonadmin_login = find_user_login_by_name(&pool, "user2", "member").await;
 
-        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), Some(user1)).await.unwrap_err();
+        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), Some(user1), None, None).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
@@ -818,7 +882,7 @@ mod tests {
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let nonadmin_login = find_user_login_by_name(&pool, "user2", "member").await;
 
-        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), None).await.unwrap_err();
+        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), None, None, None).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
@@ -827,22 +891,26 @@ mod tests {
         let user = find_person_id_by_name(&pool, "user1").await;
         let activity = NewActivity {
             person_id: user,
-            challenge_id: find_challenge_by_name(&pool, "April 2025 Hikes").await,
+            challenge_id: Some(find_challenge_by_name(&pool, "April 2025 Hikes").await),
+            activity_type: None,
             date: NaiveDate::from_ymd_opt(2025, 4, 16).unwrap(),
             amount: 0.0
         };
 
         let login = find_user_login_by_name(&pool, "user1", "member").await;
         assert_eq!(0, count_activities(&pool).await);
-        crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.expect("Failed to create activity");
-        assert_eq!(1, count_activities(&pool).await);
+        crate::activities::create_activity(State::from(&pool), login.clone(), Json(activity)).await.expect("Failed to create activity");
+        let activities = list_activities(State::from(&pool), login, None, Some(user), None, None).await.unwrap().0;
+        assert_eq!(1, activities.len());
+        assert_eq!("Hiking", activities.get(0).unwrap().activity_type.name);
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql"))]
     async fn test_create_activity_other_nonadmin(pool: PgPool) {
         let activity = NewActivity {
             person_id: find_person_id_by_name(&pool, "user1").await,
-            challenge_id: find_challenge_by_name(&pool, "April 2025 Hikes").await,
+            challenge_id: Some(find_challenge_by_name(&pool, "April 2025 Hikes").await),
+            activity_type: None,
             date: NaiveDate::from_ymd_opt(2025, 4, 16).unwrap(),
             amount: 0.0
         };
@@ -858,7 +926,8 @@ mod tests {
     async fn test_create_activity_other_admin(pool: PgPool) {
         let activity = NewActivity {
             person_id: find_person_id_by_name(&pool, "user1").await,
-            challenge_id: find_challenge_by_name(&pool, "April 2025 Hikes").await,
+            challenge_id: Some(find_challenge_by_name(&pool, "April 2025 Hikes").await),
+            activity_type: None,
             date: NaiveDate::from_ymd_opt(2025, 4, 16).unwrap(),
             amount: 0.0
         };
@@ -869,12 +938,82 @@ mod tests {
         assert_eq!(1, count_activities(&pool).await);
     }
 
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql"))]
+    async fn test_create_activity_without_challenge(pool: PgPool) {
+        let activity = NewActivity {
+            person_id: find_person_id_by_name(&pool, "user1").await,
+            challenge_id: None,
+            activity_type: Some(find_activity_type(&pool, "Cycling").await),
+            date: NaiveDate::from_ymd_opt(2025, 4, 16).unwrap(),
+            amount: 0.0
+        };
+
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
+        assert_eq!(0, count_activities(&pool).await);
+        crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.unwrap();
+        assert_eq!(1, count_activities(&pool).await);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql"))]
+    async fn test_create_activity_without_challenge_or_activity_type(pool: PgPool) {
+        let activity = NewActivity {
+            person_id: find_person_id_by_name(&pool, "user1").await,
+            challenge_id: None,
+            activity_type: None,
+            date: NaiveDate::from_ymd_opt(2025, 4, 16).unwrap(),
+            amount: 0.0
+        };
+
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
+        assert_eq!(0, count_activities(&pool).await);
+        let err = crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.unwrap_err();
+        assert_eq!(Custom(Status::UnprocessableEntity, "either challenge_id or activity_type required".to_string()), err);
+        assert_eq!(0, count_activities(&pool).await);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql"))]
+    async fn test_create_activity_with_both_challenge_and_activity_type_agreed(pool: PgPool) {
+        let user = find_person_id_by_name(&pool, "user1").await;
+        let activity = NewActivity {
+            person_id: user,
+            challenge_id: Some(find_challenge_by_name(&pool, "April 2025 Hikes").await),
+            activity_type: Some(find_activity_type(&pool, "Hiking").await),
+            date: NaiveDate::from_ymd_opt(2025, 4, 16).unwrap(),
+            amount: 0.0
+        };
+
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
+        assert_eq!(0, count_activities(&pool).await);
+        crate::activities::create_activity(State::from(&pool), login.clone(), Json(activity)).await.unwrap();
+        let activities = list_activities(State::from(&pool), login, None, Some(user), None, None).await.unwrap().0;
+        assert_eq!(1, activities.len());
+        assert_eq!("Hiking", activities.get(0).unwrap().activity_type.name);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql"))]
+    async fn test_create_activity_with_both_challenge_and_activity_type_not_agreed(pool: PgPool) {
+        let user = find_person_id_by_name(&pool, "user1").await;
+        let activity = NewActivity {
+            person_id: user,
+            challenge_id: Some(find_challenge_by_name(&pool, "April 2025 Hikes").await),
+            activity_type: Some(find_activity_type(&pool, "Cycling").await),
+            date: NaiveDate::from_ymd_opt(2025, 4, 16).unwrap(),
+            amount: 0.0
+        };
+
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
+        assert_eq!(0, count_activities(&pool).await);
+        let err = crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.unwrap_err();
+        assert_eq!(Custom(Status::UnprocessableEntity, "activity_type clashes with challenge activity type".to_string()), err);
+        assert_eq!(0, count_activities(&pool).await);
+    }
+
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_delete_activity_self(pool: PgPool) {
         let challenge_id = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user_id = find_person_id_by_name(&pool, "user1").await;
 
-        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id)).await.unwrap();
+        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id), None, None).await.unwrap();
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "user1", "member").await;
@@ -888,7 +1027,7 @@ mod tests {
         let challenge_id = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user_id = find_person_id_by_name(&pool, "user1").await;
 
-        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id)).await.unwrap();
+        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id), None, None).await.unwrap();
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "admin", "admin").await;
@@ -902,7 +1041,7 @@ mod tests {
         let challenge_id = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user_id = find_person_id_by_name(&pool, "user1").await;
 
-        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id)).await.unwrap();
+        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id), None, None).await.unwrap();
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "user2", "member").await;

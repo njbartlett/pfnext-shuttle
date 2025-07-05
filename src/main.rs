@@ -2,10 +2,22 @@
 #[macro_use]
 extern crate rocket;
 
+mod activities;
+mod backup;
+mod bookings;
+mod common;
+mod config;
+mod transaction_log;
+mod loginsession;
+mod mock_chrono;
+mod notifications;
+mod sessions;
+mod templates;
+mod users;
+mod whereclause;
+
 use std::fs::read_to_string;
 use std::path::Path;
-
-use chrono::{DateTime, FixedOffset};
 
 use dotenv::dotenv;
 
@@ -25,18 +37,6 @@ use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
 use crate::templates::Templates;
 
-mod activities;
-mod backup;
-mod bookings;
-mod config;
-mod transaction_log;
-mod loginsession;
-mod mock_chrono;
-mod notifications;
-mod sessions;
-mod templates;
-mod users;
-mod whereclause;
 
 #[catch(401)]
 fn api_unauthorized(request: &Request) -> Custom<String> {
@@ -129,12 +129,3 @@ async fn launch() -> Rocket<Build> {
         ].into_iter().flatten().collect::<Vec<Route>>())
 }
 
-fn parse_opt_date(str: Option<String>) -> Result<Option<DateTime<FixedOffset>>, Custom<String>> {
-    if str.is_none() {
-        return Ok(None);
-    }
-    let parsed = DateTime::parse_from_rfc3339(str.as_ref().unwrap());
-    Ok(Some(parsed.map_err(|e| {
-        Custom(Status::UnprocessableEntity, e.to_string())
-    })?))
-}

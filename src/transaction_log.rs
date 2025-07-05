@@ -1,4 +1,5 @@
-use crate::{loginsession::LoginSession, parse_opt_date};
+use crate::common::parse_opt_date;
+use crate::loginsession::LoginSession;
 use chrono::{DateTime, Utc};
 use rocket::{http::Status, Route};
 use rocket::response::status::Custom;

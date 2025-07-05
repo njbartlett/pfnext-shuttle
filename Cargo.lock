@@ -2646,6 +2646,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.9.0",
  "rand_core 0.9.3",
+ "result",
  "rocket",
  "rocket-client-addr",
  "rocket_cors",
@@ -3107,6 +3108,12 @@ name = "resolv-conf"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95325155c684b1c89f7765e30bc1c42e4a6da51ca513615660cb8a62ef9a88e3"
+
+[[package]]
+name = "result"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "194d8e591e405d1eecf28819740abed6d719d1a2db87fc0bcdedee9a26d55560"
 
 [[package]]
 name = "ring"
