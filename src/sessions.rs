@@ -69,7 +69,15 @@ struct SessionFullRecord {
     booked: bool,
     waitlist_rank: Option<i64>,
     attended: bool,
+    rating: Option<i16>,
     booking_count: i64,
+    avg_rating: Option<f64>,
+    count_rating_all: i64,
+    count_rating_5: i64,
+    count_rating_4: i64,
+    count_rating_3: i64,
+    count_rating_2: i64,
+    count_rating_1: i64,
     max_booking_count: Option<i64>,
     attended_count: Option<i64>,
     notes: Option<String>,
@@ -101,6 +109,12 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
             None => None
         };
 
+        let count_rating_5 = row.try_get::<i64, &str>("count_rating_5")?;
+        let count_rating_4 = row.try_get::<i64, &str>("count_rating_4")?;
+        let count_rating_3 = row.try_get::<i64, &str>("count_rating_3")?;
+        let count_rating_2 = row.try_get::<i64, &str>("count_rating_2")?;
+        let count_rating_1 = row.try_get::<i64, &str>("count_rating_1")?;
+        let count_rating_all = count_rating_1 + count_rating_2 + count_rating_3 + count_rating_4 + count_rating_5;
         Ok(SessionFullRecord {
             id: session_id,
             datetime: row.try_get("datetime")?,
@@ -117,11 +131,14 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
             booked: row.try_get("booked").ok().unwrap_or(false),
             waitlist_rank: row.try_get("waitlist_rank").ok(),
             attended: row.try_get("attended").ok().unwrap_or(false),
+            rating: row.try_get("rating").ok(),
             booking_count: row.try_get("booking_count")?,
+            avg_rating: row.try_get("avg_rating")?,
+            count_rating_all, count_rating_5, count_rating_4, count_rating_3, count_rating_2, count_rating_1,
             max_booking_count: row.try_get("max_booking_count").ok(),
             attended_count: row.try_get("attended_count").ok(),
             notes: row.try_get("notes").ok(),
-            cost: row.try_get("cost")?
+            cost: row.try_get("cost")?,
         })
     }
 }
@@ -208,7 +225,13 @@ fn build_session_query(
         t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated,
         loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, loc.url AS location_url,
         trainer.id AS trainer_id, trainer.name AS trainer_name, trainer.email AS trainer_email, trainer.url AS trainer_url,
-        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count, s.max_booking_count AS max_booking_count");
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id) AS booking_count, s.max_booking_count AS max_booking_count,
+        (SELECT CAST(AVG(rating) AS FLOAT8) FROM booking WHERE booking.session_id = s.id) AS avg_rating,
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id AND rating = 5) AS count_rating_5,
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id AND rating = 4) AS count_rating_4,
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id AND rating = 3) AS count_rating_3,
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id AND rating = 2) AS count_rating_2,
+        (SELECT COUNT(*) FROM booking WHERE booking.session_id = s.id AND rating = 1) AS count_rating_1");
 
     if show_attended {
         qb.push(", (SELECT COUNT(*) from booking WHERE booking.session_id = s.id AND booking.attended = true) AS attended_count");
@@ -222,6 +245,10 @@ fn build_session_query(
         qb.push(", CASE WHEN EXISTS (SELECT 1 FROM booking WHERE booking.session_id = s.id AND booking.attended = true AND booking.person_id = ");
         qb.push_bind(booking_person_id);
         qb.push(") THEN true ELSE false END AS attended");
+
+        qb.push(", (SELECT rating FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
+        qb.push_bind(booking_person_id);
+        qb.push(") AS rating");
 
         qb.push(", (SELECT waitlist_rank FROM (SELECT ROW_NUMBER() OVER (ORDER BY w.id ASC) AS waitlist_rank, person_id, session_id FROM waitlist w WHERE w.session_id = s.id ORDER BY w.id ASC) AS waitlist_sub WHERE waitlist_sub.person_id = ");
         qb.push_bind(booking_person_id);
@@ -406,17 +433,12 @@ async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> R
 mod tests {
     use chrono::{Days, Utc};
     use rocket::State;
-    use sqlx::{query, query_as, Executor, FromRow, PgPool};
-    use crate::{loginsession::{LoginSession, Roles}, sessions::list_sessions, users::UserLoginRecord};
-
-    #[derive(FromRow)]
-    struct BigintRecord {
-        id: i64
-    }
+    use sqlx::{query, query_scalar, PgPool, Postgres};
+    use crate::{loginsession::{LoginSession, Roles}, sessions::{list_sessions, SessionFullRecord}, users::UserLoginRecord};
 
     #[sqlx::test(fixtures("../schema.sql"))]
     async fn browse_sessions_not_logged_in(pool: PgPool) {
-        let _session_id: BigintRecord = query_as("insert into session (datetime, duration_mins, session_type) values ('2025-01-01 00:00:00+0', 60, 1) returning id")
+        query_scalar::<Postgres, i64>("insert into session (datetime, duration_mins, session_type) values ('2025-01-01 00:00:00+0', 60, 1) returning id")
             .fetch_one(&pool)
             .await.unwrap();
         let sessions = list_sessions(State::from(&pool), None, None, None, None, false).await.unwrap();
@@ -459,6 +481,40 @@ mod tests {
         ).await.unwrap().0.into_iter().next().unwrap();
         assert_eq!(Some(2), session.waitlist_rank, "waitlist rank should be 2nd");
 
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/sessions.sql"))]
+    async fn session_ratings(pool: PgPool) {
+        let user1 = UserLoginRecord::load_by_email(&pool, "user1@example.com").await.unwrap().unwrap();
+        let user2 = UserLoginRecord::load_by_email(&pool, "user2@example.com").await.unwrap().unwrap();
+        let session_id: i64 = query_scalar("SELECT id FROM session")
+            .fetch_one(&pool)
+            .await.unwrap();
+        query("INSERT INTO booking (person_id, session_id, attended, rating) VALUES ($1, $2, true, 3) RETURNING session_id")
+            .bind(user1.id).bind(session_id)
+            .fetch_one(&pool)
+            .await.unwrap();
+        query("INSERT INTO booking (person_id, session_id, attended, rating) VALUES ($1, $2, true, 4) RETURNING session_id")
+            .bind(user2.id).bind(session_id)
+            .fetch_one(&pool)
+            .await.unwrap();
+
+
+        let login = create_login(user1.id, &user1.name, "member");
+        let session= list_sessions(
+            State::from(&pool),
+            Some(login.clone()),
+            Some("2025-01-01T00:00:00Z".to_string()),
+            Some("2025-01-01T23:59:59Z".to_string()),
+            None,
+            false
+        ).await.unwrap().0.into_iter().next().unwrap();
+        assert_eq!(Some(3.5), session.avg_rating);
+        assert_eq!(0, session.count_rating_1);
+        assert_eq!(0, session.count_rating_2);
+        assert_eq!(1, session.count_rating_3);
+        assert_eq!(1, session.count_rating_4);
+        assert_eq!(0, session.count_rating_5);
     }
 
     fn create_login(uid: i64, name: &str, role: &str) -> LoginSession {

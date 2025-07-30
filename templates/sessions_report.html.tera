@@ -43,6 +43,7 @@
                 <th scope="col">Location</th>
                 <th scope="col">Trainer</th>
                 <th scope="col">Attendance</th>
+                <th scope="col">Avg.Rating</th>
             </tr>
         </thead>
         <tbody>
@@ -52,6 +53,7 @@
                 <td>${session.location ? session.location.name : 'N/A'}</td>
                 <td>${session.trainer ? session.trainer.name : 'N/A'}</td>
                 <td>${session.attended_count} / ${session.booking_count}</td>
+                <td>${renderRating(session.avg_rating)}</td>
             </tr>
         </tbody>
     </table>

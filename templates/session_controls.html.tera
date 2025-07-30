@@ -5,7 +5,27 @@
     <span v-if="session.booked" class="me-1">                        
         <!-- Session in past, display attendance status -->
         <span v-if="isPast(session.datetime)">
-            <span v-if="session.attended" class="text-success"><i class="bi bi-check2-circle">&nbsp;Attended</i></span>
+            <span v-if="session.attended" class="text-success text-align-middle">
+                <i class="bi bi-check2-circle">&nbsp;Attended</i>
+                &nbsp;
+                <span class="dropdown">
+                    <button class="btn btn-sm btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <span v-if="session.rating != null" title="Amend Rating">
+                            ${session.rating} <i class="bi bi-star-fill"></i>
+                        </span>
+                        <span v-else title="Rate Session">
+                            <i class="bi bi-star"></i>
+                        </span>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><button class="dropdown-item" :class="{'active': session.rating == 5}" @click.prevent="rateSession(session, 5)"><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i> 😁</button></li>
+                        <li><button class="dropdown-item" :class="{'active': session.rating == 4}" @click.prevent="rateSession(session, 4)"><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star"></i> 😀</button></li>
+                        <li><button class="dropdown-item" :class="{'active': session.rating == 3}" @click.prevent="rateSession(session, 3)"><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star"></i><i class="bi bi-star"></i> 😐</button></li>
+                        <li><button class="dropdown-item" :class="{'active': session.rating == 2}" @click.prevent="rateSession(session, 2)"><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star"></i><i class="bi bi-star"></i><i class="bi bi-star"></i> 🙁</button></li>
+                        <li><button class="dropdown-item" :class="{'active': session.rating == 1}" @click.prevent="rateSession(session, 1)"><i class="bi bi-star-fill"></i><i class="bi bi-star"></i><i class="bi bi-star"></i><i class="bi bi-star"></i><i class="bi bi-star"></i> 😥</button></li>
+                    </ul>
+                </span>
+            </span>
             <span v-else class="text-danger"><i class="bi bi-x-circle">&nbsp;Didn't Attend</i></span>
         </span>
         <!-- Session in future, show booked and allow cancellation -->

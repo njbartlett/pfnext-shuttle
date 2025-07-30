@@ -1,0 +1,55 @@
+{# Template for session ratings in either calendar or list view #}
+
+<div v-if="session.avg_rating != null">
+    <a v-html="renderStarRating(session.avg_rating)" data-bs-toggle="collapse" :href="'#collapseCalSession' + session.id" role="button" aria-expanded="false" :aria-controls="'collapseCalSession' + session.id"></a>
+</div>
+
+<div class="collapse" :id="'collapseCalSession' + session.id">
+    <table class="table table-sm table-transparent table-borderless align-middle">
+        <tr>
+            <td class="text-nowrap">5 <i class="bi bi-star-fill"></i></td>
+            <td width="100%">
+                <div class="progress" role="progressbar" style="height: 10px">
+                    <div class="progress-bar bg-secondary" :style="'width:' + displayPercent(session.count_rating_5 / session.count_rating_all)"></div>
+                </div>
+            </td>
+            <td>${session.count_rating_5}</td>
+        </tr>
+        <tr>
+            <td class="text-nowrap">4 <i class="bi bi-star-fill"></i></td>
+            <td width="100%">
+                <div class="progress" role="progressbar" style="height: 10px">
+                    <div class="progress-bar bg-secondary" :style="'width:' + displayPercent(session.count_rating_4 / session.count_rating_all)"></div>
+                </div>
+            </td>
+            <td>${session.count_rating_4}</td>
+        </tr>
+        <tr>
+            <td class="text-nowrap">3 <i class="bi bi-star-fill"></i></td>
+            <td width="100%">
+                <div class="progress" role="progressbar" style="height: 10px">
+                    <div class="progress-bar bg-secondary" :style="'width:' + displayPercent(session.count_rating_3 / session.count_rating_all)"></div>
+                </div>
+            </td>
+            <td>${session.count_rating_3}</td>
+        </tr>
+        <tr>
+            <td class="text-nowrap">2 <i class="bi bi-star-fill"></i></td>
+            <td width="100%">
+                <div class="progress" role="progressbar" style="height: 10px">
+                    <div class="progress-bar bg-secondary" :style="'width:' + displayPercent(session.count_rating_2 / session.count_rating_all)"></div>
+                </div>
+            </td>
+            <td>${session.count_rating_2}</td>
+        </tr>
+        <tr>
+            <td class="text-nowrap">1 <i class="bi bi-star-fill"></i></td>
+            <td width="100%">
+                <div class="progress" role="progressbar" style="height: 10px">
+                    <div class="progress-bar bg-secondary" :style="'width:' + displayPercent(session.count_rating_1 / session.count_rating_all)"></div>
+                </div>
+            </td>
+            <td>${session.count_rating_1}</td>
+        </tr>
+    </table>
+</div>

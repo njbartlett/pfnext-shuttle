@@ -62,7 +62,7 @@
                             <span v-if="session.location.url"><a :href="session.location.url" :class="{'link-secondary': isPast(session.datetime)}">${session.location.name}</a></span>
                             <span v-else>${session.location.name}</span>
                         </span>
-                        &nbsp;
+
                         <!-- Attendance pill -->
                         <span v-if="session.max_booking_count" class="badge rounded-pill"
                             :class="{'text-bg-danger': session.booking_count >= session.max_booking_count, 'text-bg-primary': session.booking_count < session.max_booking_count}"
@@ -72,6 +72,9 @@
                         <span v-else class="badge rounded-pill text-bg-primary" :title="session.booking_count + ' member(s) booked'">
                             ${session.booking_count}
                         </span>
+
+                        {% include "session_ratings" %}
+
                     </td>
 
                     <!-- Member book/cancel and admin controls -->
@@ -115,6 +118,7 @@
                                 <span v-if="session.trainer.url"><a :href="session.trainer.url" :class="{'link-secondary': isPast(session.datetime)}"><i class="bi bi-person-arms-up"></i>&nbsp;${session.trainer.name}</a></span>
                                 <span v-else><i class="bi bi-person-arms-up"></i>&nbsp;${session.trainer.name}</span>
                             </div>
+                            {% include "session_ratings" %}
                             <div v-if="session.notes" class="text-wrap" style="max-width: 15rem;">${session.notes}</div>
 
                             {% include "session_controls" %}

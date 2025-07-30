@@ -13,6 +13,7 @@ const new_adhoc_activity_validation = ref({
     ready: false
 })
 const all_activities_query = reactive({
+    type: -1,
     from: toDateString(startOfMonth(new Date())),
     to: toDateString(new Date())
 })
@@ -51,6 +52,9 @@ async function loadAllActivities() {
     params.append("person_id", loggedin.value.id)
     params.append("from", all_activities_query.from)
     params.append("to", all_activities_query.to)
+    if (all_activities_query.type != null && all_activities_query.type != -1) {
+        params.append("activity_type", all_activities_query.type)
+    }
     httpGetJson("/activities?" + params.toString(), displayAllActivities)
 }
 
@@ -186,6 +190,19 @@ function displayShortDate(date) {
     })
 }
 
+function getActivityTypeName(id) {
+    if (id == null || id == -1) {
+        return "Any"
+    }
+
+    for (activity_type of activity_types.value) {
+        if (activity_type.id == id) {
+            return activity_type.name
+        }
+    }
+    return "Unknown"
+}
+
 let app = createApp({
     setup() {
         return {
@@ -194,7 +211,7 @@ let app = createApp({
 
             // Functions
             submitAdhocActivity, deleteActivity,
-            isAdmin, displayDate, displayNumber, displayPercent, formatNameAndEmail, displayShortDate,
+            isAdmin, displayDate, displayNumber, displayPercent, formatNameAndEmail, displayShortDate, getActivityTypeName,
             encodeLoginReturnUrl, onLogout
         }
     }

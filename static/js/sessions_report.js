@@ -42,6 +42,10 @@ function loadSessions() {
     httpGetJson("/sessions?" + params.toString(), json => session_data.value = json)
 }
 
+function renderRating(rating) {
+    return Math.round(rating * 100) / 100
+}
+
 let app = createApp({
     setup() {
         return {
@@ -49,7 +53,7 @@ let app = createApp({
             session_data, loadSessions,
             trainer_list,
             filter_data,
-            displayDate, displayTime,
+            displayDate, displayTime, renderRating,
             isAdmin, encodeLoginReturnUrl, onLogout
         }
     }

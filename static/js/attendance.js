@@ -81,7 +81,7 @@ async function toggleAttendance(booking) {
     let params = new URLSearchParams()
     params.append("person_id", booking.person_id)
     params.append("session_id", booking.session_id)
-    httpCall("/bookings?" + params.toString(), "PUT", {
+    httpCall("/bookings?" + params.toString(), "PATCH", {
         attended: new_attended
     }, res => {
         sortByField(bookings.value, sort_params.value.field, sort_params.value.ascending)

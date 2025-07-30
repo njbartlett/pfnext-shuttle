@@ -335,14 +335,16 @@ impl Activity {
         challenge_id: Option<i64>,
         person_id: Option<i64>,
         from: Option<NaiveDate>,
-        to: Option<NaiveDate>
+        to: Option<NaiveDate>,
+        activity_type: Option<i32>
     ) -> Result<Vec<Activity>, Error> {
         let mut qb = QueryBuilder::new(Self::ACTIVITY_QUERY_BASE);
         WhereClause::init()
             .opt_append_to(&mut qb, "a.challenge_id", Equal, challenge_id)
             .opt_append_to(&mut qb, "a.person_id", Equal, person_id)
             .opt_append_to(&mut qb, "a.date", GreaterThanOrEqual, from)
-            .opt_append_to(&mut qb, "a.date", LessThanOrEqual, to);
+            .opt_append_to(&mut qb, "a.date", LessThanOrEqual, to)
+            .opt_append_to(&mut qb, "a.activity_type", Equal, activity_type);
         qb.push(" ORDER BY a.date DESC, a.id DESC");
         qb.build_query_as().fetch_all(pool).await
     }
@@ -356,19 +358,20 @@ impl Activity {
     }
 }
 
-#[get("/activities?<challenge_id>&<person_id>&<from>&<to>")]
+#[get("/activities?<challenge_id>&<person_id>&<from>&<to>&<activity_type>")]
 async fn list_activities(
     pool: &State<PgPool>,
     login: LoginSession,
     challenge_id: Option<i64>,
     person_id: Option<i64>,
     from: Option<String>,
-    to: Option<String>
+    to: Option<String>,
+    activity_type: Option<i32>
 ) -> Result<Json<Vec<Activity>>, Custom<String>> {
     if !login.is_admin() && Some(login.uid) != person_id {
         return Err(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()));
     }
-    Activity::query(pool, challenge_id, person_id, parse_opt_naive_date(from, DATE_FORMAT)?, parse_opt_naive_date(to, DATE_FORMAT)?)
+    Activity::query(pool, challenge_id, person_id, parse_opt_naive_date(from, DATE_FORMAT)?, parse_opt_naive_date(to, DATE_FORMAT)?, activity_type)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
         .map(Json::from)
@@ -845,7 +848,7 @@ mod tests {
         let user1 = find_person_id_by_name(&pool, "user1").await;
 
         let login = find_user_login_by_name(&pool, "user1", "member").await;
-        let list = crate::activities::list_activities(State::from(&pool), login, Some(challenge), Some(user1), None, None).await.unwrap();
+        let list = crate::activities::list_activities(State::from(&pool), login, Some(challenge), Some(user1), None, None, None).await.unwrap();
         assert_eq!(2, list.len());
         assert_eq!("Hiking", list[0].activity_type.name);
         assert_eq!("user1", list[0].person_name);
@@ -857,7 +860,7 @@ mod tests {
         let user1 = find_person_id_by_name(&pool, "user1").await;
         let admin_login = find_user_login_by_name(&pool, "admin", "admin").await;
 
-        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), Some(user1), None, None).await.unwrap();
+        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), Some(user1), None, None, None).await.unwrap();
         assert_eq!(2, list.len());
         assert_eq!("Hiking", list[0].activity_type.name);
         assert_eq!("user1", list[0].person_name);
@@ -868,7 +871,7 @@ mod tests {
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let admin_login = find_user_login_by_name(&pool, "admin", "admin").await;
 
-        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), None, None, None).await.unwrap();
+        let list = crate::activities::list_activities(State::from(&pool), admin_login, Some(challenge), None, None, None, None).await.unwrap();
         assert_eq!(3, list.len());
     }
 
@@ -878,7 +881,7 @@ mod tests {
         let user1 = find_person_id_by_name(&pool, "user1").await;
         let nonadmin_login = find_user_login_by_name(&pool, "user2", "member").await;
 
-        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), Some(user1), None, None).await.unwrap_err();
+        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), Some(user1), None, None, None).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
@@ -887,7 +890,7 @@ mod tests {
         let challenge = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let nonadmin_login = find_user_login_by_name(&pool, "user2", "member").await;
 
-        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), None, None, None).await.unwrap_err();
+        let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), None, None, None, None).await.unwrap_err();
         assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
@@ -905,7 +908,7 @@ mod tests {
         let login = find_user_login_by_name(&pool, "user1", "member").await;
         assert_eq!(0, count_activities(&pool).await);
         crate::activities::create_activity(State::from(&pool), login.clone(), Json(activity)).await.expect("Failed to create activity");
-        let activities = list_activities(State::from(&pool), login, None, Some(user), None, None).await.unwrap().0;
+        let activities = list_activities(State::from(&pool), login, None, Some(user), None, None, None).await.unwrap().0;
         assert_eq!(1, activities.len());
         assert_eq!("Hiking", activities.get(0).unwrap().activity_type.name);
     }
@@ -990,7 +993,7 @@ mod tests {
         let login = find_user_login_by_name(&pool, "user1", "member").await;
         assert_eq!(0, count_activities(&pool).await);
         crate::activities::create_activity(State::from(&pool), login.clone(), Json(activity)).await.unwrap();
-        let activities = list_activities(State::from(&pool), login, None, Some(user), None, None).await.unwrap().0;
+        let activities = list_activities(State::from(&pool), login, None, Some(user), None, None, None).await.unwrap().0;
         assert_eq!(1, activities.len());
         assert_eq!("Hiking", activities.get(0).unwrap().activity_type.name);
     }
@@ -1018,7 +1021,7 @@ mod tests {
         let challenge_id = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user_id = find_person_id_by_name(&pool, "user1").await;
 
-        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id), None, None).await.unwrap();
+        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id), None, None, None).await.unwrap();
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "user1", "member").await;
@@ -1032,7 +1035,7 @@ mod tests {
         let challenge_id = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user_id = find_person_id_by_name(&pool, "user1").await;
 
-        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id), None, None).await.unwrap();
+        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id), None, None, None).await.unwrap();
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "admin", "admin").await;
@@ -1046,7 +1049,7 @@ mod tests {
         let challenge_id = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user_id = find_person_id_by_name(&pool, "user1").await;
 
-        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id), None, None).await.unwrap();
+        let activities = Activity::query(&pool, Some(challenge_id), Some(user_id), None, None, None).await.unwrap();
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "user2", "member").await;

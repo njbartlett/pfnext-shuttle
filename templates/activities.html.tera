@@ -68,29 +68,45 @@
     </div> <!-- record ad hoc activity -->
 
     <!-- Query activities card -->
-    <div class="card border-success">
-        <h5 class="card-header">Query Activities</h5>
-        <div class="card-body">
+    <div class="card border-primary">
+        <h5 class="card-header border-primary d-flex align-items-center p-0">
+            <button type="button" class="btn btn-sm" data-bs-toggle="collapse" data-bs-target="#queryCollapse" aria-expanded="false" aria-controls="queryCollapse">
+                <i class="bi bi-caret-right-fill text-collapsed"></i>
+                <i class="bi bi-caret-down-fill text-expanded"></i>
+            </button>
+            Query Activities
+        </h5>
+        <div id="queryCollapse" class="card-body collapse">
             <form>
-                <div class="d-flex flex-wrap align-items-center">
-                    <div class="flex-grow-1 me-1">
+                <div class="flex-grow-1 d-flex flex-wrap align-items-center">
+                    <div class="flex-grow-1 d-flex flex-nowrap align-items-center">                        
                         <label for="activityQueryDateFrom">From:</label>
                         <input
                             id="activityQueryDateFrom"
                             type="date"
-                            class="form-control"
-                            {# :class="{'is-invalid': new_adhoc_activity_validation.date}" #}
+                            class="form-control flex-grow-1 m-1"
                             v-model="all_activities_query.from"
                             required>
                     </div>
-                    <div class="flex-grow-1 ms-1">
+                    <div class="flex-grow-1 d-flex flex-nowrap align-items-center">                        
                         <label for="activityQueryDateTo">To:</label>
                         <input
                             id="activityQueryDateTo"
                             type="date"
-                            class="form-control"
-                            {# :class="{'is-invalid': new_adhoc_activity_validation.date}" #}
+                            class="form-control flex-grow-1 m-1"
                             v-model="all_activities_query.to">
+                    </div>
+                    <div class="flex-grow-1 d-flex flex-nowrap align-items-center">
+                        <label for="activityQueryType">Type:</label>
+                        <select
+                                id="activityQueryType"
+                                class="form-control flex-grow-1 m-1"
+                                :class="{'is-invalid': new_adhoc_activity_validation.activity_type}"
+                                v-model="all_activities_query.type"
+                                required>
+                            <option value="-1">Any</option>
+                            <option v-for="activity_type in activity_types" :value="activity_type.id">${activity_type.name}</option>
+                        </select>
                     </div>
                 </div>
                 <div v-if="all_activities_query_validation.error_msg" class="text-danger">
@@ -151,7 +167,7 @@
                 </tbody>
             </table>
             <div v-else>
-                There are no activities to show for the period ${displayDate(all_activities_query.from)} to ${displayDate(all_activities_query.to)}.
+                There are no activities of type "${getActivityTypeName(all_activities_query.type)}" to show for the period ${displayDate(all_activities_query.from)} to ${displayDate(all_activities_query.to)}.
             </div>
         </div>
     </div> <!-- all activities card -->

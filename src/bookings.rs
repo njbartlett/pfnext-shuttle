@@ -9,10 +9,10 @@ use rocket::serde::Serialize;
 use rocket::{Route, State};
 use serde::Deserialize;
 use sqlx::postgres::{PgQueryResult, PgRow};
-use sqlx::{query, query_as, raw_sql, Error, FromRow, PgPool, QueryBuilder, Row};
+use sqlx::{query, query_as, query_scalar, raw_sql, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 use std::fmt::{Display, Formatter};
 
-use crate::common::parse_opt_date;
+use crate::common::{parse_opt_date, to_internal_server_err};
 use crate::config::{AppEnv, Config};
 use crate::notifications::send_email;
 use crate::transaction_log::append_log;
@@ -98,6 +98,75 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
     }
 }
 
+impl SessionBookingFull {
+    fn build_query<'a>(
+        session_id: Option<i64>,
+        person_id: Option<i64>,
+        from: Option<DateTime<FixedOffset>>,
+        to: Option<DateTime<FixedOffset>>
+    ) -> QueryBuilder<'a, Postgres> {
+        // Build the Query
+        let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, b.credits_used, b.booked_timestamp, \
+                    s.datetime AS session_datetime, s.duration_mins AS session_duration_mins, s.location AS session_location_id, l.name AS session_location_name, l.address AS session_location_address, l.url AS session_location_url, \
+                    s.session_type AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated, b.attended \
+                FROM booking as b \
+                JOIN person AS p ON b.person_id = p.id \
+                JOIN session AS s ON b.session_id = s.id \
+                JOIN session_type AS t ON s.session_type = t.id \
+                LEFT JOIN location AS l ON s.location = l.id ");
+
+        let mut where_op = String::from(" WHERE");
+        if let Some(person_id) = person_id {
+            qb.push(where_op + " b.person_id = ");
+            qb.push_bind(person_id);
+            where_op = String::from(" AND");
+        }
+
+        if let Some(session_id) = session_id {
+            qb.push(where_op + " b.session_id = ");
+            qb.push_bind(session_id);
+            where_op = String::from(" AND");
+        }
+        if let Some(from) = from {
+            qb.push(where_op + " s.datetime >= ");
+            qb.push_bind(from);
+            where_op = String::from(" AND");
+        }
+        if let Some(to) = to {
+            qb.push(where_op + " s.datetime <= ");
+            qb.push_bind(to);
+        }
+
+        qb.push(" ORDER BY session_datetime, person_name");
+
+        qb
+    }
+
+    async fn list(
+        pool: &PgPool,
+        session_id: Option<i64>,
+        person_id: Option<i64>,
+        from: Option<DateTime<FixedOffset>>,
+        to: Option<DateTime<FixedOffset>>
+    ) -> Result<Vec<SessionBookingFull>, sqlx::Error> {
+        Self::build_query(session_id, person_id, from, to)
+            .build_query_as()
+            .fetch_all(pool)
+            .await
+    }
+
+    async fn find(
+        pool: &PgPool,
+        session_id: i64,
+        person_id: i64
+    ) -> Result<Option<SessionBookingFull>, sqlx::Error> {
+        Self::build_query(Some(session_id), Some(person_id), None, None)
+            .build_query_as()
+            .fetch_optional(pool)
+            .await
+    }
+}
+
 #[get("/bookings?<session_id>&<person_id>&<from>&<to>")]
 async fn list_bookings(
     pool: &State<PgPool>,
@@ -132,45 +201,14 @@ async fn list_bookings(
         return Err(Custom(Status::Forbidden, "user is not allowed to view bookings for selected person and/or session".to_string()));
     }
 
-    // Build the Query
-    let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, b.credits_used, b.booked_timestamp, \
-                s.datetime AS session_datetime, s.duration_mins AS session_duration_mins, s.location AS session_location_id, l.name AS session_location_name, l.address AS session_location_address, l.url AS session_location_url, \
-                s.session_type AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated, b.attended \
-            FROM booking as b \
-            JOIN person AS p ON b.person_id = p.id \
-            JOIN session AS s ON b.session_id = s.id \
-            JOIN session_type AS t ON s.session_type = t.id \
-            LEFT JOIN location AS l ON s.location = l.id ");
+    let bookings = SessionBookingFull::list(
+        pool,
+        session_id,
+        person_id,
+        parse_opt_date(from)?,
+        parse_opt_date(to)?,
+    ).await.map_err(to_internal_server_err)?;
 
-    let mut where_op = String::from(" WHERE");
-    if let Some(person_id) = person_id {
-        qb.push(where_op + " b.person_id = ");
-        qb.push_bind(person_id);
-        where_op = String::from(" AND");
-    }
-
-    if let Some(session_id) = session_id {
-        qb.push(where_op + " b.session_id = ");
-        qb.push_bind(session_id);
-        where_op = String::from(" AND");
-    }
-    if let Some(from) = parse_opt_date(from)? {
-        qb.push(where_op + " s.datetime >= ");
-        qb.push_bind(from);
-        where_op = String::from(" AND");
-    }
-    if let Some(to) = parse_opt_date(to)? {
-        qb.push(where_op + " s.datetime <= ");
-        qb.push_bind(to);
-    }
-
-    qb.push(" ORDER BY session_datetime, person_name");
-
-    // Execute the Query
-    let bookings = qb.build_query_as()
-        .fetch_all(pool.inner())
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
     Ok(Json(bookings))
 }
 
@@ -545,28 +583,92 @@ async fn promote_from_waitlist(
 
 #[derive(Deserialize)]
 struct BookingUpdate {
-    attended: bool
+    attended: Option<bool>,
+    rating: Option<i16>
 }
 
-#[put("/bookings?<session_id>&<person_id>", data="<booking_update>")]
+#[patch("/bookings?<session_id>&<person_id>", data="<booking_update>")]
 async fn update_booking(
     pool: &State<PgPool>,
     login: LoginSession,
     person_id: i64, session_id: i64,
     booking_update: Json<BookingUpdate>
 ) -> Result<NoContent, Custom<String>> {
+    if let Some(attended) = booking_update.attended {
+        update_attendance(pool, &login, person_id, session_id, attended).await?;
+        if !attended {
+            delete_rating(pool, person_id, session_id).await?;
+        }
+    }
+
+    if let Some(rating) = booking_update.rating {
+        update_rating(pool, &login, person_id, session_id, rating).await?;
+    }
+
+    Ok(NoContent)
+}
+
+async fn update_attendance(
+    pool: &PgPool,
+    login: &LoginSession,
+    person_id: i64, session_id: i64,
+    attended: bool
+) -> Result<i64, Custom<String>> {
     if !user_is_admin_for_session(pool, &login, session_id).await? {
         return Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string()));
     }
-    query("UPDATE booking SET attended = $1 WHERE person_id = $2 AND session_id = $3 RETURNING person_id AS id")
-        .bind(booking_update.attended)
+    
+    query_scalar("UPDATE booking SET attended = $1 WHERE person_id = $2 AND session_id = $3 RETURNING person_id")
+        .bind(attended)
         .bind(person_id)
         .bind(session_id)
-        .fetch_optional(pool.inner())
+        .fetch_optional(pool)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))?;
-    Ok(NoContent)
+        .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))
+}
+
+async fn update_rating(
+    pool: &PgPool,
+    login: &LoginSession,
+    person_id: i64, session_id: i64,
+    rating: i16
+) -> Result<i64, Custom<String>> {
+    if login.uid != person_id {
+        return Err(Custom(Status::Forbidden, "invalid user".to_string()));
+    }
+
+    let session_booking = SessionBookingFull::find(pool, session_id, person_id)
+        .await
+        .map_err(to_internal_server_err)?
+        .ok_or_else(|| Custom(Status::NotFound, "not found".to_string()))?;
+    
+    if !session_booking.attended {
+        return Err(Custom(Status::Forbidden, "cannot rate a session that was not attended".to_string()));
+    }
+
+    query_scalar("UPDATE booking SET rating = $1 WHERE person_id = $2 AND session_id = $3 RETURNING person_id")
+        .bind(rating)
+        .bind(person_id)
+        .bind(session_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(to_internal_server_err)?
+        .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))
+}
+
+async fn delete_rating(
+    pool: &PgPool,
+    person_id: i64,
+    session_id: i64
+) -> Result<i64, Custom<String>> {
+    query_scalar("UPDATE booking SET rating = NULL WHERE person_id = $1 AND session_id = $2 RETURNING person_id")
+        .bind(person_id)
+        .bind(session_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(to_internal_server_err)?
+        .ok_or(Custom(Status::NotFound, format!("No boollking found with person_id={} and session_id={}.", person_id, session_id)))
 }
 
 #[derive(Serialize, FromRow)]
@@ -789,7 +891,7 @@ mod tests {
     use rocket::serde::json::Json;
     use rocket::response::status::Custom;
     use rocket::State;
-    use sqlx::{query, query_as, Executor, FromRow, PgPool, Row};
+    use sqlx::{query, query_as, query_scalar, Executor, FromRow, PgPool, Postgres, Row};
     use crate::loginsession::{LoginSession, Roles};
     use crate::mock_chrono::{set_timestamp_datetime, set_timestamp_rfc3339, Utc};
     use crate::notifications;
@@ -1399,7 +1501,7 @@ mod tests {
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
         let login = create_login(admin_id,"admin", "admin");
-        crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: true})).await.expect("booking update should succeed");
+        crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: Some(true), rating: None})).await.expect("booking update should succeed");
         assert_eq!(1, count_bookings_attended(&pool, true).await);
     }
 
@@ -1414,7 +1516,7 @@ mod tests {
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
         let login = create_login(member_id, "member", "member");
-        let result = crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: true})).await;
+        let result = crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: Some(true), rating: None})).await;
         assert_eq!(Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
         assert_eq!(0, count_bookings_attended(&pool, true).await);
     }
@@ -1430,7 +1532,7 @@ mod tests {
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
         let login = create_login(trainer_id, "trainer", "trainer");
-        crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: true})).await.expect("booking update should succeed");
+        crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: Some(true), rating: None})).await.expect("booking update should succeed");
         assert_eq!(1, count_bookings_attended(&pool, true).await);
     }
 
@@ -1446,9 +1548,42 @@ mod tests {
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
         let login = create_login(trainer2_id, "trainer2", "trainer");
-        let result = crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: true})).await;
+        let result = crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: Some(true), rating: None})).await;
         assert_eq!(Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
         assert_eq!(0, count_bookings_attended(&pool, true).await);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql"))]
+    async fn mark_rating_as_attendee_after_attended(pool: PgPool) {
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "trainer", 0).await;
+        let member_id = create_person(&pool, "Test User", "member@example.org", "member", 0).await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        create_booking(&pool, member_id, session_id, None).await;
+        assert_eq!(0, count_bookings_attended(&pool, true).await);
+
+        // Mark attended...
+        crate::bookings::update_booking(
+            State::from(&pool),
+            create_login(admin_id, "admin", "admin"),
+            member_id, session_id,
+            Json(BookingUpdate{attended: Some(true), rating: None})
+        ).await.expect("booking update should succeed");
+        assert_eq!(1, count_bookings_attended(&pool, true).await);
+
+        // Rate session as booking attendee
+        crate::bookings::update_booking(
+            State::from(&pool),
+            create_login(member_id, "member", "member"),
+            member_id, session_id,
+            Json(BookingUpdate{attended: None, rating: Some(3)})
+        ).await.expect("booking update should succeed");
+
+        assert_eq!(3, query_scalar::<Postgres, i16>("SELECT rating FROM booking WHERE session_id = $1 AND person_id = $2")
+            .bind(session_id)
+            .bind(member_id)
+            .fetch_one(&pool)
+            .await.unwrap());        
     }
 
     #[sqlx::test(fixtures("../schema.sql"))]

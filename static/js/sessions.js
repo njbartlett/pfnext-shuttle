@@ -293,6 +293,38 @@ function afterLogout() {
     user_data.value = null
 }
 
+function renderStarRating(rating) {
+    var roundedRating = Math.round(rating * 10) / 10
+    var html = "<span class=\"text-nowrap\" title=\"" + roundedRating + " / 5 stars\">"
+    for (var counter = 0; counter < 5; counter++) {
+        var remaining = rating - counter
+        if (remaining >= 0.8) {
+            html += "<i class=\"bi bi-star-fill\"></i>"
+        } else if (0.2 <= remaining && remaining < 0.8) {
+            html += "<i class=\"bi bi-star-half\"></i>"
+        } else if (remaining < 0.3) {
+            html += "<i class=\"bi bi-star\"></i>"
+        }
+    }
+    html += "</span>"
+    return html
+}
+
+function rateSession(session, rating) {
+    let params = new URLSearchParams()
+    params.append("person_id", loggedin.value.id)
+    params.append("session_id", session.id)
+    return httpCall("/bookings?" + params.toString(), "PATCH", {
+        rating: rating
+    }, res => {
+        return loadSessions()
+    })
+}
+
+// Enable bootstrap tooltips
+const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]')
+const tooltipList = [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl))
+
 let app = createApp({
     setup() {
         return {
@@ -303,10 +335,10 @@ let app = createApp({
             session_data, session_pagination, view_mode, payment_confirm,
             bookSession, cancelBooking, setSessionPage,
             daysOfWeek, sessionsByTime,
-            joinWaitlist, leaveWaitlist, waitlist_joined,
+            joinWaitlist, leaveWaitlist, waitlist_joined, rateSession,
 
             // Misc callbacks and utility functions
-            deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, resetPagination, displayDate, displayTime, displayDateCalendar, isPast, isAdmin, isTrainer, isUserTrainerOfSession, encodeLoginReturnUrl
+            deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, resetPagination, displayDate, displayTime, displayDateCalendar, isPast, isAdmin, isTrainer, isUserTrainerOfSession, encodeLoginReturnUrl, renderStarRating, displayPercent
         }
     }
 })

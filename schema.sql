@@ -78,8 +78,9 @@ CREATE TABLE IF NOT EXISTS booking (
     person_id bigint NOT NULL REFERENCES person ON DELETE CASCADE,
     session_id bigint NOT NULL REFERENCES session ON DELETE CASCADE,
     attended bool DEFAULT false NOT NULL,
-	credits_used int2 DEFAULT 0 NULL CHECK ((credits_used >= 0)),
+	credits_used int2 DEFAULT 0 NULL CHECK (credits_used >= 0),
     booked_timestamp timestamptz,
+    rating int2 NULL CHECK (rating >= 1),
     PRIMARY KEY (person_id, session_id)
 );
 

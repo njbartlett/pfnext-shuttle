@@ -54,3 +54,11 @@ tr.session-past > td {
     --bs-text-opacity: 1;
     color: rgba(var(--bs-secondary-rgb), var(--bs-text-opacity)) !important;
 }
+
+button[aria-expanded=false] .text-expanded {
+    display: none;
+}
+
+button[aria-expanded=true] .text-collapsed {
+    display: none;
+}
