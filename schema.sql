@@ -119,6 +119,7 @@ ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS challenge (
     id bigserial PRIMARY KEY,
     name text NOT NULL UNIQUE,
+    description text,
     start date NOT NULL,
     finish date NOT NULL,
     activity_type int NOT NULL REFERENCES activity_type,

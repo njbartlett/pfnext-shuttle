@@ -221,6 +221,15 @@ function toDateString(dt) {
     return String(dt.getFullYear()).padStart(4, '0') + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0')
 }
 
+function displayShortDate(date) {
+    return new Date(date).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+    })
+}
+
+
 function calculateMemberBarWidth(member_summaries, index) {
     var percentage = member_summaries[index].total_amount / member_summaries[0].total_amount
     return displayPercent(percentage, 0)
@@ -242,7 +251,7 @@ let app = createApp({
 
             // Functions
             submitActivity, tabSelected,
-            isAdmin, displayDate, displayNumber, displayPercent, calculateMemberBarWidth, isChallengeStarted, isSelectedUserId, formatNameAndEmail,
+            isAdmin, displayDate, displayShortDate, displayNumber, displayPercent, calculateMemberBarWidth, isChallengeStarted, isSelectedUserId, formatNameAndEmail,
             encodeLoginReturnUrl, onLogout
         }
     }

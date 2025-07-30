@@ -60,11 +60,14 @@
                 <div v-for="(challenge, challenge_index) in current_challenges" class="col">
                     <div class="card my-2 rounded-3 shadow-sm" :class="{'border-primary': new_activities[challenge_index]}">
                         <div class="card-header" :class="{'text-bg-primary': new_activities[challenge_index]}">
-                            <h5 >${challenge.name}</h5>
-                            ${displayDate(challenge.start)} to ${displayDate(challenge.finish)}
+                            <span class="fs-5">${challenge.name}:</span> ${displayShortDate(challenge.start)} to ${displayShortDate(challenge.finish)}
                         </div>
                         <ul class="list-group list-group-flush">
-                
+                            <!-- Description if present -->
+                            <li v-if="challenge.description" class="list-group-item">
+                                <span class="">${challenge.description}</span>
+                            </li>
+
                             <!-- Progress Bars -->
                             <li class="list-group-item">
                                 {% include "challenge_progress_bars" %}

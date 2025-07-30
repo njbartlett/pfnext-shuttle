@@ -55,6 +55,7 @@ impl ActivityType {
 struct ChallengeRecord {
     id: i64,
     name: String,
+    description: Option<String>,
     start: NaiveDate,
     finish: NaiveDate,
     activity_type: ActivityType,
@@ -70,7 +71,7 @@ impl ChallengeRecord {
         person_id: Option<i64>,
     ) -> QueryBuilder<'a, Postgres> {
         let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT \
-                c.id, c.name, c.start, c.finish, c.goal, c.individual_goal, \
+                c.id, c.name, c.description, c.start, c.finish, c.goal, c.individual_goal, \
                 a.id AS activity_type_id, a.name AS activity_type_name, a.units AS activity_type_units, a.step_size AS activity_type_step_size, \
                 (SELECT COALESCE(SUM(amount), 0) FROM activity WHERE challenge_id = c.id) AS activity_total_all"
         );
@@ -110,6 +111,7 @@ impl FromRow<'_, PgRow> for ChallengeRecord {
         Ok(ChallengeRecord {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
+            description: row.try_get("description")?,
             start: row.try_get("start")?,
             finish: row.try_get("finish")?,
             goal: row.try_get("goal")?,
@@ -157,6 +159,7 @@ impl MemberActivitySummary {
 struct ChallengeFull {
     id: i64,
     name: String,
+    description: Option<String>,
     start: NaiveDate,
     finish: NaiveDate,
     activity_type: ActivityType,
@@ -174,6 +177,7 @@ impl ChallengeFull {
         Self {
             id: record.id,
             name: record.name.clone(),
+            description: record.description.clone(),
             start: record.start.clone(),
             finish: record.finish.clone(),
             activity_type: record.activity_type.clone(),
@@ -279,6 +283,7 @@ impl FromRow<'_, PgRow> for Activity {
             Some(ChallengeRecord {
                 id: challenge_id,
                 name: r.try_get("challenge_name")?,
+                description: r.try_get("challenge_description")?,
                 start: r.try_get("challenge_start")?,
                 finish: r.try_get("challenge_finish")?,
                 activity_type: ActivityType {
@@ -316,7 +321,7 @@ impl Activity {
 
     const ACTIVITY_QUERY_BASE: &str = "SELECT a.id, a.person_id, a.date, a.amount,
             p.name AS person_name, p.email AS person_email,
-            c.id AS challenge_id, c.name AS challenge_name, c.start AS challenge_start, c.finish AS challenge_finish, c.goal AS challenge_goal, c.individual_goal AS challenge_individual_goal,
+            c.id AS challenge_id, c.name AS challenge_name, c.description AS challenge_description, c.start AS challenge_start, c.finish AS challenge_finish, c.goal AS challenge_goal, c.individual_goal AS challenge_individual_goal,
             ct.id AS challenge_activity_type_id, ct.name AS challenge_activity_type_name, ct.units AS challenge_activity_type_units, ct.step_size AS challenge_activity_type_step_size,
             t.id AS activity_type_id, t.name AS activity_type_name, t.units AS activity_type_units, t.step_size AS activity_type_step_size
         FROM activity AS a
