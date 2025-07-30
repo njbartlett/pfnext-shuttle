@@ -25,17 +25,17 @@
                             </div>
                         </th>
                         <th>
-                            <span>Booked At</span>
-                            <div class="btn-group ms-2">
-                                <button class="btn btn-sm" :class="{'btn-primary': sort_params.field == 'booked_timestamp' && sort_params.ascending}" @click="applySort('booked_timestamp', true)"><i class="bi bi-caret-down-fill"></i></button>
-                                <button class="btn btn-sm" :class="{'btn-primary': sort_params.field == 'booked_timestamp' && !sort_params.ascending}" @click="applySort('booked_timestamp', false)"><i class="bi bi-caret-up-fill"></i></button>
-                            </div>
-                        </th>
-                        <th>
                             <span>Attended?</span>
                             <div class="btn-group ms-2">
                                 <button class="btn btn-sm" :class="{'btn-primary': sort_params.field == 'attended' && sort_params.ascending}" @click="applySort('attended', true)"><i class="bi bi-caret-down-fill"></i></button>
                                 <button class="btn btn-sm" :class="{'btn-primary': sort_params.field == 'attended' && !sort_params.ascending}" @click="applySort('attended', false)"><i class="bi bi-caret-up-fill"></i></button>
+                            </div>
+                        </th>
+                        <th>
+                            <span>Booked At</span>
+                            <div class="btn-group ms-2">
+                                <button class="btn btn-sm" :class="{'btn-primary': sort_params.field == 'booked_timestamp' && sort_params.ascending}" @click="applySort('booked_timestamp', true)"><i class="bi bi-caret-down-fill"></i></button>
+                                <button class="btn btn-sm" :class="{'btn-primary': sort_params.field == 'booked_timestamp' && !sort_params.ascending}" @click="applySort('booked_timestamp', false)"><i class="bi bi-caret-up-fill"></i></button>
                             </div>
                         </th>
                         <th></th>
@@ -44,8 +44,8 @@
                 <tbody>
                     <tr v-for="booking in bookings" class="align-middle">
                         <td>${booking.person_name}</td>
-                        <td>${displayDateTime(booking.booked_timestamp)}</td>
                         <td><form><input type="checkbox" class="form-check larger align-middle" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
+                        <td>${displayDateTime(booking.booked_timestamp)}</td>
                         <td><button type="button" class="btn btn-outline-danger btn-sm float-end" @click="removeMember(session.id, booking.person_id)"><i class="bi bi-trash-fill"></i></button></td>
                     </tr>
                 </tbody>

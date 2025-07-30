@@ -1,5 +1,5 @@
 const GRACE_DAYS = 1
-const DEFAULT_LEADERBOARD_LIMIT = 10
+const DEFAULT_LEADERBOARD_LIMIT = 3
 
 const past_challenges = ref([])
 const current_challenges = ref([])
