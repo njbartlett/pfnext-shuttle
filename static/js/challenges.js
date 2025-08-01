@@ -209,8 +209,6 @@ async function submitActivity(challenge_index, challenge) {
         // Clear the new_activity field to get ready for next manual entry
         new_activities[challenge_index].amount = 0
     
-        // Load the newly created activity record
-        loadAllActivities(admin_controls.user)
         // Reload the challenge to get the new progress indicators
         reloadChallenge(challenge_index, challenge.id)
     })
