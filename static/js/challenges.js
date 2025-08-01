@@ -1,5 +1,5 @@
 const GRACE_DAYS = 1
-const DEFAULT_LEADERBOARD_LIMIT = 3
+const DEFAULT_LEADERBOARD_LIMIT = 5
 
 const past_challenges = ref([])
 const current_challenges = ref([])
@@ -37,7 +37,7 @@ async function loadChallenges(user, current_date) {
     var search_params = new URLSearchParams()
     search_params.append("person_id", user.id)
     search_params.append("date_now", current_date + "T00:00:00Z")
-    //search_params.append("leaderboard_limit", admin_controls.leaderboard_limit)
+    search_params.append("leaderboard_limit", DEFAULT_LEADERBOARD_LIMIT)
     httpGetJson("/challenges?" + search_params.toString(), displayChallenges)
 }
 
