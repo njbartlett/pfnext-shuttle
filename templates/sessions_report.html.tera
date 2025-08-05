@@ -53,7 +53,7 @@
                 <td>${session.location ? session.location.name : 'N/A'}</td>
                 <td>${session.trainer ? session.trainer.name : 'N/A'}</td>
                 <td>${session.attended_count} / ${session.booking_count}</td>
-                <td>${renderRating(session.avg_rating)}</td>
+                <td><span v-if="session.avg_rating != null">${renderRating(session.avg_rating)}</span></td>
             </tr>
         </tbody>
     </table>
