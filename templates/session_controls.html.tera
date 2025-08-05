@@ -58,9 +58,7 @@
 
     <!-- Admin Dropdown -->
     <div v-if="isAdmin()" class="btn-group dropup">
-        <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-            Admin
-        </button>
+        <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-gear-fill"></i></button>
         <ul class="dropdown-menu">
             <li><a class="dropdown-item" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a></li>
             <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#edit=' + session.id" class="dropdown-item"><i class="bi bi-pencil"></i> Edit</a></li>
