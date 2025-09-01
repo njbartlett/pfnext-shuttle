@@ -123,14 +123,22 @@
                     </div>
                     <img src="/img/dukes_pyramid.jpg">
                     <div class="card-body">
-                        <p class="card-text">We meet at the gate on the western end of Limes Avenue (near to Go Ape, the Trent Park Café and public toilets).</p>
-                        <p>Access by car is only possible from the Cockfosters Road entrance.</p>
+                        <div class="alert alert-danger">
+                            <p><i class="bi bi-exclamation-triangle-fill"></i> <strong>The main car park off Cockfosters Road is currently CLOSED!</strong></p>
+                            <p>We will likely meet at the North Car Park off Hadley Road (map links below). This may change so please check the notes on each session before travelling to the park.</p>
+                        </div>
+                        <p class="card-text"><s>We meet at the gate on the western end of Limes Avenue (near to Go Ape, the Trent Park Café and public toilets).</p>
+                        {# <p>Access by car is only possible from the Cockfosters Road entrance.</s></p> #}
                         <div class="dropdown text-end">
                             <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-geo-alt-fill"></i> Open in Maps</button>
                             <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="https://osm.org/go/euu9byxGB-?m=" target="_blank"><img src="/img/openstreetmap.svg" class="icon">&nbsp;Open Street Map</a></li>
+                                <li><a class="dropdown-item" href="https://maps.app.goo.gl/qtfQyh6p8jhd7jHe8" target="_blank"><i class="bi bi-google"></i>&nbsp;Google Maps</a></li>
+                                {# cockfoster road:
                                 <li><a class="dropdown-item" href="https://osm.org/go/euu9NZ_Mx-?m=" target="_blank"><img src="/img/openstreetmap.svg" class="icon">&nbsp;Open Street Map</a></li>
                                 <li><a class="dropdown-item" href="https://maps.app.goo.gl/cv16jQLxXbJkukHA6" target="_blank"><i class="bi bi-google"></i>&nbsp;Google Maps</a></li>
                                 <li><a class="dropdown-item" href="https://beta.maps.apple.com/?address=Cockfosters+Road%2C+Greater+London%2C+EN4+0PS%2C+England&auid=10388443129569111574&ll=51.6573088%2C-0.1375747&lsp=9902&q=Trent+Country+Park" target="_blank"><i class="bi bi-apple"></i>&nbsp;Apple Maps</a></li>
+                                #}
                             </ul>
                         </div>
                     </div>
