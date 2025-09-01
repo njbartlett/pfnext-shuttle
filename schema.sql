@@ -158,5 +158,6 @@ CREATE TABLE IF NOT EXISTS blobs (
     id text NOT NULL PRIMARY KEY,
     mime_type text NOT NULL,
     oid oid NOT NULL UNIQUE,
-    created timestamptz NOT NULL
+    created timestamptz NOT NULL,
+    size int8 NOT NULL
 );
