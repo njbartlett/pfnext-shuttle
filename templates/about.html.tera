@@ -127,7 +127,7 @@
                             <p><i class="bi bi-exclamation-triangle-fill"></i> <strong>The main car park off Cockfosters Road is currently CLOSED!</strong></p>
                             <p>We will likely meet at the North Car Park off Hadley Road (map links below). This may change so please check the notes on each session before travelling to the park.</p>
                         </div>
-                        <p class="card-text"><s>We meet at the gate on the western end of Limes Avenue (near to Go Ape, the Trent Park Café and public toilets).</p>
+                        <p class="card-text"><s>We meet at the gate on the western end of Limes Avenue (near to Go Ape, the Trent Park Café and public toilets).</s></p>
                         {# <p>Access by car is only possible from the Cockfosters Road entrance.</s></p> #}
                         <div class="dropdown text-end">
                             <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-geo-alt-fill"></i> Open in Maps</button>
