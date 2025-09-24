@@ -5,8 +5,8 @@ use rocket::serde::json::Json;
 use rocket::serde::Deserialize;
 use rocket::{Route, State};
 use serde::Serialize;
-use sqlx::postgres::{PgArguments, PgRow};
-use sqlx::{query, query_as, Arguments, Error, Execute, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::postgres::PgRow;
+use sqlx::{query, query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
 use crate::common::parse_opt_date;
 use crate::loginsession::LoginSession;
@@ -70,6 +70,7 @@ struct SessionFullRecord {
     waitlist_rank: Option<i64>,
     attended: bool,
     rating: Option<i16>,
+    comment: Option<String>,
     booking_count: i64,
     avg_rating: Option<f64>,
     count_rating_all: i64,
@@ -132,6 +133,7 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
             waitlist_rank: row.try_get("waitlist_rank").ok(),
             attended: row.try_get("attended").ok().unwrap_or(false),
             rating: row.try_get("rating").ok(),
+            comment: row.try_get("comment").ok(),
             booking_count: row.try_get("booking_count")?,
             avg_rating: row.try_get("avg_rating")?,
             count_rating_all, count_rating_5, count_rating_4, count_rating_3, count_rating_2, count_rating_1,
@@ -246,9 +248,7 @@ fn build_session_query(
         qb.push_bind(booking_person_id);
         qb.push(") THEN true ELSE false END AS attended");
 
-        qb.push(", (SELECT rating FROM booking WHERE booking.session_id = s.id AND booking.person_id = ");
-        qb.push_bind(booking_person_id);
-        qb.push(") AS rating");
+        qb.push(", bp.rating, bp.comment");
 
         qb.push(", (SELECT waitlist_rank FROM (SELECT ROW_NUMBER() OVER (ORDER BY w.id ASC) AS waitlist_rank, person_id, session_id FROM waitlist w WHERE w.session_id = s.id ORDER BY w.id ASC) AS waitlist_sub WHERE waitlist_sub.person_id = ");
         qb.push_bind(booking_person_id);
@@ -259,6 +259,12 @@ fn build_session_query(
         INNER JOIN session_type AS t ON s.session_type = t.id \
         LEFT JOIN location AS loc ON s.location = loc.id \
         LEFT JOIN person AS trainer ON s.trainer = trainer.id");
+
+    if let Some(booking_person_id) = booking_person_id {
+        qb.push(" LEFT JOIN LATERAL (SELECT b.rating, b.comment FROM booking AS b WHERE b.session_id = s.id AND b.person_id = ");
+        qb.push_bind(booking_person_id);
+        qb.push(") AS bp ON 1=1");
+    }
 
     let parsed_from = parse_opt_date(from)?;
     let parsed_to = parse_opt_date(to)?;
@@ -484,17 +490,17 @@ mod tests {
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/sessions.sql"))]
-    async fn session_ratings(pool: PgPool) {
+    async fn session_feedback(pool: PgPool) {
         let user1 = UserLoginRecord::load_by_email(&pool, "user1@example.com").await.unwrap().unwrap();
         let user2 = UserLoginRecord::load_by_email(&pool, "user2@example.com").await.unwrap().unwrap();
         let session_id: i64 = query_scalar("SELECT id FROM session")
             .fetch_one(&pool)
             .await.unwrap();
-        query("INSERT INTO booking (person_id, session_id, attended, rating) VALUES ($1, $2, true, 3) RETURNING session_id")
+        query("INSERT INTO booking (person_id, session_id, attended, rating, comment) VALUES ($1, $2, true, 3, 'not too bad') RETURNING session_id")
             .bind(user1.id).bind(session_id)
             .fetch_one(&pool)
             .await.unwrap();
-        query("INSERT INTO booking (person_id, session_id, attended, rating) VALUES ($1, $2, true, 4) RETURNING session_id")
+        query("INSERT INTO booking (person_id, session_id, attended, rating, comment) VALUES ($1, $2, true, 4, 'pretty good') RETURNING session_id")
             .bind(user2.id).bind(session_id)
             .fetch_one(&pool)
             .await.unwrap();
@@ -515,6 +521,8 @@ mod tests {
         assert_eq!(1, session.count_rating_3);
         assert_eq!(1, session.count_rating_4);
         assert_eq!(0, session.count_rating_5);
+        assert_eq!(Some(3), session.rating);
+        assert_eq!(Some("not too bad".to_string()), session.comment);
     }
 
     fn create_login(uid: i64, name: &str, role: &str) -> LoginSession {

@@ -58,6 +58,10 @@ url = "/attendance.html"
 title = "Create/Edit Session"
 url = "/edit_session.html"
 
+[feedback]
+title = "Session Feedback"
+url = "/feedback.html"
+
 [members]
 title = "Member Directory"
 url = "/members.html"

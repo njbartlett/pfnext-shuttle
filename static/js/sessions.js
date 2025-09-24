@@ -20,6 +20,11 @@ const session_pagination = ref({
 const view_mode = ref('cal')
 const payment_confirm = ref(null)
 const waitlist_joined = ref(null)
+const selected_session_feedback = ref({
+    session: null,
+    rating: null,
+    comment: null
+})
 
 // ADMIN ONLY DATA
 const deleting_session = ref({
@@ -293,30 +298,26 @@ function afterLogout() {
     user_data.value = null
 }
 
-function renderStarRating(rating) {
-    var roundedRating = Math.round(rating * 10) / 10
-    var html = "<span class=\"text-nowrap\" title=\"" + roundedRating + " / 5 stars\">"
-    for (var counter = 0; counter < 5; counter++) {
-        var remaining = rating - counter
-        if (remaining >= 0.8) {
-            html += "<i class=\"bi bi-star-fill\"></i>"
-        } else if (0.2 <= remaining && remaining < 0.8) {
-            html += "<i class=\"bi bi-star-half\"></i>"
-        } else if (remaining < 0.3) {
-            html += "<i class=\"bi bi-star\"></i>"
-        }
-    }
-    html += "</span>"
-    return html
+function openSessionFeedback(session) {
+    console.log("Opening feedback for session", session)
+    selected_session_feedback.value.session = session
+    selected_session_feedback.value.rating = session.rating
+    selected_session_feedback.value.comment = session.comment
+    feedbackModal.show()
 }
 
-function rateSession(session, rating) {
+function saveSessionFeedback() {
     let params = new URLSearchParams()
     params.append("person_id", loggedin.value.id)
-    params.append("session_id", session.id)
-    return httpCall("/bookings?" + params.toString(), "PATCH", {
-        rating: rating
-    }, res => {
+    params.append("session_id", selected_session_feedback.value.session.id)
+    let data = {
+        feedback: {
+            rating: parseInt(selected_session_feedback.value.rating),
+            comment: selected_session_feedback.value.comment ?? ""
+        }
+    }
+    return httpCall("/bookings?" + params.toString(), "PATCH", data, _ => {
+        feedbackModal.hide()
         return loadSessions()
     })
 }
@@ -335,7 +336,7 @@ let app = createApp({
             session_data, session_pagination, view_mode, payment_confirm,
             bookSession, cancelBooking, setSessionPage,
             daysOfWeek, sessionsByTime,
-            joinWaitlist, leaveWaitlist, waitlist_joined, rateSession,
+            joinWaitlist, leaveWaitlist, waitlist_joined, openSessionFeedback, saveSessionFeedback, selected_session_feedback,
 
             // Misc callbacks and utility functions
             deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, resetPagination, displayDate, displayTime, displayDateCalendar, isPast, isAdmin, isTrainer, isUserTrainerOfSession, encodeLoginReturnUrl, renderStarRating, displayPercent
@@ -374,3 +375,9 @@ watch(view_mode, (new_value) => {
 });
 
 loadSessions()
+
+// Create JavaScript Modals
+const feedbackModal = new bootstrap.Modal(document.getElementById('feedbackModal'), {
+    focus: true,
+    keyboard: true
+})

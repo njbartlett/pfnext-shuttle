@@ -250,4 +250,21 @@ function sortByField(arr, field, ascending = true) {
     });
 }
 
+function renderStarRating(rating) {
+    var roundedRating = Math.round(rating * 10) / 10
+    var html = "<span class=\"text-nowrap\" title=\"" + roundedRating + " / 5 stars\">"
+    for (var counter = 0; counter < 5; counter++) {
+        var remaining = rating - counter
+        if (remaining >= 0.8) {
+            html += "<i class=\"bi bi-star-fill\"></i>"
+        } else if (0.2 <= remaining && remaining < 0.8) {
+            html += "<i class=\"bi bi-star-half\"></i>"
+        } else if (remaining < 0.3) {
+            html += "<i class=\"bi bi-star\"></i>"
+        }
+    }
+    html += "</span>"
+    return html
+}
+
 // END library.js

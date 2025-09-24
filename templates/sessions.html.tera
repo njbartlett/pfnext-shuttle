@@ -176,10 +176,10 @@
                     </div>
                 </div>
             </div>
-        </div> <!-- use credits confirm dialog -->
+        </div> <!-- end use credits confirm dialog -->
 
         <!-- Join waitlist confirm dialog -->
-        <div class="modal fade" id="joinWaitlistConfirmDialog" tabindex="-1" aria-labelledby="joinWaitlistConfirmLabel">
+        <div class="modal fade" id="joinWaitlistConfirmDialog" tabindex="-1" aria-labelledby="joinWaitlistConfirmLabel" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">
                     <div class="modal-header bg-warning text-bg-warning">
@@ -201,8 +201,47 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </div> <!-- computed content-->
+        </div> <!-- end join waitlist confirm dialog -->
+
+        <!-- Session feedback dialog -->
+        <div class="modal fade" tabindex="-1" id="feedbackModal" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header bg-primary">
+                        <h5 class="modal-title">Your Feedback</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p v-if="selected_session_feedback.session">
+                            Please provide your feedback for ${selected_session_feedback.session.session_type.name} session
+                            <span v-if="selected_session_feedback.session.trainer">led by ${selected_session_feedback.session.trainer.name}</span>
+                            on ${displayDate(selected_session_feedback.session.datetime)} at ${displayTime(selected_session_feedback.session.datetime)}.
+                        </p>
+                        <form>
+                            <label for="sessionRating" class="form-label">Rating:</label>
+                            <select id="sessionRating" class="form-control" v-model="selected_session_feedback.rating">
+                                <option value="5">★★★★★ 😁</button></option>
+                                <option value="4">★★★★ 😀</button></option>
+                                <option value="3">★★★ 😐</button></option>
+                                <option value="2">★★ 🙁</button></option>
+                                <option value="1">★ 😥</button></option>
+                            </select>
+                            <label for="sessionFeedbackComment" class="form-label">Comments:</label>
+                            <textarea id="sessionFeedbackComment" class="form-control" rows="5" v-model="selected_session_feedback.comment"></textarea>
+                        </form>
+                        <div class="alert alert-warning mt-2">
+                            <i class="bi bi-exclamation-circle"></i>&nbsp;Ratings and comments can be viewed anonymously by the session trainer and by admins. If you would like your name to be known, sign your comment.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" @click="saveSessionFeedback()">Save changes</button>
+                    </div>
+                </div>
+            </div>
+        </div> <!-- End session feedback dialog -->
+
+    </div> <!-- end computed content-->
 
 </div> <!-- Main Container-->
 

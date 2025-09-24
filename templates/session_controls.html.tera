@@ -3,29 +3,16 @@
 
     <!-- Member Booked -->
     <span v-if="session.booked" class="me-1">                        
-        <!-- Session in past, display attendance status -->
+        <!-- Session in past: display attendance status and feedback -->
         <span v-if="isPast(session.datetime)">
             <span v-if="session.attended" class="text-success text-align-middle">
+                <!-- Attended marker -->
                 <i class="bi bi-check2-circle">&nbsp;Attended</i>
                 &nbsp;
-                <span class="dropdown">
-                    <button class="btn btn-sm btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <span v-if="session.rating != null" title="Amend Rating">
-                            ${session.rating} <i class="bi bi-star-fill"></i>
-                        </span>
-                        <span v-else title="Rate Session">
-                            <i class="bi bi-star"></i>
-                        </span>
-                    </button>
-                    <ul class="dropdown-menu">
-                        <li><button class="dropdown-item" :class="{'active': session.rating == 5}" @click.prevent="rateSession(session, 5)"><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i> 😁</button></li>
-                        <li><button class="dropdown-item" :class="{'active': session.rating == 4}" @click.prevent="rateSession(session, 4)"><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star"></i> 😀</button></li>
-                        <li><button class="dropdown-item" :class="{'active': session.rating == 3}" @click.prevent="rateSession(session, 3)"><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star"></i><i class="bi bi-star"></i> 😐</button></li>
-                        <li><button class="dropdown-item" :class="{'active': session.rating == 2}" @click.prevent="rateSession(session, 2)"><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star"></i><i class="bi bi-star"></i><i class="bi bi-star"></i> 🙁</button></li>
-                        <li><button class="dropdown-item" :class="{'active': session.rating == 1}" @click.prevent="rateSession(session, 1)"><i class="bi bi-star-fill"></i><i class="bi bi-star"></i><i class="bi bi-star"></i><i class="bi bi-star"></i><i class="bi bi-star"></i> 😥</button></li>
-                    </ul>
-                </span>
+                <!-- Session feedback button -->
+                <button class="btn btn-sm btn-outline-primary" type="button" @click="openSessionFeedback(session)"><i class="bi bi-chat-quote"></i></button>
             </span>
+            <!-- Not-attended marker -->
             <span v-else class="text-danger"><i class="bi bi-x-circle">&nbsp;Didn't Attend</i></span>
         </span>
         <!-- Session in future, show booked and allow cancellation -->
@@ -61,6 +48,7 @@
         <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-gear-fill"></i></button>
         <ul class="dropdown-menu">
             <li><a class="dropdown-item" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a></li>
+            <li><a class="dropdown-item" :href="'feedback.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-chat-text"></i> Feedback</a></li>
             <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#edit=' + session.id" class="dropdown-item"><i class="bi bi-pencil"></i> Edit</a></li>
             <li><a :href="'edit_session.html?return=' + encodeLoginReturnUrl() + '#copy=' + session.id" class="dropdown-item"><i class="bi bi-copy"></i> Copy</a></li>
             <li><button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#deleteConfirmDialog" @click="onClickDeleteSession(session)"><i class="bi bi-trash"></i> Delete</button></li>

@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS booking (
 	credits_used int2 DEFAULT 0 NULL CHECK (credits_used >= 0),
     booked_timestamp timestamptz,
     rating int2 NULL CHECK (rating >= 1),
+    comment text NULL,
     PRIMARY KEY (person_id, session_id)
 );
 
