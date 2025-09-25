@@ -229,9 +229,10 @@
                             <label for="sessionFeedbackComment" class="form-label">Comments:</label>
                             <textarea id="sessionFeedbackComment" class="form-control" rows="5" v-model="selected_session_feedback.comment"></textarea>
                         </form>
-                        <div class="alert alert-warning mt-2">
-                            <i class="bi bi-exclamation-circle"></i>&nbsp;Ratings and comments can be viewed anonymously by the session trainer and by admins. If you would like your name to be known, sign your comment.
+                        <div class="alert alert-secondary my-2">
+                            <i class="bi bi-info-circle"></i>&nbsp;Ratings and comments can be viewed anonymously by the session trainer and by admins. If you would like your name to be known, sign your comment.
                         </div>
+                        <div v-if="selected_session_feedback.error" class="alert alert-danger my-2"><i class="bi bi-exclamation-triangle-fill"></i> ${selected_session_feedback.error}</div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>

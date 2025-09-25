@@ -23,7 +23,8 @@ const waitlist_joined = ref(null)
 const selected_session_feedback = ref({
     session: null,
     rating: null,
-    comment: null
+    comment: null,
+    error: null
 })
 
 // ADMIN ONLY DATA
@@ -303,6 +304,7 @@ function openSessionFeedback(session) {
     selected_session_feedback.value.session = session
     selected_session_feedback.value.rating = session.rating
     selected_session_feedback.value.comment = session.comment
+    selected_session_feedback.value.error = null
     feedbackModal.show()
 }
 
@@ -316,10 +318,25 @@ function saveSessionFeedback() {
             comment: selected_session_feedback.value.comment ?? ""
         }
     }
-    return httpCall("/bookings?" + params.toString(), "PATCH", data, _ => {
+
+    let request = {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    }
+    return fetch(SERVER_URL + '/bookings?' + params.toString(), request).then(res => {
+        if (!res.ok) throw res
         feedbackModal.hide()
         return loadSessions()
+    }).catch(err => {
+        err.text().then(msg => {
+            selected_session_feedback.value.error = msg
+        })
     })
+
 }
 
 // Enable bootstrap tooltips

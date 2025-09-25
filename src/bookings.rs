@@ -10,6 +10,7 @@ use rocket::{Route, State};
 use serde::Deserialize;
 use sqlx::postgres::{PgQueryResult, PgRow};
 use sqlx::{query, query_as, query_scalar, raw_sql, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use unicode_segmentation::UnicodeSegmentation;
 use std::fmt::{Display, Formatter};
 
 use crate::common::{parse_opt_date, to_internal_server_err};
@@ -27,6 +28,8 @@ use chrono::Utc;
 const ROLE_FULL_MEMBER: &str = "member";
 const ROLE_TRAINER: &str = "trainer";
 const ROLE_LIMITED_MEMBER: &str = "limited-member";
+
+const COMMENT_MAX_LENGTH: usize = 1000;
 
 pub fn routes() -> Vec<Route> {
     routes![
@@ -665,6 +668,13 @@ async fn update_feedback(
 ) -> Result<i64, Custom<String>> {
     if login.uid != person_id {
         return Err(Custom(Status::Forbidden, "invalid user".to_string()));
+    }
+
+    let comment_length = feedback.comment.as_ref()
+        .map(|s| s.graphemes(true).count())
+        .unwrap_or(0);
+    if comment_length > COMMENT_MAX_LENGTH {
+        return Err(Custom(Status::UnprocessableEntity, format!("comment length {comment_length} exceeds maximum length of {COMMENT_MAX_LENGTH} characters")));
     }
 
     let session_booking = SessionBookingFull::find(pool, session_id, person_id)
