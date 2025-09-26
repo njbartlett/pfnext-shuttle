@@ -676,6 +676,10 @@ async fn update_feedback(
     if comment_length > COMMENT_MAX_LENGTH {
         return Err(Custom(Status::UnprocessableEntity, format!("comment length {comment_length} exceeds maximum length of {COMMENT_MAX_LENGTH} characters")));
     }
+    let comment: &Option<String> = match comment_length {
+        0 => &None,
+        _ => &feedback.comment
+    };
 
     let session_booking = SessionBookingFull::find(pool, session_id, person_id)
         .await
@@ -688,7 +692,7 @@ async fn update_feedback(
 
     query_scalar("UPDATE booking SET rating = $1, comment = $2 WHERE person_id = $3 AND session_id = $4 RETURNING person_id")
         .bind(&feedback.rating)
-        .bind(&feedback.comment)
+        .bind(comment)
         .bind(person_id)
         .bind(session_id)
         .fetch_optional(pool)

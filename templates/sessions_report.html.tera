@@ -52,8 +52,8 @@
                 <td>${session.session_type.name}</td>
                 <td>${session.location ? session.location.name : 'N/A'}</td>
                 <td>${session.trainer ? session.trainer.name : 'N/A'}</td>
-                <td>${session.attended_count} / ${session.booking_count}</td>
-                <td><span v-if="session.avg_rating != null">${renderRating(session.avg_rating)}</span></td>
+                <td><a :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()">${session.attended_count} / ${session.booking_count}</a></td>
+                <td><span v-if="session.avg_rating != null"><a :href="'feedback.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()">${renderRating(session.avg_rating)}</a></span></td>
             </tr>
         </tbody>
     </table>
