@@ -26,6 +26,7 @@ const selected_session_feedback = ref({
     comment: null,
     error: null
 })
+const timer = ref(new Date())
 
 // ADMIN ONLY DATA
 const deleting_session = ref({
@@ -196,9 +197,6 @@ function renderWeekOffset(offset) {
 
 
     return displayDateRange(start, end)
-    // } else {
-    //     return "+" + offset + " Weeks"
-    // }
 }
 
 function displayDateCalendar(date, length) {
@@ -336,7 +334,23 @@ function saveSessionFeedback() {
             selected_session_feedback.value.error = msg
         })
     })
+}
 
+function isPastByTimer(datetime, timer) {
+    let target = new Date(datetime)
+    return target < timer
+}
+
+function isSoon(datetime, minutes, now) {
+    let target = new Date(datetime)
+    let diff_mins = (target - now) / (1000 * 60)
+    return diff_mins >=0 && diff_mins <= minutes
+}
+
+function calculateTimeLeft(datetime, now) {
+    let target = new Date(datetime)
+    let diff_millis = target - now
+    return formatDuration(diff_millis)
 }
 
 // Enable bootstrap tooltips
@@ -356,12 +370,20 @@ let app = createApp({
             joinWaitlist, leaveWaitlist, waitlist_joined, openSessionFeedback, saveSessionFeedback, selected_session_feedback,
 
             // Misc callbacks and utility functions
-            deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, resetPagination, displayDate, displayTime, displayDateCalendar, isPast, isAdmin, isTrainer, isUserTrainerOfSession, encodeLoginReturnUrl, renderStarRating, displayPercent
+            deleting_session, onClickDeleteSession, deleteSession, onLogout, renderWeekOffset, scrollPaginationBackwards, scrollPaginationForwards, resetPagination, displayDate, displayTime, displayDateCalendar, isAdmin, isTrainer, isUserTrainerOfSession, encodeLoginReturnUrl, renderStarRating, displayPercent,
+            isPast, isPastByTimer, isSoon, timer, calculateTimeLeft
         }
     }
 })
 app.config.compilerOptions.delimiters = ['${', '}']
 app.mount('#app')
+let interval = setInterval(() => {
+    console.log("Updating timer")
+    timer.value = new Date()
+}, 1000)
+app.onUnmount(() => {
+    clearInterval(interval)
+})
 
 loadUser()
 

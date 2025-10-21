@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS session (
 	trainer int8 NULL REFERENCES person,
 	max_booking_count int8 NULL,
 	notes text NULL,
-	cost int2 DEFAULT 0 NOT NULL CHECK ((cost >= 0))
+	cost int2 DEFAULT 0 NOT NULL CHECK ((cost >= 0)),
+    booking_deadline_mins int8 DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS booking (

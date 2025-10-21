@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use rocket::http::Status;
 use rocket::response::status::{Created, Custom, NoContent};
 use rocket::serde::json::Json;
@@ -82,7 +82,9 @@ struct SessionFullRecord {
     max_booking_count: Option<i64>,
     attended_count: Option<i64>,
     notes: Option<String>,
-    cost: i16
+    cost: i16,
+    booking_deadline_duration_mins: i64,
+    booking_deadline: DateTime<Utc>
 }
 
 impl FromRow<'_, PgRow> for SessionFullRecord {
@@ -116,9 +118,14 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
         let count_rating_2 = row.try_get::<i64, &str>("count_rating_2")?;
         let count_rating_1 = row.try_get::<i64, &str>("count_rating_1")?;
         let count_rating_all = count_rating_1 + count_rating_2 + count_rating_3 + count_rating_4 + count_rating_5;
+
+        let booking_deadline_duration_mins = row.try_get("booking_deadline_mins")?;
+        let datetime = row.try_get("datetime")?;
+        let booking_deadline = datetime - Duration::minutes(booking_deadline_duration_mins);
+
         Ok(SessionFullRecord {
             id: session_id,
-            datetime: row.try_get("datetime")?,
+            datetime,
             duration_mins: row.try_get("duration_mins")?,
             session_type: SessionType{
                 id: row.try_get("session_type_id")?,
@@ -141,6 +148,8 @@ impl FromRow<'_, PgRow> for SessionFullRecord {
             attended_count: row.try_get("attended_count").ok(),
             notes: row.try_get("notes").ok(),
             cost: row.try_get("cost")?,
+            booking_deadline_duration_mins,
+            booking_deadline
         })
     }
 }
@@ -154,7 +163,8 @@ struct NewSession {
     trainer_id: Option<i64>,
     max_bookings: Option<i64>,
     notes: Option<String>,
-    cost: i16
+    cost: i16,
+    booking_deadline_mins: i64
 }
 
 impl NewSession {
@@ -223,7 +233,7 @@ fn build_session_query(
     show_attended: bool,
     qb: &mut QueryBuilder<Postgres>
 ) -> Result<(), Custom<String>> {
-    qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, s.cost,
+    qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, s.cost, s.booking_deadline_mins,
         t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated,
         loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, loc.url AS location_url,
         trainer.id AS trainer_id, trainer.name AS trainer_name, trainer.email AS trainer_email, trainer.url AS trainer_url,
@@ -308,7 +318,7 @@ async fn create_session(
         .await
         .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
 
-    let id_row = query("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id")
+    let id_row = query("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost, booking_deadline_mins) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id")
         .bind(&new_session.datetime)
         .bind(&new_session.duration_mins)
         .bind(&new_session.session_type_id)
@@ -317,6 +327,7 @@ async fn create_session(
         .bind(&new_session.max_bookings)
         .bind(&new_session.notes)
         .bind(&new_session.cost)
+        .bind(&new_session.booking_deadline_mins)
         .fetch_optional(pool.inner())
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
@@ -380,6 +391,9 @@ async fn update_session(
     qb.push(", cost = ");
     qb.push_bind(new_session.cost);
 
+    qb.push(", booking_deadline_mins = ");
+    qb.push_bind(new_session.booking_deadline_mins);
+
     qb.push(", notes = ");
     qb.push_bind(&new_session.notes);
 
@@ -437,7 +451,7 @@ async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> R
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Days, Utc};
+    use chrono::{Days, Duration, Utc};
     use rocket::State;
     use sqlx::{query, query_scalar, PgPool, Postgres};
     use crate::{loginsession::{LoginSession, Roles}, sessions::{list_sessions, SessionFullRecord}, users::UserLoginRecord};
@@ -523,6 +537,20 @@ mod tests {
         assert_eq!(0, session.count_rating_5);
         assert_eq!(Some(3), session.rating);
         assert_eq!(Some("not too bad".to_string()), session.comment);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql"))]
+    async fn session_with_booking_deadline(pool: PgPool) {
+        query_scalar::<Postgres, i64>("insert into session (datetime, duration_mins, session_type, booking_deadline_mins) values ('2025-01-01 00:00:00+0', 60, 1, 120) returning id")
+            .fetch_one(&pool)
+            .await.unwrap();
+        let sessions = list_sessions(State::from(&pool), None, None, None, None, false).await.unwrap();
+        assert_eq!(1, sessions.len());
+
+        let session = sessions.get(0).unwrap();
+        assert_eq!("2025-01-01 00:00:00 UTC", session.datetime.to_string());
+        assert_eq!(120, session.booking_deadline_duration_mins);
+        assert_eq!("2024-12-31 22:00:00 UTC", session.booking_deadline.to_string());
     }
 
     fn create_login(uid: i64, name: &str, role: &str) -> LoginSession {

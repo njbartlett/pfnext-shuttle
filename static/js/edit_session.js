@@ -9,7 +9,9 @@ const session_data = reactive({
     cost: null,
     max_bookings_enabled: false,
     max_bookings: null,
-    notes: null
+    notes: null,
+    booking_deadline_hours: 0,
+    booking_deadline_mins: 0
 })
 const session_data_validation = ref({
     id: null,
@@ -106,6 +108,8 @@ function copySessionFields(from_session, to_session) {
     to_session.max_bookings_enabled = from_session.max_booking_count !== null
     to_session.max_bookings = from_session.max_booking_count
     to_session.notes = from_session.notes
+    to_session.booking_deadline_hours = from_session.booking_deadline_duration_mins !== null ? Math.floor(from_session.booking_deadline_duration_mins / 60) : 0
+    to_session.booking_deadline_mins = from_session.booking_deadline_duration_mins !== null ? from_session.booking_deadline_duration_mins % 60 : 0
 }
 
 async function saveSession(session, createAnother) {
@@ -118,7 +122,8 @@ async function saveSession(session, createAnother) {
         trainer_id: session.trainer_id,
         cost: Number(session.cost),
         max_bookings: session.max_bookings_enabled ? session.max_bookings : null,
-        notes: session.notes
+        notes: session.notes,
+        booking_deadline_mins: Number(session.booking_deadline_hours) * 60 + Number(session.booking_deadline_mins)
     }
     let url = session.id ? "/sessions/" + session.id : "/sessions"
     httpCall(url, session.id ? "PUT" : "POST", request, res => {
@@ -193,6 +198,19 @@ function onChangeSessionType() {
     session_data.cost = 0
 }
 
+function calculateDeadline(date, time, hours, mins) {
+    let deadline = new Date(date + " " + time)
+    deadline.setHours(deadline.getHours() - hours)
+    deadline.setMinutes(deadline.getMinutes() - mins)
+    return deadline.toLocaleDateString('en-GB', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    })
+}
+
 watch(session_data, new_data => validateEditSession(new_data, session_data_validation.value))
 
 loadAdminData().then(loadSession)
@@ -203,7 +221,7 @@ let app = createApp({
             loggedin, http_err, outcome, page_return_path,
             session_data, session_data_validation, onChangeSessionType,
             admin_user_data, admin_trainer_list, admin_session_type_list, admin_location_list, suggested_session_times,
-            saveSession, isAdmin, onLogout, encodeLoginReturnUrl, goBack
+            saveSession, isAdmin, onLogout, encodeLoginReturnUrl, goBack, calculateDeadline
         }
     }
 })

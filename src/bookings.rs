@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Days, FixedOffset, NaiveTime, TimeZone};
+use chrono::{DateTime, Datelike, Days, Duration, FixedOffset, NaiveTime, TimeZone};
 use chrono_tz::Tz;
 use rocket::futures::stream::BoxStream;
 use rocket::futures::StreamExt;
@@ -12,6 +12,7 @@ use sqlx::postgres::{PgQueryResult, PgRow};
 use sqlx::{query, query_as, query_scalar, raw_sql, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 use unicode_segmentation::UnicodeSegmentation;
 use std::fmt::{Display, Formatter};
+use std::ops::Sub;
 
 use crate::common::{parse_opt_date, to_internal_server_err};
 use crate::config::{AppEnv, Config};
@@ -246,9 +247,16 @@ async fn create_booking(
         }
 
         // Non-admins can only book future sessions
-        if person_and_session.datetime.lt(&Utc::now()) {
+        let now = Utc::now();
+        if person_and_session.datetime.lt(&now) {
             info!("person id {} attempted to book session in past (session id {}, date {}); denied: missing admin role", login.uid, booking.session_id, person_and_session.datetime);
-            return Err(Custom(Status::Forbidden, "Cannot create booking in the past!".to_string()));
+            return Err(Custom(Status::Forbidden, "Cannot create booking in the past".to_string()));
+        }
+        // Non-admins cannot book after the booking deadline
+        let booking_deadline = person_and_session.datetime - Duration::minutes(person_and_session.booking_deadline_mins);
+        if booking_deadline.lt(&now) {
+            info!("person id {} attempted to book session id {} after booking deadline {}; denied: missing admin role", login.uid, booking.session_id, booking_deadline);
+            return Err(Custom(Status::Forbidden, "Cannot create booking after the booking deadline".to_string()));
         }
 
         let credits_to_use = booking.credits_used.unwrap_or(0);
@@ -358,6 +366,7 @@ struct PersonSessionBookingDetails {
     person_roles: Roles,
     person_credits: CreditsCost,
     datetime: DateTime<FixedOffset>,
+    booking_deadline_mins: i64,
     cost: i16,
     session_id: i64,
     session_type_name: String,
@@ -380,7 +389,7 @@ impl Display for PersonSessionBookingDetails {
 
 impl PersonSessionBookingDetails {
     async fn load(pool: &PgPool, person_id: i64, session_id: i64) -> Result<PersonSessionBookingDetails, Custom<String>> {
-        query_as("SELECT p.id AS person_id, p.name AS person_name, p.email AS person_email, p.roles AS person_roles, p.credits AS person_credits, s.id AS session_id, s.datetime, s.cost, st.name AS session_type_name, l.name AS session_location_name, s.max_booking_count,
+        query_as("SELECT p.id AS person_id, p.name AS person_name, p.email AS person_email, p.roles AS person_roles, p.credits AS person_credits, s.id AS session_id, s.datetime, s.booking_deadline_mins, s.cost, st.name AS session_type_name, l.name AS session_location_name, s.max_booking_count,
             (SELECT COUNT(*) FROM booking AS b WHERE b.session_id = $1) AS booking_count
             FROM person AS p, session as s
             JOIN session_type AS st ON s.session_type = st.id
@@ -929,8 +938,8 @@ async fn _promote_waitlist(
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Add;
-    use chrono::{DateTime, Days, FixedOffset, TimeDelta};
+    use std::ops::{Add, Sub};
+    use chrono::{DateTime, Days, Duration, FixedOffset, TimeDelta};
     use rocket::http::Status;
     use rocket::serde::json::Json;
     use rocket::response::status::Custom;
@@ -969,6 +978,10 @@ mod tests {
     }
 
     async fn create_session_max_bookings(pool: &PgPool, datetime: &DateTime<FixedOffset>, trainer_id: i64, session_type_name: &str, location_name: &str, max_bookings: Option<i64>) -> i64 {
+        create_session_with_max_bookings_and_deadline(pool, datetime, trainer_id, session_type_name, location_name, max_bookings, Duration::zero()).await
+    }
+
+    async fn create_session_with_max_bookings_and_deadline(pool: &PgPool, datetime: &DateTime<FixedOffset>, trainer_id: i64, session_type_name: &str, location_name: &str, max_bookings: Option<i64>, booking_deadline_duration: Duration) -> i64 {
         let session_type_id: IntRecord = query_as("select id from session_type where name = $1")
             .bind(session_type_name)
             .fetch_one(pool).await.unwrap();
@@ -977,8 +990,8 @@ mod tests {
             .bind(location_name)
             .fetch_one(pool).await.unwrap();
 
-        let session_id_record: BigintRecord = query_as("insert into session (datetime, duration_mins, session_type, location, trainer, cost, max_booking_count) \
-            VALUES ($1, 60, $2, $3, $4, 1, $5) \
+        let session_id_record: BigintRecord = query_as("insert into session (datetime, duration_mins, session_type, location, trainer, cost, max_booking_count, booking_deadline_mins) \
+            VALUES ($1, 60, $2, $3, $4, 1, $5, $6) \
             RETURNING id
         ")
             .bind(datetime)
@@ -986,6 +999,7 @@ mod tests {
             .bind(location_id.id)
             .bind(trainer_id)
             .bind(max_bookings)
+            .bind(booking_deadline_duration.num_minutes() as i64)
             .fetch_one(pool).await.unwrap();
 
         session_id_record.id
@@ -1055,7 +1069,7 @@ mod tests {
     async fn cancel_booking_admin(pool: PgPool) {
         pool.execute(include_str!("../schema.sql")).await.unwrap();
 
-        let session_time = Utc::now().fixed_offset().add(TimeDelta::days(1));
+        let session_time = Utc::now().fixed_offset()+ TimeDelta::days(1);
         let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
         let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "member,trainer", 0).await;
         let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
@@ -1228,6 +1242,60 @@ mod tests {
         assert_eq!(1, count_bookings(&pool).await);
 
         assert_eq!(vec![("member@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
+    }
+
+    #[sqlx::test]
+    async fn book_session_in_past(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
+        let session_time = Utc::now().fixed_offset() - TimeDelta::days(1);
+        let session_id = create_session(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park").await;
+        let booking = crate::bookings::SessionBooking {
+            person_id: member_id,
+            session_id,
+            credits_used: None
+        };
+
+        // Create booking as member: fails
+        let member_login = create_login(member_id, "member", "member");
+        assert_eq!(Custom(Status::Forbidden, "Cannot create booking in the past".to_string()), crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), member_login, Json(booking.clone())).await.unwrap_err());
+
+        // Create booking as admin: succeeds
+        let admin_login = create_login(admin_id, "admin", "admin");
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), admin_login, Json(booking)).await.unwrap();
+        assert_eq!(1, count_bookings(&pool).await);
+        assert_eq!(vec![("admin@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
+    }
+
+    #[sqlx::test]
+    async fn book_session_after_booking_deadline(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "Member User", "member@example.org", "member", 0).await;
+        let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
+        // Session time is 1 hour in the future but booking deadline is 2 hours before session time
+        let session_time = Utc::now().fixed_offset().add(TimeDelta::hours(1));
+        let booking_deadline_duration = Duration::hours(2);
+        let session_id = create_session_with_max_bookings_and_deadline(&pool, &session_time, trainer_id, "HIIT", "Oak Hill Park", None, booking_deadline_duration).await;
+        let booking = crate::bookings::SessionBooking {
+            person_id: member_id,
+            session_id,
+            credits_used: None
+        };
+
+        // Create booking as member: fails
+        let member_login = create_login(member_id, "member", "member");
+        assert_eq!(Custom(Status::Forbidden, "Cannot create booking after the booking deadline".to_string()), crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), member_login, Json(booking.clone())).await.unwrap_err());
+
+        // Create booking as admin: succeeds
+        let admin_login = create_login(admin_id, "admin", "admin");
+        crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), admin_login, Json(booking)).await.unwrap();
+        assert_eq!(1, count_bookings(&pool).await);
+        assert_eq!(vec![("admin@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=Member User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=0", session_time))], read_logged(&pool).await);
     }
 
     #[sqlx::test]

@@ -96,6 +96,17 @@
                         ${session_data_validation.location_id}
                     </div>
                 </div>
+                <div class="col">
+                    <label for="editSessionBookingDeadline" class="form-label">Booking Deadline</label>
+                    <div class="input-group flex-nowrap">
+                        <input id="editSessionBookingDeadlineHours" class="form-control no-spinner" v-model="session_data.booking_deadline_hours" type="number" min="0" required>
+                        <span class="input-group-text">h</span>
+                        <input id="editSessionBookingDeadlineMins" class="form-control no-spinner" v-model="session_data.booking_deadline_mins" type="number" min="0" max="59" step="5" required>
+                        <span class="input-group-text">m</span>
+                    </div>
+                    <div v-if="session_data.date && session_data.time" class="text-secondary"><i class="bi bi-info-circle"></i> Deadline to book is ${calculateDeadline(session_data.date, session_data.time, session_data.booking_deadline_hours, session_data.booking_deadline_mins)}</div>
+                </div>
+
             </div> <!-- END: trainer row -->
 
             <div class="mb-2"> <!-- session notes -->

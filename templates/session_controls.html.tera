@@ -1,10 +1,9 @@
 <!-- Only show controls for logged-in users -->
 <div v-if="loggedin" class="mt-2">
-
     <!-- Member Booked -->
     <span v-if="session.booked" class="me-1">                        
         <!-- Session in past: display attendance status and feedback -->
-        <span v-if="isPast(session.datetime)">
+        <span v-if="isPastByTimer(session.datetime, timer)">
             <span v-if="session.attended" class="text-success text-align-middle">
                 <!-- Attended marker -->
                 <i class="bi bi-check2-circle">&nbsp;Attended</i>
@@ -24,24 +23,33 @@
         </div>
     </span>
 
-    <!-- Member not booked, session is in future. For unbooked sessions in the past, there is nothing to display. -->
-    <span v-else v-if="!isPast(session.datetime)" class="me-1">
-        <!-- Max booking count reached -->
-        <span v-if="session.max_booking_count && session.booking_count >= session.max_booking_count">
-            <!-- User on waitlist -->
-            <div v-if="session.waitlist_rank" class="btn-group">
-                <button type="button" class="btn btn-outline-warning btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="bi bi-hourglass-split"></i>&nbsp;On Waitlist&nbsp;(${session.waitlist_rank})
-                </button>
-                <ul class="dropdown-menu">
-                    <li><a class="dropdown-item link-danger" href="#" @click.prevent="leaveWaitlist(session)"><i class="bi bi-x-circle"></i>&nbsp;Leave Waitlist</a></li>
-                </ul>
-            </div>
-            <!-- User not on waitlist -->
-            <button v-else type="button" class="btn btn-warning btn-sm" @click="joinWaitlist(session)">Join Waitlist</button>
+    <!-- Member not booked, session is in future. -->
+    <div v-else v-if="!isPastByTimer(session.datetime, timer)" class="me-1">
+        <!-- Although session is in the future, the booking deadline has passed so it cannot be booked -->
+        <span v-if="isPastByTimer(session.booking_deadline, timer)" class="text-danger"><i class="bi bi-sign-stop">&nbsp;Deadline Passed!</i></span>
+        <!-- The booking deadline has not passed yet, so allow booking -->
+        <span v-else>
+            <!-- Max booking count reached -->
+            <span v-if="session.max_booking_count && session.booking_count >= session.max_booking_count">
+                <!-- User on waitlist -->
+                <div v-if="session.waitlist_rank" class="btn-group">
+                    <button type="button" class="btn btn-outline-warning btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-hourglass-split"></i>&nbsp;On Waitlist&nbsp;(${session.waitlist_rank})
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item link-danger" href="#" @click.prevent="leaveWaitlist(session)"><i class="bi bi-x-circle"></i>&nbsp;Leave Waitlist</a></li>
+                    </ul>
+                </div>
+                <!-- User not on waitlist -->
+                <button v-else type="button" class="btn btn-warning btn-sm" @click="joinWaitlist(session)">Join Waitlist</button>
+            </span>
+            <button v-else type="button" class="btn btn-primary btn-sm" @click="bookSession(session)">
+                <span>Book</span><span v-if="isSoon(session.booking_deadline, 180, timer)">&nbsp;within ${calculateTimeLeft(session.booking_deadline, timer)}</span>
+            </button>
         </span>
-        <button v-else type="button" class="btn btn-primary btn-sm" @click="bookSession(session)">Book</button>
-    </span>
+    </div>
+
+    <!-- For unbooked sessions in the past, there is nothing to display. -->
 
     <!-- Admin Dropdown -->
     <div v-if="isAdmin()" class="btn-group dropup">
@@ -55,4 +63,5 @@
         </ul>
     </div>
     <a v-else v-if="isUserTrainerOfSession(session)" class="btn btn-outline-primary btn-sm" :href="'attendance.html?id=' + session.id + '&return=' + encodeLoginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a>
+
 </div>

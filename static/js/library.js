@@ -156,6 +156,25 @@ function formatNameAndEmail(name, email) {
     return name + ' <' + email + '>'
 }
 
+function formatDuration(ms) {
+    if (ms < 0) ms = -ms
+    const days = Math.floor(ms / 86400000)
+    const hours = Math.floor((ms % 86400000) / 3600000)
+    const mins = Math.floor((ms % 3600000) / 60000)
+    const secs = Math.floor((ms % 60000) / 1000)
+
+    if (days > 0) {
+        return `~ ${days}d ${hours}h`
+    }
+    if (hours > 0) {
+        return `${hours}h ${mins}m`
+    }
+    if (mins > 0) {
+        return `${mins}m ${secs}s`
+    }
+    return `${secs}s`
+}
+
 function findUserByEmail(email, all_users) {
     for (var user of all_users) {
         if (user.email === email) {
