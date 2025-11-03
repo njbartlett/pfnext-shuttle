@@ -114,6 +114,13 @@ impl<'r> FromRequest<'r> for LoginSession {
     type Error = AuthenticationError;
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        // Get the database pool from the request state
+        let pool: Option<&PgPool> = request.rocket().state();
+        if pool.is_none() {
+            return Self::set_outcome_error(AuthenticationError::MissingDatabase, request);
+        }
+        let pool = pool.unwrap();
+
         // Get the session cookie
         let sessionid: Option<String> = request.cookies()
             .get_private(SESSION_ID)
@@ -122,17 +129,11 @@ impl<'r> FromRequest<'r> for LoginSession {
         // No cookie in request header => browser has expired the session
         if sessionid.is_none() {
             info!("Session cookie not sent by client");
+            let _ = append_log(pool, &None, "UNAUTHORIZED", "Session cookie not sent by client").await;
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
         let sessionid = sessionid.unwrap();
         info!("Verifying login session for id {}", sessionid);
-
-        // Get the database pool from the request state
-        let pool: Option<&PgPool> = request.rocket().state();
-        if pool.is_none() {
-            return Self::set_outcome_error(AuthenticationError::MissingDatabase, request);
-        }
-        let pool = pool.unwrap();
 
         // Load the session record
         let load_result = LoginSession::load(&pool, &sessionid).await;
@@ -144,6 +145,7 @@ impl<'r> FromRequest<'r> for LoginSession {
         // No session record in db => we have expired the session
         if login_session.is_none() {
             info!("Session record not found in table");
+            let _ = append_log(pool, &None, "UNAUTHORIZED", "Session record not found in table").await;
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
 
@@ -327,7 +329,7 @@ async fn log_login(pool: &PgPool, email: &String, ipinfo: &Option<String>, succe
         true => "LOGIN",
         false => "FAILED LOGIN",
     };
-    let _ = append_log(pool, &None, event_type, &log_detail).await;
+let _ = append_log(pool, &None, event_type, &log_detail).await;
 }
 
 #[derive(Deserialize)]
