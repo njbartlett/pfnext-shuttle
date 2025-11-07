@@ -498,7 +498,8 @@ async fn login(
     cookie.set_same_site(SameSite::Strict);
     cookie.unset_domain();
     cookie.set_http_only(true);
-    cookie.set_expires(Expiration::Session);
+    let session_duration_secs = SESSION_DURATION.num_seconds();
+    cookie.set_max_age(Some(rocket::time::Duration::seconds(session_duration_secs)));
     cookies.add_private(cookie);
 
     Ok(Json(body))
@@ -778,7 +779,7 @@ mod tests {
         // Login
         let login1 = dispatch_login(&client, "user1@example.com", "password").await.unwrap();
         assert_eq!(count_session_rows(&pool).await, 1, "should be 1 session after login");
-        assert_eq!(None, login1.max_age_secs);
+        assert_eq!(Some(7*24*60*60), login1.max_age_secs);
         let session_after_first_login = LoginSession::load(&pool, &login1.sessionid).await.unwrap().unwrap();
 
         // Advance clock by 1 hour
@@ -813,7 +814,7 @@ mod tests {
         // Login
         let login1 = dispatch_login(&client, "user1@example.com", "password").await.unwrap();
         assert_eq!(count_session_rows(&pool).await, 1, "should be 1 session after login");
-        assert_eq!(None, login1.max_age_secs);
+        assert_eq!(Some(7*24*60*60), login1.max_age_secs);
 
         // Login again with existing cookie but wrong password => deletes session record
         let mut post = client.post(uri!(crate::loginsession::login))
