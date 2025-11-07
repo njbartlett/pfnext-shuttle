@@ -1,8 +1,8 @@
 const polls_data = ref([])
 const admin_controls = reactive({
-    all_members: false,
-    include_closed: false
+    all_members: false
 })
+const admin_all_members = ref([])
 
 function loadPollsWithVotes() {
     let params = new URLSearchParams()
@@ -14,9 +14,28 @@ function loadPollsWithVotes() {
     })
 }
 
-function submitVote(poll) {
+function adminSubmitVote(poll) {
+    poll.new_vote = poll.admin_new_vote
+    poll.admin_new_vote = null
+
+    let person = null
+    for (user of admin_all_members.value) {
+        if (formatNameAndEmail(user.name, user.email) === poll.admin_new_vote_person) {
+            person = user
+            break
+        }
+    }
+    if (person) {
+        poll.admin_new_vote_person = null
+        submitVote(person.id, poll)
+    } else {
+        alert(`Could not find user matching "${person_name_email}". Please select a valid user from the list.`)
+    }
+}
+
+function submitVote(person_id, poll) {
     const vote_body = {
-        person_id: loggedin.value.id,
+        person_id: person_id,
         poll_id: poll.poll.id,
         value: poll.new_vote
     }
@@ -62,10 +81,10 @@ let app = createApp({
         return {
             // Data
             loggedin, http_err,
-            polls_data, admin_controls,
+            polls_data, admin_controls, admin_all_members,
 
             // Functions
-            isAdmin, onLogout, encodeLoginReturnUrl, removeVote, submitVote, formatNameAndEmail, exportPollsCSV
+            isAdmin, onLogout, encodeLoginReturnUrl, removeVote, adminSubmitVote, submitVote, formatNameAndEmail, exportPollsCSV
         }
     }
 })
@@ -74,3 +93,7 @@ app.mount('#app')
 
 loadPollsWithVotes()
 watch(admin_controls, loadPollsWithVotes)
+
+loadAllUsers(users => {
+    admin_all_members.value = users
+})

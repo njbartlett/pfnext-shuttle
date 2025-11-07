@@ -36,13 +36,15 @@
                     </tr>
                 </thead>
 
-                <!-- All Votes -->
                 <tbody>
+                    <!-- All Votes -->
                     <tr v-for="vote in poll.votes">
                         <td><strong><i class="bi bi-check2-circle"></i>&nbsp;${vote.value}</strong></td>
                         <td v-if="admin_controls.all_members">${vote.person_name}</td>
                         <td><button type="button" class="btn btn-outline-danger btn-sm float-end" @click="removeVote(poll, vote)"><i class="bi bi-trash-fill"></i></button></td>
                     </tr>
+
+                    <!-- Show no votes message -->
                     <tr v-if="poll.votes.length == 0">
                         <td><em>No votes submitted yet.</em></td>
                     </tr>
@@ -52,7 +54,7 @@
                 <tbody v-if="!admin_controls.all_members">
                     <tr v-if="poll.votes.length < poll.poll.limit_per_person">
                         <td colspan="2">
-                            <form @submit.prevent="submitVote(poll)">
+                            <form @submit.prevent="submitVote(loggedin.id, poll)">
                                 <div class="input-group">
                                     <input type="text" class="form-control" v-model="poll.new_vote" :placeholder="'Enter your vote, max ' + poll.poll.limit_per_person + ' vote(s) per member'" required>
                                     <button class="btn btn-primary" type="submit" :disabled="!poll.new_vote">Submit Vote</button>
@@ -67,7 +69,18 @@
 
             </table>
         </div>
-        <div v-if="isAdmin() && admin_controls.all_members" class="card-footer bg-warning-subtle">
+        <div v-if="isAdmin()" class="card-footer bg-warning-subtle position-relative">
+            <div class="position-absolute top-0 end-0 text-warning"><i class="bi bi-lightning-fill" title="Admin Only"></i></div>
+            <form @submit.prevent="adminSubmitVote(poll)" class="mb-2">
+                <div class="input-group">
+                    <input type="search" class="form-control" id="selectMemberDataList" placeholder="Vote as member&hellip;" list="selectMemberOptions" v-model="poll.admin_new_vote_person">
+                    <datalist id="selectMemberOptions">
+                        <option v-for="user in admin_all_members" :value="formatNameAndEmail(user.name, user.email)"></option>
+                    </datalist>
+                    <input type="text" class="form-control" v-model="poll.admin_new_vote" :placeholder="'Enter your vote, max ' + poll.poll.limit_per_person + ' vote(s) per member'" required>
+                    <button class="btn btn-primary" type="submit" :disabled="!poll.admin_new_vote && !poll.admin_new_vote_person">Submit Vote</button>
+                </div>
+            </form>
             <button class="btn btn-outline-primary" type="button" @click="exportPollsCSV(poll)"><i class="bi bi-file-earmark-spreadsheet-fill"></i>&nbsp;Export Poll Data</button>
         </div>
     </div> <!-- End Poll Cards -->
