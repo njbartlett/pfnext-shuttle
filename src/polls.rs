@@ -25,6 +25,7 @@ impl Poll {
         pool: &PgPool
     ) -> Result<Vec<Self>, sqlx::Error> {
         let mut qb = QueryBuilder::new(Self::BASE_QUERY);
+        qb.push(" ORDER BY id ASC");
         qb.build_query_as()
             .fetch_all(pool)
             .await
@@ -37,6 +38,7 @@ impl Poll {
         let mut qb = QueryBuilder::new(Self::BASE_QUERY);
         qb.push(" WHERE id = ");
         qb.push_bind(poll_id);
+        qb.push(" ORDER BY id ASC");
         
         qb.build_query_as()
             .fetch_optional(pool)
@@ -107,6 +109,7 @@ impl Vote {
         WhereClause::init()
             .opt_append_to(&mut qb, "v.poll_id", whereclause::Operator::Equal, poll_id)
             .opt_append_to(&mut qb, "v.person_id", whereclause::Operator::Equal, person_id);
+        qb.push(" ORDER BY v.id ASC");
 
         qb.build_query_as()
             .fetch_all(pool)
