@@ -24,7 +24,7 @@
     
     <!-- Poll Cards -->
     <div v-cloak class="card border-primary mb-3" v-for="poll in polls_data" :id="'poll-' + poll.poll.id">
-        <h5 class="card-header text-bg-primary">${poll.poll.question}</h5>
+        <h5 class="card-header" :class="{'text-bg-primary': poll.poll.open}">${poll.poll.question}</h5>
         <div class="card-body">
             <p v-if="poll.poll.description">${poll.poll.description}</p>
             <table class="table table-sm table-borderless mb-0 vertical-align-middle">
@@ -53,7 +53,7 @@
                 <!-- Voting section, only when not viewing all members as admin -->
                 <tbody v-if="!admin_controls.all_members">
                     <tr v-if="poll.votes.length < poll.poll.limit_per_person">
-                        <td colspan="2">
+                        <td v-if="poll.poll.open" colspan="2">
                             <form @submit.prevent="submitVote(loggedin.id, poll)">
                                 <div class="input-group">
                                     <input type="text" class="form-control" v-model="poll.new_vote" :placeholder="'Enter your vote, max ' + poll.poll.limit_per_person + ' vote(s) per member'" required>
@@ -61,6 +61,7 @@
                                 </div>
                             </form>
                         </td>
+                        <td v-else><em>Voting is now closed for this poll.</em></td>
                     </tr>
                     <tr v-else>
                         <td><em>You have reached the maximum number of votes for this poll, thank you!</em></td>

@@ -30,7 +30,7 @@ const timer = ref(new Date())
 
 const polls_data = ref([])
 const unvoted_polls = computed(() => {
-    return polls_data.value.filter(poll => poll.votes.length == 0)
+    return polls_data.value.filter(poll => (poll.poll.open && poll.votes.length == 0))
 })
 
 // ADMIN ONLY DATA
