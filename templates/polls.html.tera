@@ -23,8 +23,10 @@
     </div>
     
     <!-- Poll Cards -->
-    <div v-cloak class="card border-primary mb-3" v-for="poll in polls_data" :id="'poll-' + poll.poll.id">
-        <h5 class="card-header" :class="{'text-bg-primary': poll.poll.open}">${poll.poll.question}</h5>
+    <div v-cloak class="card mb-3" :class="{'border-primary': poll.poll.open}" v-for="poll in polls_data" :id="'poll-' + poll.poll.id">
+        <h5 class="card-header" :class="{'text-bg-primary': poll.poll.open}">
+            <span v-if="!poll.poll.open">CLOSED:</span> ${poll.poll.question}
+        </h5>
         <div class="card-body">
             <p v-if="poll.poll.description">${poll.poll.description}</p>
             <table class="table table-sm table-borderless mb-0 vertical-align-middle">
@@ -41,7 +43,7 @@
                     <tr v-for="vote in poll.votes">
                         <td><strong><i class="bi bi-check2-circle"></i>&nbsp;${vote.value}</strong></td>
                         <td v-if="admin_controls.all_members">${vote.person_name}</td>
-                        <td><button type="button" class="btn btn-outline-danger btn-sm float-end" @click="removeVote(poll, vote)"><i class="bi bi-trash-fill"></i></button></td>
+                        <td><button type="button" :disabled="!poll.poll.open" class="btn btn-outline-danger btn-sm float-end" @click="removeVote(poll, vote)"><i class="bi bi-trash-fill"></i></button></td>
                     </tr>
 
                     <!-- Show no votes message -->
