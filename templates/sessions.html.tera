@@ -86,7 +86,7 @@
                     <td>{% include "session_controls" %}</td>
                 </tr>
                 <tr v-if="session.notes" class="border-bottom" :class="{'session-past': isPast(session.datetime)}">
-                    <td colspan="4">${session.notes}</td>
+                    <td colspan="4" v-html="session.notes"></td>
                 </tr>
             </tbody>
         </table> <!-- list view table -->
@@ -124,7 +124,7 @@
                                 <span v-else><i class="bi bi-person-arms-up"></i>&nbsp;${session.trainer.name}</span>
                             </div>
                             {% include "session_ratings" %}
-                            <div v-if="session.notes" class="text-wrap" style="max-width: 15rem;">${session.notes}</div>
+                            <div v-if="session.notes" class="text-wrap" style="max-width: 15rem;" v-html="session.notes"></div>
 
                             {% include "session_controls" %}
                         </div>
