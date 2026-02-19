@@ -61,6 +61,7 @@ struct ChallengeRecord {
     activity_type: ActivityType,
     goal: f32,
     individual_goal: Option<f32>,
+    daily_goal: Option<f32>,
     total_all: f32,
     total_for_person: f32
 }
@@ -71,7 +72,7 @@ impl ChallengeRecord {
         person_id: Option<i64>,
     ) -> QueryBuilder<'a, Postgres> {
         let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT \
-                c.id, c.name, c.description, c.start, c.finish, c.goal, c.individual_goal, \
+                c.id, c.name, c.description, c.start, c.finish, c.goal, c.individual_goal, c.daily_goal, \
                 a.id AS activity_type_id, a.name AS activity_type_name, a.units AS activity_type_units, a.step_size AS activity_type_step_size, \
                 (SELECT COALESCE(SUM(amount), 0) FROM activity WHERE challenge_id = c.id) AS activity_total_all"
         );
@@ -116,6 +117,7 @@ impl FromRow<'_, PgRow> for ChallengeRecord {
             finish: row.try_get("finish")?,
             goal: row.try_get("goal")?,
             individual_goal: row.try_get("individual_goal")?,
+            daily_goal: row.try_get("daily_goal")?,
             total_all: row.try_get("activity_total_all")?,
             total_for_person: row.try_get("activity_total_for_person").unwrap_or(0.0),
             activity_type: ActivityType {
@@ -294,6 +296,7 @@ impl FromRow<'_, PgRow> for Activity {
                 },
                 goal: r.try_get("challenge_goal")?,
                 individual_goal: r.try_get("challenge_individual_goal")?,
+                daily_goal: r.try_get("challenge_daily_goal")?,
                 total_all: 0.0, total_for_person: 0.0
             })
         } else {
@@ -321,7 +324,7 @@ impl Activity {
 
     const ACTIVITY_QUERY_BASE: &str = "SELECT a.id, a.person_id, a.date, a.amount,
             p.name AS person_name, p.email AS person_email,
-            c.id AS challenge_id, c.name AS challenge_name, c.description AS challenge_description, c.start AS challenge_start, c.finish AS challenge_finish, c.goal AS challenge_goal, c.individual_goal AS challenge_individual_goal,
+            c.id AS challenge_id, c.name AS challenge_name, c.description AS challenge_description, c.start AS challenge_start, c.finish AS challenge_finish, c.goal AS challenge_goal, c.individual_goal AS challenge_individual_goal, c.daily_goal AS challenge_daily_goal,
             ct.id AS challenge_activity_type_id, ct.name AS challenge_activity_type_name, ct.units AS challenge_activity_type_units, ct.step_size AS challenge_activity_type_step_size,
             t.id AS activity_type_id, t.name AS activity_type_name, t.units AS activity_type_units, t.step_size AS activity_type_step_size
         FROM activity AS a
@@ -555,7 +558,7 @@ mod tests {
             Some("2025-05-15".to_string()),
             None
         ).await.unwrap().0;
-        assert_eq!(3, challenges.len());
+        assert_eq!(4, challenges.len());
 
         assert_eq!("April 2025 Hikes", challenges[0].name);
         assert_eq!(2, challenges[0].member_summaries.len());
@@ -578,7 +581,7 @@ mod tests {
             Some("2025-04-15".to_string()),
             None
         ).await.unwrap().0;
-        assert_eq!(3, challenges.len());
+        assert_eq!(4, challenges.len());
 
         assert_eq!("April 2025 Hikes", challenges[0].name);
         assert_eq!(2, challenges[0].member_summaries.len());
@@ -601,7 +604,7 @@ mod tests {
             Some("2025-04-15".to_string()),
             None
         ).await.unwrap().0;
-        assert_eq!(3, challenges.len());
+        assert_eq!(4, challenges.len());
 
         assert_eq!("April 2025 Hikes", challenges[0].name);
         assert_eq!(2, challenges[0].member_summaries.len());
@@ -624,7 +627,7 @@ mod tests {
             Some("2025-04-15".to_string()),
             None
         ).await.unwrap().0;
-        assert_eq!(3, challenges.len());
+        assert_eq!(4, challenges.len());
 
         assert_eq!("April 2025 Hikes", challenges[0].name);
         assert_eq!(2, challenges[0].member_summaries.len());
@@ -649,7 +652,7 @@ mod tests {
             None,
             None
         ).await.unwrap().0;
-        assert_eq!(3, challenges.len());
+        assert_eq!(4, challenges.len());
 
         for c in challenges {
             assert_eq!(0, c.member_summaries.len());
@@ -668,7 +671,7 @@ mod tests {
             None,
             None
         ).await.unwrap().0;
-        assert_eq!(3, challenges.len());
+        assert_eq!(4, challenges.len());
         assert_eq!(2, challenges[0].member_summaries.len());
         assert_eq!(1, challenges[1].member_summaries.len());
         assert_eq!(0, challenges[2].member_summaries.len());
@@ -687,7 +690,7 @@ mod tests {
             None,
             Some(1)
         ).await.unwrap().0;
-        assert_eq!(3, challenges.len());
+        assert_eq!(4, challenges.len());
         assert_eq!(2, challenges[0].member_summaries.len());
 
         assert_eq!(Some("user2".to_string()), challenges[0].member_summaries[0].name);
@@ -717,7 +720,7 @@ mod tests {
             None,
             None
         ).await.unwrap().0;
-        assert_eq!(3, challenges.len());
+        assert_eq!(4, challenges.len());
 
         // No challenges expanded because in our configured timezone, none of them have started
         for c in challenges {
@@ -742,7 +745,7 @@ mod tests {
             None,
             None
         ).await.unwrap().0;
-        assert_eq!(3, challenges.len());
+        assert_eq!(4, challenges.len());
         // First challenge is expanded because it has started in our configured timezone
         assert_eq!(2, challenges[0].member_summaries.len());
         assert_eq!(0, challenges[1].member_summaries.len());
@@ -1003,9 +1006,9 @@ mod tests {
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "user1", "member").await;
-        assert_eq!(4, count_activities(&pool).await);
+        assert_eq!(7, count_activities(&pool).await);
         crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap();
-        assert_eq!(3, count_activities(&pool).await);
+        assert_eq!(6, count_activities(&pool).await);
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
@@ -1017,9 +1020,9 @@ mod tests {
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "admin", "admin").await;
-        assert_eq!(4, count_activities(&pool).await);
+        assert_eq!(7, count_activities(&pool).await);
         crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap();
-        assert_eq!(3, count_activities(&pool).await);
+        assert_eq!(6, count_activities(&pool).await);
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
@@ -1031,10 +1034,10 @@ mod tests {
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "user2", "member").await;
-        assert_eq!(4, count_activities(&pool).await);
+        assert_eq!(7, count_activities(&pool).await);
         let error = crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap_err();
         assert_eq!(Custom(Status::NotFound, "activity not found or user not allowed to delete".to_string()), error);
-        assert_eq!(4, count_activities(&pool).await);
+        assert_eq!(7, count_activities(&pool).await);
     }
 
 }
