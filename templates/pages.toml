@@ -27,7 +27,7 @@ nav = true
 
 [activities]
 title = "Activities"
-url = "activities.html"
+url = "/activities.html"
 nav = true
 
 [polls]
