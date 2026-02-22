@@ -1,15 +1,19 @@
+use std::cmp::Ordering;
+use std::collections::HashMap;
+
 use chrono::{NaiveDate, TimeZone};
 use chrono_tz::Tz;
 use futures::future::try_join_all;
 use rocket::http::Status;
+use rocket::http::ext::IntoCollection;
 use rocket::response::status::{Created, Custom, NoContent};
 use rocket::serde::json::Json;
 use rocket::{Route, State};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgRow;
-use sqlx::{query_as, query_scalar, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::{Error, FromRow, PgPool, Postgres, QueryBuilder, Row, query, query_as, query_scalar};
 
-use crate::common::parse_opt_naive_date;
+use crate::common::{parse_opt_naive_date, to_internal_server_err};
 use crate::config::Config;
 use crate::loginsession::LoginSession;
 use crate::whereclause::Operator::{Equal, GreaterThan, GreaterThanOrEqual, LessThanOrEqual};
@@ -59,7 +63,7 @@ struct ChallengeRecord {
     start: NaiveDate,
     finish: NaiveDate,
     activity_type: ActivityType,
-    goal: f32,
+    goal: Option<f32>,
     individual_goal: Option<f32>,
     daily_goal: Option<f32>,
     total_all: f32,
@@ -115,9 +119,9 @@ impl FromRow<'_, PgRow> for ChallengeRecord {
             description: row.try_get("description")?,
             start: row.try_get("start")?,
             finish: row.try_get("finish")?,
-            goal: row.try_get("goal")?,
-            individual_goal: row.try_get("individual_goal")?,
-            daily_goal: row.try_get("daily_goal")?,
+            goal: row.try_get("goal").ok(),
+            individual_goal: row.try_get("individual_goal").ok(),
+            daily_goal: row.try_get("daily_goal").ok(),
             total_all: row.try_get("activity_total_all")?,
             total_for_person: row.try_get("activity_total_for_person").unwrap_or(0.0),
             activity_type: ActivityType {
@@ -130,30 +134,150 @@ impl FromRow<'_, PgRow> for ChallengeRecord {
     }
 }
 
-
-#[derive(Serialize, Clone, FromRow, Debug)]
+#[derive(Serialize, FromRow, Clone, Debug)]
 struct MemberActivitySummary {
     id: Option<i64>,
     name: Option<String>,
-    total_amount: f32
+    total_amount: f32,
+    singular_units: String,
+    plural_units: String
 }
 
 impl MemberActivitySummary {
-    async fn query(pool: &PgPool, challenge_id: i64, limit: &Option<i32>) -> Result<Vec<MemberActivitySummary>, Error> {
-        let mut qb = QueryBuilder::new("SELECT p.id, p.name, SUM(a.amount) AS total_amount \
+    // TODO: support singular/plural units in activity type
+    async fn query_amount_totals<'r>(pool: &PgPool, challenge_id: i64, limit: &Option<i32>, total_all: f32, units: &str) -> Result<Vec<MemberActivitySummary>, Error> {
+        let mut sql = "SELECT p.id, p.name, SUM(a.amount) AS total_amount, $1 AS singular_units, $1 AS plural_units
             FROM activity AS a \
-            JOIN person AS p ON a.person_id = p.id");
-        qb.push(" WHERE a.challenge_id = ");
-        qb.push_bind(challenge_id);
-        qb.push(" GROUP BY p.id, p.name ORDER BY total_amount DESC");
-        if let Some(limit) = limit {
-            qb.push(" LIMIT ");
-            qb.push_bind(limit);
+            JOIN person AS p ON a.person_id = p.id
+            WHERE a.challenge_id = $2
+            GROUP BY p.id, p.name
+            ORDER BY total_amount DESC".to_string();
+        if limit.is_some() {
+            sql.push_str(" LIMIT $3");
         }
-        
-        let query = qb.build_query_as();
-            query.fetch_all(pool)
-            .await
+
+        let mut query = query_as(sql.as_str())
+            .bind(units)
+            .bind(challenge_id);
+        if let Some(limit) = limit {
+            query = query.bind(limit);
+        }
+        let mut summaries = query.fetch_all(pool).await?;
+
+        // Add a final leaderboard entry for the remainder
+        if limit.is_some() {
+            let leaderboard_sum: f32 = summaries.iter()
+                .map(|s: &MemberActivitySummary| s.total_amount)
+                .sum();
+            let remainder = total_all - leaderboard_sum;
+            if remainder >= TOLERANCE {
+                summaries.push(MemberActivitySummary {
+                    id: None,
+                    name: None,
+                    total_amount: remainder,
+                    singular_units: units.to_string(),
+                    plural_units: units.to_string()
+                });
+            }
+        }
+        Ok(summaries)
+    }
+    
+    async fn query_daily_goals<'r>(pool: &sqlx::Pool<Postgres>, challenge_id: i64, limit: &Option<i32>, daily_goal: f32) -> Result<Vec<MemberActivitySummary>, Error> {
+        // Query activity totals by user and date
+        let rows = query("SELECT p.id, p.name, a.date, SUM(a.amount) AS amount
+                FROM person AS p
+                JOIN activity AS a ON p.id = a.person_id
+                WHERE a.challenge_id = $1
+                GROUP BY p.id, p.name, a.date")
+            .bind(challenge_id)
+            .fetch_all(pool)
+            .await?;
+
+        // Group by user and sum the dates on which that user achieved at least the daily goal
+        let mut activity_map: HashMap<i64, MemberActivitySummary> = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let person_id: i64= row.try_get("id")?;
+            let amount: f32 = row.try_get("amount")?;
+
+            // Ignore record if the total activity amount for that person/date is less than the goal
+            if amount >= daily_goal {
+                let opt_entry = activity_map.get_mut(&person_id);
+                if let Some(entry) = opt_entry {
+                    // Bump the day count for this user
+                    entry.total_amount += 1.0;
+                } else {
+                    // First entry for this user, create a new record
+                    let new_entry = MemberActivitySummary {
+                        id: Some(person_id),
+                        name: row.try_get("name")?,
+                        total_amount: 1.0,
+                        singular_units: "day".to_string(),
+                        plural_units: "days".to_string()
+                    };
+                    activity_map.insert(person_id, new_entry);
+                }
+            }
+        }
+
+        // TODO: implement limits
+
+        let mut summaries: Vec<MemberActivitySummary> = activity_map.into_values().collect();
+        // Sort summaries descending on total_amount field
+        summaries.sort_by(|a, b| {
+            if a.total_amount == b.total_amount {
+                Ordering::Equal
+            } else if b.total_amount > a.total_amount {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
+        });
+        Ok(summaries)
+    }
+
+}
+
+#[derive(Serialize, FromRow, Clone, Debug)]
+struct DailyActivity {
+    date: NaiveDate,
+    amount: f32,
+    completed: bool,
+}
+
+impl DailyActivity {
+    async fn query(pool: &PgPool, person_id: i64, challenge_id: i64, challenge_start: &NaiveDate, challenge_finish: &NaiveDate, daily_goal: f32) -> Result<Vec<DailyActivity>, Error> {
+        // Query daily activities for the person and challenge, summing amounts for each date
+        let activity_rows = query("SELECT a.date, SUM(a.amount) AS amount
+                FROM activity AS a
+                WHERE a.challenge_id = $1 AND a.person_id = $2
+                GROUP BY a.date")
+            .bind(challenge_id)
+            .bind(person_id)
+            .fetch_all(pool)
+            .await?;
+
+        // Create a map of date to activity amount for quick lookup
+        let mut activity_amounts_by_date: HashMap<NaiveDate, DailyActivity> = HashMap::with_capacity(activity_rows.len());
+        for activity_row in activity_rows {
+            let date = activity_row.try_get("date")?;
+            let amount = activity_row.try_get("amount")?;
+            let completed = amount >= daily_goal;
+            activity_amounts_by_date.insert(date, DailyActivity {
+                date, amount, completed
+            });
+
+        };
+
+        // Create a new Vec of activities with an entry for every date in the challenge range, providing an empty activity where there was no data for that date.
+        let mut result: Vec<DailyActivity> = Vec::with_capacity(challenge_finish.signed_duration_since(*challenge_start).num_days() as usize + 1);
+        let mut date = challenge_start.clone();
+        while date <= *challenge_finish {
+            let activity = activity_amounts_by_date.remove(&date).unwrap_or_else(|| DailyActivity { date, amount: 0.0, completed: daily_goal <= 0.0 });
+            result.push(activity);
+            date = date.succ_opt().unwrap();
+        }
+        Ok(result)
     }
 }
 
@@ -165,10 +289,12 @@ struct ChallengeFull {
     start: NaiveDate,
     finish: NaiveDate,
     activity_type: ActivityType,
-    goal: f32,
+    goal: Option<f32>,
     individual_goal: Option<f32>,
+    daily_goal: Option<f32>,
     total_all: f32,
     total_for_person: f32,
+    daily_activities: Vec<DailyActivity>,
     member_summaries: Vec<MemberActivitySummary>
 }
 
@@ -185,24 +311,32 @@ impl ChallengeFull {
             activity_type: record.activity_type.clone(),
             goal: record.goal,
             individual_goal: record.individual_goal,
+            daily_goal: record.daily_goal,
             total_all: record.total_all,
             total_for_person: record.total_for_person,
+            daily_activities: vec![],
             member_summaries: vec![]
         }
     }
-    async fn expand_leaderboard(mut self, pool: &PgPool, limit: &Option<i32>) -> Result<Self, Error> {
-        let mut leaderboard = MemberActivitySummary::query(pool, self.id, limit).await?;
-        if limit.is_some() {
-            let leaderboard_sum: f32 = leaderboard.iter()
-                .map(|s| s.total_amount)
-                .sum();
-            let remainder = self.total_all - leaderboard_sum;
-            if remainder >= TOLERANCE {
-                leaderboard.push(MemberActivitySummary {
-                    id: None, name: None, total_amount: remainder
-                });
-            }
+
+    async fn expand_daily_activities(mut self, pool: &PgPool, person_id: i64, current_date: &NaiveDate) -> Result<Self, Error> {
+        if let Some(daily_goal) = self.daily_goal {
+            let current_date = if current_date > &self.finish {
+                &self.finish
+            } else {
+                current_date
+            };
+            self.daily_activities = DailyActivity::query(pool, person_id, self.id, &self.start, current_date, daily_goal).await?;
         }
+        Ok(self)
+    }
+
+    async fn expand_leaderboard(mut self, pool: &PgPool, limit: &Option<i32>) -> Result<Self, Error> {
+        let leaderboard: Vec<MemberActivitySummary> = if let Some(daily_goal) = self.daily_goal {
+            MemberActivitySummary::query_daily_goals(pool, self.id, limit, daily_goal).await?
+        } else {
+            MemberActivitySummary::query_amount_totals(pool, self.id, limit, self.total_all, &self.activity_type.units).await?
+        };
         self.member_summaries = leaderboard;
         Ok(self)
     }
@@ -380,17 +514,19 @@ async fn list_activities(
         .map(Json::from)
 }
 
-fn check_challenge_permission(login: &LoginSession, person_id: &Option<i64>) -> Result<(), Custom<String>> {
+fn check_challenge_permission(login: &LoginSession, person_id: &Option<i64>, message: &str) -> Result<i64, Custom<String>> {
     if let Some(person_id) = person_id {
-        if !login.is_admin() && login.uid != person_id.clone() {
-            return Err(Custom(Status::Forbidden, "admin role required to view other user challenge totals".to_string()));
+        let person_id = person_id.clone();
+        if !login.is_admin() && login.uid != person_id {
+            return Err(Custom(Status::Forbidden, message.to_string()));
         }
+        return Ok(person_id);
     }
-    Ok(())
+    return Ok(login.uid);
 }
 
 #[get("/challenges?<person_id>&<date_today>&<leaderboard_limit>")]
-async fn list_challenges(
+async fn list_challenges<'r>(
     pool: &State<PgPool>,
     config: &State<Config>,
     login: LoginSession,
@@ -398,7 +534,7 @@ async fn list_challenges(
     date_today: Option<String>,
     leaderboard_limit: Option<i32>
 ) -> Result<Json<Vec<ChallengeFull>>, Custom<String>> {
-    check_challenge_permission(&login, &person_id)?;
+    let person_id_for_dailies = check_challenge_permission(&login, &person_id, "admin role required to view other user challenge totals")?;
     
     // Set date_now to the current time clock if not specified as a parameter
     let today = if let Some(date_today) = date_today {
@@ -411,39 +547,55 @@ async fn list_challenges(
     let records = ChallengeRecord::list(pool, person_id)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
-
-    try_join_all(records.iter().map(|r| expand_record_if_active(&pool, r, &today, &leaderboard_limit)))
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-        .map(Json::from)
-}
-
-async fn expand_record_if_active(pool: &PgPool, r: &ChallengeRecord, today: &NaiveDate, leaderboard_limit: &Option<i32>) -> Result<ChallengeFull, Error> {
-    let full = ChallengeFull::copy_record(r);
-    if today >= &full.start {
-        full.expand_leaderboard(pool, leaderboard_limit).await
-    } else {
-        Ok(full)
+    let mut results = Vec::with_capacity(records.len());
+    for record in &records {
+        let mut full = ChallengeFull::copy_record(record);
+        if today >= full.start {
+            full = full.expand_daily_activities(pool, person_id_for_dailies, &today).await.map_err(to_internal_server_err)?;
+            full = full.expand_leaderboard(pool, &leaderboard_limit).await.map_err(to_internal_server_err)?;
+        }
+        results.push(full);
     }
+    Ok(Json(results))
 }
 
-#[get("/challenges/<id>?<person_id>&<leaderboard_limit>")]
-async fn get_challenge(
+async fn expand_record_if_active(pool: &PgPool, record: &ChallengeRecord, person_id: i64, today: &NaiveDate, leaderboard_limit: &Option<i32>) -> Result<ChallengeFull, Error> {
+    let mut full = ChallengeFull::copy_record(record);
+    if today >= &full.start {
+        full = full.expand_daily_activities(pool, person_id, today).await?
+            .expand_leaderboard(pool, leaderboard_limit).await?;
+    }
+    Ok(full)
+}
+
+#[get("/challenges/<id>?<person_id>&<leaderboard_limit>&<date_now>")]
+async fn get_challenge<'r>(
     pool: &State<PgPool>,
+    config: &State<Config>,
     login: LoginSession,
     id: i64,
     person_id: Option<i64>,
-    leaderboard_limit: Option<i32>
+    leaderboard_limit: Option<i32>,
+    date_now: Option<String>
 ) -> Result<Json<ChallengeFull>, Custom<String>> {
-    check_challenge_permission(&login, &person_id)?;
+    let person_id_for_dailies = check_challenge_permission(&login, &person_id, "admin role required to view other user challenge totals")?;
     let simple_record: ChallengeRecord = ChallengeRecord::query_by_id(pool, id, person_id)
         .await
         .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
 
-    ChallengeFull::copy_record(&simple_record).expand_leaderboard(pool, &leaderboard_limit)
-        .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-        .map(Json::from)
+    // Set date_now to the current time clock if not specified as a parameter
+    let date_now = if let Some(date_now) = date_now {
+        NaiveDate::parse_from_str(&date_now, DATE_FORMAT).map_err(|e| Custom(Status::BadRequest, e.to_string()))?
+    } else {
+        let tz: Tz = config.get_timezone().map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        tz.from_utc_datetime(&Utc::now().naive_utc()).date_naive()
+    };
+
+    let mut result = ChallengeFull::copy_record(&simple_record);
+    result = result.expand_daily_activities(pool, person_id_for_dailies, &date_now).await.map_err(to_internal_server_err)?;
+    result = result.expand_leaderboard(pool, &leaderboard_limit).await.map_err(to_internal_server_err)?;
+
+    Ok(Json::from(result))
 }
 
 #[get("/activities/<activity_id>")]
@@ -615,7 +767,18 @@ mod tests {
         assert_eq!(0, challenges[1].member_summaries.len());
         assert_eq!(100.0, challenges[1].total_all);
         assert_eq!(100.0, challenges[1].total_for_person);
-    }
+
+        assert_eq!("June Million Steps", challenges[2].name);
+
+        assert_eq!("Marching Along", challenges[3].name);
+        assert_eq!(15, challenges[3].daily_activities.len());
+        assert_eq!(2, challenges[3].member_summaries.len());
+        assert_eq!(3.0, challenges[3].member_summaries[0].total_amount);
+        assert_eq!(Some("user1".to_string()), challenges[3].member_summaries[0].name);
+        assert_eq!("days", challenges[3].member_summaries[0].plural_units);
+        assert_eq!(1.0, challenges[3].member_summaries[1].total_amount);
+        assert_eq!(Some("user2".to_string()), challenges[3].member_summaries[1].name);
+        assert_eq!("days", challenges[3].member_summaries[1].plural_units);    }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
     async fn test_list_challenges_for_otheruser_admin(pool: PgPool) {
@@ -770,7 +933,7 @@ mod tests {
         let challenge_id = find_challenge_by_name(&pool, "April 2025 Hikes").await;
         let user1 = find_person_id_by_name(&pool, "user1").await;
         let login = find_user_login_by_name(&pool, "admin", "admin").await;
-        let challenge = crate::activities::get_challenge(State::from(&pool), login, challenge_id, Some(user1), None).await.unwrap();
+        let challenge = crate::activities::get_challenge(State::from(&pool), State::from(&Config::load().unwrap()), login, challenge_id, Some(user1), None, None).await.unwrap();
 
         assert_eq!("April 2025 Hikes", challenge.name);
         assert_eq!("Hiking", challenge.activity_type.name);
@@ -1006,9 +1169,9 @@ mod tests {
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "user1", "member").await;
-        assert_eq!(7, count_activities(&pool).await);
+        let count = count_activities(&pool).await;
         crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap();
-        assert_eq!(6, count_activities(&pool).await);
+        assert_eq!(count - 1, count_activities(&pool).await, "activity should have been deleted");
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
@@ -1020,9 +1183,9 @@ mod tests {
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "admin", "admin").await;
-        assert_eq!(7, count_activities(&pool).await);
+        let count = count_activities(&pool).await;
         crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap();
-        assert_eq!(6, count_activities(&pool).await);
+        assert_eq!(count - 1, count_activities(&pool).await, "activity should have been deleted");
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
@@ -1034,10 +1197,10 @@ mod tests {
         assert_eq!(2, activities.len());
 
         let login = find_user_login_by_name(&pool, "user2", "member").await;
-        assert_eq!(7, count_activities(&pool).await);
+        let count = count_activities(&pool).await;
         let error = crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap_err();
         assert_eq!(Custom(Status::NotFound, "activity not found or user not allowed to delete".to_string()), error);
-        assert_eq!(7, count_activities(&pool).await);
+        assert_eq!(count, count_activities(&pool).await, "activity should not have been deleted");
     }
 
 }

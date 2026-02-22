@@ -77,7 +77,7 @@
                             <li v-if="new_activities[challenge_index]" class="list-group-item">
                                 <form @submit.prevent="submitActivity(challenge_index, challenge)">
                                     <div class="d-flex flex-wrap align-items-center"> <!-- flex wrap to allow the label to split from the form controls -->
-                                        <div class="fs-5 text-nowrap me-1">Log ${challenge.activity_type.name}:</div>
+                                        <div class="fs-5 text-nowrap me-1">Log Activity:</div>
                                         <div class="flex-grow-1 d-flex align-items-center gy-2"> <!-- non-wrapping flex to keep the form controls in a line -->
                                             <!-- Date -->
                                             <input
@@ -133,7 +133,7 @@
                                         <div class="progress" role="progressbar" style="height: 25px">
                                             <div class="progress-bar"
                                             :class="{'bg-success': isSelectedUserId(member_summary.id), 'bg-primary': !isSelectedUserId(member_summary.id)}"
-                                            :style="'width:' + calculateMemberBarWidth(challenge.member_summaries, index)">${displayNumber(member_summary.total_amount)}</div>
+                                            :style="'width:' + calculateMemberBarWidth(challenge.member_summaries, index)">${displayNumber(member_summary.total_amount)}&nbsp;${member_summary.total_amount == 1 ? member_summary.singular_units : member_summary.plural_units}</div>
                                         </div>
                                     </td>
                                 </tr>

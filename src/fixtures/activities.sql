@@ -24,6 +24,11 @@ SELECT insert_activity('2025-04-02', 400, 'user2', 'April 2025 Hikes');
 
 SELECT insert_activity('2025-05-01', 100, 'user1', 'May 2025 Cycling');
 
-SELECT insert_activity('2026-03-1', 5, 'user1', 'Marching Along');
-SELECT insert_activity('2026-03-2', 6, 'user1', 'Marching Along');
-SELECT insert_activity('2026-03-3', 3, 'user1', 'Marching Along');
+-- Activities for a challenge that has a daily goal
+SELECT insert_activity('2025-04-1', 5, 'user1', 'Marching Along');
+SELECT insert_activity('2025-04-2', 6, 'user1', 'Marching Along');
+SELECT insert_activity('2025-04-3', 4, 'user1', 'Marching Along'); -- Activity that does NOT reach the daily goal of 5.
+SELECT insert_activity('2025-04-4', 3, 'user1', 'Marching Along'); -- Activity below the daily goal...
+SELECT insert_activity('2025-04-4', 3, 'user1', 'Marching Along'); -- ... but summing with this activity to exceed the daily goal.
+
+SELECT insert_activity('2025-04-01', 5, 'user2', 'Marching Along');

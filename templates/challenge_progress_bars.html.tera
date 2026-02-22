@@ -1,21 +1,42 @@
 {# Template for Challenge progress bars #}
  
 <!-- Overall Progress-->
-<div class="text-primary fs-5">
-    Group Goal: ${displayNumber(challenge.total_all)} of ${displayNumber(challenge.goal)} ${challenge.activity_type.units}
-</div>
-<div class="progress-stacked my-2" style="height: 50px">
-    <div class="progress" role="progressbar" :style="'width:' + displayPercent(challenge.total_for_person / challenge.goal)">
-        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="height: 50px">${displayPercent(challenge.total_for_person / challenge.goal, 0)}</div>
+<div v-if="challenge.goal">
+    <div class="text-primary fs-5">
+        Group Goal: ${displayNumber(challenge.total_all)} of ${displayNumber(challenge.goal)} ${challenge.activity_type.units}
     </div>
-    <div class="progress" role="progressbar" :style="'width:' + displayPercent((challenge.total_all - challenge.total_for_person) / challenge.goal)">
-        <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="height: 50px">${displayPercent(challenge.total_all / challenge.goal, 0)}</div>
+    <div class="progress-stacked my-2" style="height: 50px">
+        <div class="progress" role="progressbar" :style="'width:' + displayPercent(challenge.total_for_person / challenge.goal)">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="height: 50px">${displayPercent(challenge.total_for_person / challenge.goal, 0)}</div>
+        </div>
+        <div class="progress" role="progressbar" :style="'width:' + displayPercent((challenge.total_all - challenge.total_for_person) / challenge.goal)">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" style="height: 50px">${displayPercent(challenge.total_all / challenge.goal, 0)}</div>
+        </div>
     </div>
 </div>
+
 <!-- Individual Progress-->
-<div class="text-success fs-5">
-    ${admin_controls.user.name}'s Goal: ${displayNumber(challenge.total_for_person)} of ${displayNumber(challenge.individual_goal)} ${challenge.activity_type.units}
+<div v-if="challenge.individual_goal">
+    <div class="text-success fs-5">
+        ${admin_controls.user.name}'s Goal: ${displayNumber(challenge.total_for_person)} of ${displayNumber(challenge.individual_goal)} ${challenge.activity_type.units}
+    </div>
+    <div class="progress my-2" role="progressbar" style="height: 50px">
+        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" :style="'width:' + displayPercent(challenge.total_for_person / challenge.individual_goal)">${displayPercent(challenge.total_for_person / challenge.individual_goal)}</div>
+    </div>
 </div>
-<div class="progress my-2" role="progressbar" style="height: 50px">
-    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" :style="'width:' + displayPercent(challenge.total_for_person / challenge.individual_goal)">${displayPercent(challenge.total_for_person / challenge.individual_goal)}</div>
+
+<!-- Daily Progress-->
+<div v-if="challenge.daily_goal">
+    <div class="text-success fs-1">
+        <span class="fs-5 me-1">${admin_controls.user.name}'s Daily Goal: ${displayNumber(challenge.daily_goal)}&nbsp;${challenge.activity_type.units}</span>
+    </div>
+    <div class="text-success">
+        <span
+            v-for="(daily_activity, index) in challenge.daily_activities"
+            class="badge me-1 mb-1"
+            :class="{'text-bg-success': daily_activity.completed, 'text-bg-warning': daily_activity.amount > 0 && !daily_activity.completed, 'text-bg-secondary': !daily_activity.completed}"
+        >   
+            ${daily_activity.amount}<span v-if="daily_activity.amount > 0">&nbsp;${challenge.activity_type.units}</span>
+        </span>
+    </div>
 </div>
