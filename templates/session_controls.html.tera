@@ -24,7 +24,7 @@
     </span>
 
     <!-- Member not booked, session is in future. -->
-    <div v-else v-if="!isPastByTimer(session.datetime, timer)" class="me-1">
+    <span v-else v-if="!isPastByTimer(session.datetime, timer)" class="me-1">
         <!-- Although session is in the future, the booking deadline has passed so it cannot be booked -->
         <span v-if="isPastByTimer(session.booking_deadline, timer)" class="text-danger"><i class="bi bi-sign-stop">&nbsp;Deadline Passed!</i></span>
         <!-- The booking deadline has not passed yet, so allow booking -->
@@ -47,7 +47,7 @@
                 <span>Book</span><span v-if="isSoon(session.booking_deadline, 180, timer)">&nbsp;within ${calculateTimeLeft(session.booking_deadline, timer)}</span>
             </button>
         </span>
-    </div>
+    </span>
 
     <!-- For unbooked sessions in the past, there is nothing to display. -->
 
