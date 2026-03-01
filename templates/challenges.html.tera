@@ -143,7 +143,7 @@
                                         </td>
                                     </tr>
                                     <tr v-for="subentry in ranking.subentries">
-                                        <td :class="{'text-success': isSelectedUserId(subentry.id)}">${subentry.name}</td>
+                                        <td class="fs-6 text-nowrap" :class="{'text-success': isSelectedUserId(subentry.id)}">${subentry.name}</td>
                                         <td width="100%">
                                             <div class="progress" role="progressbar" style="height: 25px">
                                                 <div class="progress-bar"
