@@ -113,30 +113,46 @@
                         <div class="card-footer">
                             <span class="fs-5 mt-2">Leaderboard</span>
                             <table class="table table-borderless table-transparent mt-2 align-middle">
-                                <tr v-if="challenge.member_summaries.length == 0">
+                                <tr v-if="challenge.categorized_leaderboard.length == 0">
                                     <td class="ps-0 fs-5" colspan="3">
                                         No activities recorded yet!
                                     </td>
                                 </tr>
-                                <tr v-for="(member_summary, index) in challenge.member_summaries">
-                                    <td class="ps-0 fs-6">
-                                        <span v-if="index == 0" title="Gold Medal">🥇</span>
-                                        <span v-if="index == 1" title="Silver Medal">🥈</span>
-                                        <span v-if="index == 2" title="Bronze Medal">🥉</span>
-                                        <span v-if="index >= 3">${index + 1}</span>
-                                    </td>
-                                    <td class="fs-6 text-nowrap" :class="{'text-success': isSelectedUserId(member_summary.id)}">
-                                        <span v-if="member_summary.name">${member_summary.name}</span>
-                                        <span v-else>&laquo; others &raquo;</span>
-                                    </td>
-                                    <td width="100%">
-                                        <div class="progress" role="progressbar" style="height: 25px">
-                                            <div class="progress-bar"
-                                            :class="{'bg-success': isSelectedUserId(member_summary.id), 'bg-primary': !isSelectedUserId(member_summary.id)}"
-                                            :style="'width:' + calculateMemberBarWidth(challenge.member_summaries, index)">${displayNumber(member_summary.total_amount)}&nbsp;${member_summary.total_amount == 1 ? member_summary.singular_units : member_summary.plural_units}</div>
-                                        </div>
-                                    </td>
-                                </tr>
+                                <tbody v-for="(ranking, index) in challenge.categorized_leaderboard" class="border-bottom">
+                                    <tr>
+                                        <!-- Ranking column -->
+                                        <td :rowspan="ranking.subentries.length + 1" class="ps-0 fs-2">
+                                            <span v-if="ranking.rank == 1" title="Gold Medal">🥇</span>
+                                            <span v-if="ranking.rank == 2" title="Silver Medal">🥈</span>
+                                            <span v-if="ranking.rank == 3" title="Bronze Medal">🥉</span>
+                                            <span v-if="ranking.rank > 3">${entry.rank}</span>
+                                        </td>
+    
+                                        <!-- Name column -->
+                                        <td class="fs-6 text-nowrap" >
+                                            <span v-if="ranking.initial.name" :class="{'text-success': isSelectedUserId(ranking.initial.id)}">${ranking.initial.name}</span>
+                                            <span v-else>&laquo; others &raquo;</span>
+                                        </td>
+    
+                                        <td width="100%">
+                                            <div class="progress" role="progressbar" style="height: 25px">
+                                                <div class="progress-bar"
+                                                :class="{'bg-success': isSelectedUserId(ranking.initial.id), 'bg-primary': !isSelectedUserId(ranking.initial.id)}"
+                                                :style="'width:' + calculateMemberBarWidth(challenge.categorized_leaderboard, index)">${displayNumber(ranking.total_amount)}&nbsp;${ranking.total_amount == 1 ? ranking.initial.singular_units : ranking.initial.plural_units}</div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <tr v-for="subentry in ranking.subentries">
+                                        <td>${subentry.name}</td>
+                                        <td width="100%">
+                                            <div class="progress" role="progressbar" style="height: 25px">
+                                                <div class="progress-bar"
+                                                :class="{'bg-success': isSelectedUserId(subentry.id), 'bg-primary': !isSelectedUserId(subentry.id)}"
+                                                :style="'width:' + calculateMemberBarWidth(challenge.categorized_leaderboard, index)">${displayNumber(ranking.total_amount)}&nbsp;${ranking.total_amount == 1 ? ranking.initial.singular_units : ranking.initial.plural_units}</div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
                             </table>
                         </div>
                     </div> <!-- current challenge card -->

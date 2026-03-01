@@ -72,7 +72,7 @@ async function reloadChallenge(challenge_index, challenge_id) {
                     spliceChallenge(challenge, past_challenges.value);
                     break;
                 case CURRENT_CHALLENGE:
-                    updateNewActivityForChallenge(challenge_index, challenge);
+                    updateChallenge(challenge_index, challenge);
                     spliceChallenge(challenge, current_challenges.value);
                     break;
                 case FUTURE_CHALLENGE:
@@ -167,7 +167,7 @@ async function displayChallenges(json) {
                 past_challenges.value.push(challenge)
                 break;
             case CURRENT_CHALLENGE:
-                updateNewActivityForChallenge(index, challenge)
+                updateChallenge(index, challenge)
                 current_challenges.value.push(challenge)
                 break;
             case FUTURE_CHALLENGE:
@@ -177,7 +177,8 @@ async function displayChallenges(json) {
     }
 }
 
-function updateNewActivityForChallenge(index, challenge) {
+function updateChallenge(index, challenge) {
+    // Update the New Activity field
     let new_activity = {
         date: toDateString(new Date()),
         amount: 0,
@@ -192,6 +193,26 @@ function updateNewActivityForChallenge(index, challenge) {
     }
     new_activities.splice(index, 1, new_activity)
     new_activities_validation.value.splice(index, 1, validation)
+
+    // Categorize the challenge leaderboard into rankings
+    let categorized = []
+    let rank = 0
+    let current = null
+    for (var entry of challenge.member_summaries) {
+        if (current != null && current.total_amount !== null && current.total_amount === entry.total_amount) {
+            current.subentries.push(entry)
+        } else {
+            rank ++
+            current = {
+                rank: rank,
+                total_amount: entry.total_amount,
+                initial: entry,
+                subentries: []
+            }
+            categorized.push(current)
+        }
+    }
+    challenge.categorized_leaderboard = categorized
 }
 
 async function submitActivity(challenge_index, challenge) {
