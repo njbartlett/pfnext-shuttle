@@ -36,7 +36,7 @@
             class="badge lh-sm me-1 mb-1"
             :class="{'text-bg-success': daily_activity.completed, 'text-bg-warning': daily_activity.amount > 0 && !daily_activity.completed, 'text-bg-secondary': !daily_activity.completed}"
         >   
-            <span style="font-weight: normal">Day ${index}</span>
+            <span style="font-weight: normal">Day ${index + 1}</span>
             <br>
             ${daily_activity.amount}<span v-if="daily_activity.amount > 0">&nbsp;${challenge.activity_type.units}</span>
         </div>
