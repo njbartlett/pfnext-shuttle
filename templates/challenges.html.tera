@@ -125,7 +125,7 @@
                                             <span v-if="ranking.rank == 1" title="Gold Medal">🥇</span>
                                             <span v-if="ranking.rank == 2" title="Silver Medal">🥈</span>
                                             <span v-if="ranking.rank == 3" title="Bronze Medal">🥉</span>
-                                            <span v-if="ranking.rank > 3">${entry.rank}</span>
+                                            <span v-if="ranking.rank > 3">${ranking.rank}</span>
                                         </td>
     
                                         <!-- Name column -->
