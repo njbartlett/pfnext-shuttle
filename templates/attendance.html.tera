@@ -50,6 +50,12 @@
                     </tr>
                 </tbody>
             </table>
+
+            <!-- All Attended / Not Attended -->
+            <div class="btn-group my-2 float-end" role="group" aria-label="Bulk Attendance Operations">
+                <button type="button" class="btn btn-primary" @click="setAllAttended(true)"><i class="bi bi-check-all"></i>&nbsp;All Attended</button>
+                <button type="button" class="btn btn-outline-danger" @click="setAllAttended(false)"><i class="bi bi-x-square"></i>&nbsp;Clear All</button>
+            </div>
     
             <form>
                 <div class="input-group m-0 p-0">

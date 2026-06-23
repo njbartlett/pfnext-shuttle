@@ -88,6 +88,20 @@ async function toggleAttendance(booking) {
     })
 }
 
+async function setAllAttended(attended) {
+    let params = new URLSearchParams()
+    params.append("session_id", session.value.id)
+    console.log(">>> params", params.toString())
+    httpCall("/bookings?" + params.toString(), "PATCH", {
+        attended: attended
+    }, res => {
+        for (booking of bookings.value) {
+            booking.attended = attended
+        }
+        sortByField(bookings.value, sort_params.value.field, sort_params.value.ascending)
+    })
+}
+
 async function removeWaitlistEntry(waitlist_entry) {
     let params = new URLSearchParams()
     params.append("person_id", waitlist_entry.person_id)
@@ -123,7 +137,7 @@ let app = createApp({
         return {
             http_err, loggedin, page_return_path,
             session, bookings, adding_user, all_user_data, waitlist,
-            isAdmin, onLogout, displayTime, displayDate, displayDateTime, addMemberInput, addMember, removeMember, toggleAttendance, encodeLoginReturnUrl, goBack,
+            isAdmin, onLogout, displayTime, displayDate, displayDateTime, addMemberInput, addMember, removeMember, toggleAttendance, setAllAttended, encodeLoginReturnUrl, goBack,
             removeWaitlistEntry, sort_params, applySort
         }
     }

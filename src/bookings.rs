@@ -23,6 +23,7 @@ use crate::sessions::{SessionLocation, SessionType};
 
 #[cfg(test)]
 use crate::mock_chrono::Utc;
+use crate::whereclause::{Operator, WhereClause};
 #[cfg(not(test))]
 use chrono::Utc;
 
@@ -632,17 +633,18 @@ struct BookingUpdate {
 async fn update_booking(
     pool: &State<PgPool>,
     login: LoginSession,
-    person_id: i64, session_id: i64,
+    person_id: Option<i64>,
+    session_id: i64,
     booking_update: Json<BookingUpdate>
 ) -> Result<NoContent, Custom<String>> {
     if let Some(attended) = booking_update.attended {
         update_attendance(pool, &login, person_id, session_id, attended).await?;
-        if !attended {
+        if !attended && let Some(person_id) = person_id {
             delete_rating(pool, person_id, session_id).await?;
         }
     }
 
-    if let Some(feedback) = &booking_update.feedback {
+    if let Some(person_id) = person_id && let Some(feedback) = &booking_update.feedback {
         update_feedback(pool, &login, person_id, session_id, feedback).await?;
     }
 
@@ -652,21 +654,38 @@ async fn update_booking(
 async fn update_attendance(
     pool: &PgPool,
     login: &LoginSession,
-    person_id: i64, session_id: i64,
+    person_id: Option<i64>,
+    session_id: i64,
     attended: bool
-) -> Result<i64, Custom<String>> {
+) -> Result<(), Custom<String>> {
     if !user_is_admin_for_session(pool, &login, session_id).await? {
         return Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string()));
     }
-    
-    query_scalar("UPDATE booking SET attended = $1 WHERE person_id = $2 AND session_id = $3 RETURNING person_id")
-        .bind(attended)
-        .bind(person_id)
-        .bind(session_id)
-        .fetch_optional(pool)
+
+    let mut qb = QueryBuilder::new("UPDATE booking SET attended = ");
+    let mut wc = WhereClause::init();
+
+    qb.push_bind(attended);
+    wc.append_to(&mut qb, "session_id", Operator::Equal, session_id);
+    wc.opt_append_to(&mut qb, "person_id", Operator::Equal, person_id);
+    let query_result = qb.build()
+        .execute(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))
+        .map_err(to_internal_server_err)?;
+    if query_result.rows_affected() == 0 {
+        return Err(Custom(Status::NotFound, format!("No booking(s) found for session_id={} and optional person_id={:?}", session_id, person_id)));
+    }
+    
+    Ok(())
+    
+    // query_scalar("UPDATE booking SET attended = $1 WHERE person_id = $2 AND session_id = $3 RETURNING person_id")
+    //     .bind(attended)
+    //     .bind(person_id)
+    //     .bind(session_id)
+    //     .fetch_optional(pool)
+    //     .await
+    //     .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
+    //     .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))
 }
 
 async fn update_feedback(
@@ -1613,8 +1632,53 @@ mod tests {
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
         let login = create_login(admin_id,"admin", "admin");
-        crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await.expect("booking update should succeed");
+        crate::bookings::update_booking(State::from(&pool), login, Some(member_id), session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await.expect("booking update should succeed");
         assert_eq!(1, count_bookings_attended(&pool, true).await);
+    }
+
+    #[sqlx::test]
+    async fn mark_all_attended_admin(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        // Setup users
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "trainer", 0).await;
+        let member1_id = create_person(&pool, "Test User 1", "member1@example.org", "member", 0).await;
+        let member2_id = create_person(&pool, "Test User 2", "member2@example.org", "member", 0).await;
+
+        // Setup session and bookings
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        create_booking(&pool, member1_id, session_id, None).await;
+        create_booking(&pool, member2_id, session_id, None).await;
+        assert_eq!(0, count_bookings_attended(&pool, true).await);
+
+        let login = create_login(admin_id,"admin", "admin");
+        crate::bookings::update_booking(State::from(&pool), login, None, session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await.expect("booking update should succeed");
+        assert_eq!(2, count_bookings_attended(&pool, true).await);
+    }
+
+    #[sqlx::test]
+    async fn mark_all_attended_admin_wrong_session_id(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        // Setup users
+        let admin_id = create_person(&pool, "Test User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Test User", "trainer@example.org", "trainer", 0).await;
+        let member1_id = create_person(&pool, "Test User 1", "member1@example.org", "member", 0).await;
+        let member2_id = create_person(&pool, "Test User 2", "member2@example.org", "member", 0).await;
+
+        // Setup session and bookings
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        create_booking(&pool, member1_id, session_id, None).await;
+        create_booking(&pool, member2_id, session_id, None).await;
+        assert_eq!(0, count_bookings_attended(&pool, true).await);
+
+        let login = create_login(admin_id,"admin", "admin");
+        let err = crate::bookings::update_booking(State::from(&pool), login, None, 1000, Json(BookingUpdate{attended: Some(true), feedback: None}))
+            .await
+            .expect_err("Update booking should fail");
+        assert_eq!(err, Custom(Status::NotFound, "No booking(s) found for session_id=1000 and optional person_id=None".to_string()));
+        assert_eq!(0, count_bookings_attended(&pool, true).await);
     }
 
     #[sqlx::test]
@@ -1628,7 +1692,7 @@ mod tests {
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
         let login = create_login(member_id, "member", "member");
-        let result = crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await;
+        let result = crate::bookings::update_booking(State::from(&pool), login, Some(member_id), session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await;
         assert_eq!(Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
         assert_eq!(0, count_bookings_attended(&pool, true).await);
     }
@@ -1644,7 +1708,7 @@ mod tests {
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
         let login = create_login(trainer_id, "trainer", "trainer");
-        crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await.expect("booking update should succeed");
+        crate::bookings::update_booking(State::from(&pool), login, Some(member_id), session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await.expect("booking update should succeed");
         assert_eq!(1, count_bookings_attended(&pool, true).await);
     }
 
@@ -1660,7 +1724,7 @@ mod tests {
         assert_eq!(0, count_bookings_attended(&pool, true).await);
 
         let login = create_login(trainer2_id, "trainer2", "trainer");
-        let result = crate::bookings::update_booking(State::from(&pool), login, member_id, session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await;
+        let result = crate::bookings::update_booking(State::from(&pool), login, Some(member_id), session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await;
         assert_eq!(Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
         assert_eq!(0, count_bookings_attended(&pool, true).await);
     }
@@ -1678,7 +1742,8 @@ mod tests {
         crate::bookings::update_booking(
             State::from(&pool),
             create_login(admin_id, "admin", "admin"),
-            member_id, session_id,
+            Some(member_id),
+            session_id,
             Json(BookingUpdate{attended: Some(true), feedback: None})
         ).await.expect("booking update should succeed");
         assert_eq!(1, count_bookings_attended(&pool, true).await);
@@ -1687,7 +1752,8 @@ mod tests {
         crate::bookings::update_booking(
             State::from(&pool),
             create_login(member_id, "member", "member"),
-            member_id, session_id,
+            Some(member_id),
+            session_id,
             Json(BookingUpdate{attended: None, feedback: Some(Feedback{ rating: 3, comment: Some("fun session!".to_string()) })})
         ).await.expect("booking update should succeed");
 
