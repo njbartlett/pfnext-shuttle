@@ -69,7 +69,7 @@
                             </li>
 
                             <!-- Progress Bars -->
-                            <li class="list-group-item">
+                            <li class="list-group-item" v-if="challenge.goal || challenge.individual_goal || challenge.daily_goal">
                                 {% include "challenge_progress_bars" %}
                             </li>
     
