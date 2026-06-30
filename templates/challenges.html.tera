@@ -60,7 +60,9 @@
                 <div v-for="(challenge, challenge_index) in current_challenges" class="col">
                     <div class="card my-2 rounded-3 shadow-sm" :class="{'border-primary': new_activities[challenge_index]}">
                         <div class="card-header" :class="{'text-bg-primary': new_activities[challenge_index]}">
-                            <span class="fs-5">${challenge.name}:</span> ${displayShortDate(challenge.start)} to ${displayShortDate(challenge.finish)}
+                            <span class="fs-4">${challenge.name}</span>
+                            <br>
+                            <span>${displayShortDate(challenge.start)} to ${displayShortDate(challenge.finish)}</span>
                         </div>
                         <ul class="list-group list-group-flush">
                             <!-- Description if present -->
