@@ -17,7 +17,7 @@ use rocket::{
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::{PgRow, PgTypeInfo}, query, Decode, FromRow, PgPool, Postgres, QueryBuilder, Row, Type};
 
-use crate::{transaction_log::append_log, users::UserLoginRecord, whereclause::{Operator, WhereClause}};
+use crate::{config::AppEnv, transaction_log::append_log, users::UserLoginRecord, whereclause::{Operator, WhereClause}};
 
 const SESSION_ID: &str = "sessionid";
 const ADMIN: &str = "admin";
@@ -457,6 +457,7 @@ where
 #[post("/login", data = "<login_request>")]
 async fn login(
     pool: &State<PgPool>,
+    app_env: &State<AppEnv>,
     cookies: &CookieJar<'_>,
     existing_login: Option<LoginSession>,
     client_info: Option<ClientInfo<'_>>,
@@ -494,7 +495,7 @@ async fn login(
     
     // Add session cookie
     let mut cookie = Cookie::new(SESSION_ID, login_session.sessionid);
-    cookie.set_secure(true);
+    cookie.set_secure(app_env.cookie_secure);
     cookie.set_same_site(SameSite::Strict);
     cookie.unset_domain();
     cookie.set_http_only(true);
