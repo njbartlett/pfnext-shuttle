@@ -88,6 +88,19 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Howard's Hikes -->
+                <div id="session_howardshikes" class="col">
+                    <div class="card shadow-sm border-primary">
+                        <div class="card-header py-3">
+                            <h4 class="my-0 fw-normal">Howard's Hikes</h4>
+                        </div>
+                        <img src="/img/session_hikes.jpg">
+                        <div class="card-body">
+                            <p class="card-text">Hiking and camping in the UK countryside (open to non-members).</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
