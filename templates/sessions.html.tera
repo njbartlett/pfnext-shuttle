@@ -19,6 +19,11 @@
         <div v-if="loggedin" v-for="poll in unvoted_polls" class="alert alert-info" role="alert">
             <i class="bi bi-info-circle"></i>&nbsp;There is an open poll: <a :href="'polls.html#poll-' + poll.poll.id" class="alert-link">${poll.poll.question}</a>
         </div>
+
+        <div v-if="!loggedin" class="alert alert-light" role="alert">
+            You are not logged in.
+            <a :href="'login.html?return=' + encodeLoginReturnUrl()" role="button" class="btn btn-success rounded-pill mx-2">Login to Book</a>
+        </div>
     
         <!-- Weekly Pagination -->
         <div class="my-2 d-flex flex-wrap">
@@ -133,8 +138,6 @@
                 <tr class="border-bottom"></tr>
             </tbody>
         </table> <!-- calendar view table -->
-    
-        <a v-if="!loggedin" :href="'login.html?return=' + encodeLoginReturnUrl()" class="btn btn-success rounded-pill mb-3">Login to Book</a>
     
         <p class="text-center text-secondary">Showing week commencing ${displayDate(session_pagination.start)}. Found ${session_data.length} session(s) for selected week. Session times shown are local to the venue.</p>
     
