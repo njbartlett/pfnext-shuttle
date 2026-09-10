@@ -110,7 +110,7 @@
             <tbody>
                 <tr v-for="time in sessionsByTime(session_data)">
                     <td v-for="day in time.days" class="border-start border-end" :class="{'bg-light-subtle': day.is_today}">
-                        <div v-for="session in day.sessions" class="border rounded p-1" :class="{'border-primary': !isPast(session.datetime), 'bg-primary-subtle': !isPast(session.datetime), 'bg-secondary-subtle': isPast(session.datetime), 'text-secondary': isPast(session.datetime)}">
+                        <div v-for="session in day.sessions" class="border rounded p-1 hover-expand" :class="{'border-primary': !isPast(session.datetime), 'bg-primary-subtle': !isPast(session.datetime), 'bg-secondary-subtle': isPast(session.datetime), 'text-secondary': isPast(session.datetime)}">
                             <div class="d-flex align-items-center mb-1">
                                 <strong>${displayTime(session.datetime)} ${session.session_type.name}</strong>
                                 <span v-if="session.max_booking_count" class="ms-auto badge rounded-pill"

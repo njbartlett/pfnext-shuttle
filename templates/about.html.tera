@@ -26,7 +26,7 @@
             <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">
                 <!-- HIIT -->
                 <div id="session_hiit" class="col">
-                    <div class="card shadow-sm border-primary">
+                    <div class="card hover-expand shadow-sm border-primary">
                         <div class="card-header py-3 text-bg-primary">
                             <h4 class="my-0 fw-normal">HIIT</h4>
                         </div>
@@ -36,7 +36,7 @@
 
                 <!-- OTM -->
                 <div id="session_otm" class="col">
-                    <div class="card shadow-sm border-primary">
+                    <div class="card hover-expand shadow-sm border-primary">
                         <div class="card-header py-3 text-bg-primary">
                             <h4 class="my-0 fw-normal">On The Move</h4>
                         </div>
@@ -46,7 +46,7 @@
 
                 <!-- Strong-->
                 <div id="session_strong" class="col">
-                    <div class="card shadow-sm border-primary">
+                    <div class="card hover-expand shadow-sm border-primary">
                         <div class="card-header py-3 text-bg-primary">
                             <h4 class="my-0 fw-normal">Strong</h4>
                         </div>
@@ -56,7 +56,7 @@
 
                 <!-- Boxing-->
                 <div id="session_boxing" class="col">
-                    <div class="card shadow-sm border-primary">
+                    <div class="card hover-expand shadow-sm border-primary">
                         <div class="card-header py-3 text-bg-primary">
                             <h4 class="my-0 fw-normal">Boxing for Fitness</h4>
                         </div>
@@ -66,7 +66,7 @@
 
                 <!-- Run Club-->
                 <div id="session_runclub" class="col">
-                    <div class="card shadow-sm border-primary">
+                    <div class="card hover-expand shadow-sm border-primary">
                         <div class="card-header py-3">
                             <h4 class="my-0 fw-normal">Running Club*</h4>
                         </div>
@@ -76,7 +76,7 @@
             
                 <!-- Cycle Squad-->
                 <div id="session_cyclesquad" class="col">
-                    <div class="card shadow-sm border-primary">
+                    <div class="card hover-expand shadow-sm border-primary">
                         <div class="card-header py-3">
                             <h4 class="my-0 fw-normal">Cycle Squad*</h4>
                         </div>
@@ -86,7 +86,7 @@
 
                 <!-- Howard's Hikes -->
                 <div id="session_howardshikes" class="col">
-                    <div class="card shadow-sm border-primary">
+                    <div class="card hover-expand shadow-sm border-primary">
                         <div class="card-header py-3">
                             <h4 class="my-0 fw-normal">Howard's Hikes*</h4>
                         </div>
@@ -103,7 +103,7 @@
         <h2 id="locations" class="display-5 text-center text-body-emphasis">Locations</h2>
         <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 g-3">
             <div id="location_oak_hill" class="col">
-                <div class="card shadow-sm">
+                <div class="card shadow-sm hover-expand">
                     <div class="card-header py-3">
                         <h4 class="my-0 fw-normal">Oak Hill Park, Barnet</h4>
                     </div>
@@ -123,7 +123,7 @@
                 </div>
             </div>
             <div id="location_trent_park" class="col">
-                <div class="card shadow-sm">
+                <div class="card shadow-sm hover-expand">
                     <div class="card-header py-3">
                         <h4 class="my-0 fw-normal">Trent Park, Enfield</h4>
                     </div>
@@ -153,7 +153,7 @@
     <div class="container mt-5">
         <h2 id="trainers" class="display-5 text-center text-body-emphasis">Our Trainers</h2>
 
-        <div id="trainer_angela" class="card shadow-sm border-primary my-3">
+        <div id="trainer_angela" class="card shadow-sm border-primary my-3 hover-expand">
             <h5 class="card-header text-bg-primary">Angela Charalambous</h5>
             <div class="card-body">
                 <div class="row">
@@ -177,7 +177,7 @@
             </div>
         </div>
 
-        <div id="trainer_javier" class="card card-shadow-sm border-primary my-3">
+        <div id="trainer_javier" class="card card-shadow-sm border-primary my-3 hover-expand">
             <h5 class="card-header text-bg-primary">Javier Suarez</h5>
             <div class="card-body">
                 <div class="row">
@@ -200,7 +200,7 @@
             </div>
         </div>
 
-        <div id="trainer_mandy" class="card card-shadow-sm border-primary my-3">
+        <div id="trainer_mandy" class="card card-shadow-sm border-primary my-3 hover-expand">
             <h5 class="card-header text-bg-primary">Mandy Garner</h5>
             <div class="card-body">
                 <div class="row">
