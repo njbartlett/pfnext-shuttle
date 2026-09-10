@@ -2,7 +2,7 @@ use crate::common::parse_opt_date;
 use crate::loginsession::LoginSession;
 use chrono::{DateTime, Utc};
 use rocket::{http::Status, Route};
-use rocket::response::status::Custom;
+use crate::apierror::ApiError;
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::State;
@@ -12,7 +12,7 @@ pub fn routes() -> Vec<Route> {
     routes![read_log]
 }
 
-pub async fn append_log(pool: &PgPool, originator: &Option<String>, event_type: &str, detail: &str) -> Result<i64, Custom<String>> {
+pub async fn append_log(pool: &PgPool, originator: &Option<String>, event_type: &str, detail: &str) -> Result<i64, ApiError> {
     let timestamp: DateTime<Utc> = Utc::now();
     query("INSERT INTO eventlog (datetime, person, type, detail) VALUES ($1, $2, $3, $4) RETURNING id")
     .bind(timestamp)
@@ -22,7 +22,7 @@ pub async fn append_log(pool: &PgPool, originator: &Option<String>, event_type: 
     .fetch_one(pool)
     .await
     .and_then(|r| r.try_get("id"))
-    .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+    .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
 }
 
 #[derive(FromRow, Serialize, Debug)]
@@ -40,9 +40,9 @@ async fn read_log(
     login: LoginSession,
     from: Option<String>,
     to: Option<String>
-) -> Result<Json<Vec<LogRow>>, Custom<String>> {
+) -> Result<Json<Vec<LogRow>>, ApiError> {
     if !login.is_admin() {
-        return Err(Custom(Status::Forbidden, "admin role required to read log".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required to read log".to_string()));
     }
 
     let mut qb = QueryBuilder::new("SELECT id, datetime, person, type AS event_type, detail FROM eventlog");
@@ -63,14 +63,15 @@ async fn read_log(
     qb.build_query_as()
         .fetch_all(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
         .map(Json::from)
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, Days, Duration, Utc};
-    use rocket::{http::Status, response::status::Custom, State};
+    use rocket::{http::Status, State};
+    use crate::apierror::ApiError;
     use sqlx::{query, query_as, Executor, PgPool, Row};
     use crate::loginsession::{LoginSession, Roles};
 
@@ -94,7 +95,7 @@ mod tests {
 
         let login = create_login("member", "member");
         let read_result = crate::transaction_log::read_log(State::from(&pool), login, None, None).await;
-        assert_eq!(Custom(Status::Forbidden, "admin role required to read log".to_string()), read_result.unwrap_err());
+        assert_eq!(ApiError::new(Status::Forbidden, "admin role required to read log".to_string()), read_result.unwrap_err());
     }
     #[sqlx::test]
     async fn read_empty_admin(pool: PgPool) {

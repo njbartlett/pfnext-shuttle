@@ -12,12 +12,12 @@ use chrono::Utc;
 use password_auth::verify_password;
 use rand::{thread_rng, RngCore};
 use rocket::{
-    http::{private::cookie::Expiration, Cookie, CookieJar, SameSite, Status}, request::{FromRequest, Outcome}, response::status::{Custom, NoContent}, serde::json::Json, Request, Route, State
+    http::{private::cookie::Expiration, Cookie, CookieJar, SameSite, Status}, request::{FromRequest, Outcome}, response::status::NoContent, serde::json::Json, Request, Route, State
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::{PgRow, PgTypeInfo}, query, Decode, FromRow, PgPool, Postgres, QueryBuilder, Row, Type};
 
-use crate::{config::AppEnv, transaction_log::append_log, users::UserLoginRecord, whereclause::{Operator, WhereClause}};
+use crate::{apierror::ApiError, config::AppEnv, transaction_log::append_log, users::UserLoginRecord, whereclause::{Operator, WhereClause}};
 
 const SESSION_ID: &str = "sessionid";
 const ADMIN: &str = "admin";
@@ -121,12 +121,18 @@ impl<'r> FromRequest<'r> for LoginSession {
         }
         let pool = pool.unwrap();
 
-        // Get the session cookie
-        let sessionid: Option<String> = request.cookies()
-            .get_private(SESSION_ID)
-            .map(|c| c.value().to_string());
+        // Get the session id from the Authorization header (mobile/API clients),
+        // falling back to the private session cookie (browsers)
+        let sessionid: Option<String> = request.headers()
+            .get_one("Authorization")
+            .and_then(|h| h.strip_prefix("Bearer "))
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .or_else(|| request.cookies()
+                .get_private(SESSION_ID)
+                .map(|c| c.value().to_string()));
 
-        // No cookie in request header => browser has expired the session
+        // No bearer token or cookie in request header => browser has expired the session
         if sessionid.is_none() {
             info!("Session cookie not sent by client");
             let _ = append_log(pool, &None, "UNAUTHORIZED", "Session cookie not sent by client").await;
@@ -331,10 +337,22 @@ async fn log_login(pool: &PgPool, email: &String, ipinfo: &Option<String>, succe
 let _ = append_log(pool, &None, event_type, &log_detail).await;
 }
 
+/// Client kinds that authenticate with a bearer token returned in the login
+/// response body, instead of the private session cookie.
+const TOKEN_CLIENTS: [&str; 1] = ["mobile"];
+
 #[derive(Deserialize)]
 struct LoginRequest {
     email: String,
     password: String,
+    #[serde(default)]
+    client: Option<String>,
+}
+
+impl LoginRequest {
+    fn wants_token(&self) -> bool {
+        self.client.as_deref().is_some_and(|c| TOKEN_CLIENTS.contains(&c))
+    }
 }
 
 #[derive(Serialize)]
@@ -342,7 +360,11 @@ struct LoggedInUser {
     id: i64,
     name: String,
     email: String,
-    roles: Vec<String>
+    roles: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expiry: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Debug)]
@@ -462,7 +484,7 @@ async fn login(
     existing_login: Option<LoginSession>,
     client_info: Option<ClientInfo<'_>>,
     login_request: Json<LoginRequest>
-) -> Result<Json<LoggedInUser>, Custom<String>> {
+) -> Result<Json<LoggedInUser>, ApiError> {
     let client_info = &client_info.map(|i| i.to_string());
 
     let login_result = match existing_login {
@@ -485,23 +507,32 @@ async fn login(
     // Log the successful login
     log_login(pool, &login_request.email, &client_info, true).await;
 
+    // Token clients (e.g. the mobile app) receive the session token in the response
+    // body and send it back as "Authorization: Bearer <token>"; browsers receive it
+    // as a private session cookie instead.
+    let wants_token = login_request.wants_token();
+
     // Build login response body
     let body = LoggedInUser {
         id: login_session.uid,
         name: login_session.name,
         email: login_session.email,
-        roles: login_session.roles.0
+        roles: login_session.roles.0,
+        token: wants_token.then(|| login_session.sessionid.clone()),
+        expiry: wants_token.then_some(login_session.expiry),
     };
-    
-    // Add session cookie
-    let mut cookie = Cookie::new(SESSION_ID, login_session.sessionid);
-    cookie.set_secure(app_env.cookie_secure);
-    cookie.set_same_site(SameSite::Strict);
-    cookie.unset_domain();
-    cookie.set_http_only(true);
-    let session_duration_secs = SESSION_DURATION.num_seconds();
-    cookie.set_max_age(Some(rocket::time::Duration::seconds(session_duration_secs)));
-    cookies.add_private(cookie);
+
+    if !wants_token {
+        // Add session cookie
+        let mut cookie = Cookie::new(SESSION_ID, login_session.sessionid);
+        cookie.set_secure(app_env.cookie_secure);
+        cookie.set_same_site(SameSite::Strict);
+        cookie.unset_domain();
+        cookie.set_http_only(true);
+        let session_duration_secs = SESSION_DURATION.num_seconds();
+        cookie.set_max_age(Some(rocket::time::Duration::seconds(session_duration_secs)));
+        cookies.add_private(cookie);
+    }
 
     Ok(Json(body))
 }
@@ -531,7 +562,7 @@ async fn logout(
 #[get("/verify_session")]
 async fn verify_session(
     _login: LoginSession
-) -> Result<NoContent, Custom<String>> {
+) -> Result<NoContent, ApiError> {
     Ok(NoContent)
 }
 
@@ -568,13 +599,13 @@ impl LoginSessionAugmented {
 async fn get_sessions(
     pool: &State<PgPool>,
     login: LoginSession
-) -> Result<Json<Vec<LoginSessionAugmented>>, Custom<String>> {
+) -> Result<Json<Vec<LoginSessionAugmented>>, ApiError> {
     if !login.is_admin() {
-        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
     LoginSession::load_all(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
         .map(|v| {
             v.into_iter()
                 .map(|l| LoginSessionAugmented::augment(&l, l.sessionid == login.sessionid))
@@ -588,14 +619,14 @@ async fn get_session_by_id(
     pool: &State<PgPool>,
     login: LoginSession,
     id: &str
-) -> Result<Json<LoginSessionAugmented>, Custom<String>> {
+) -> Result<Json<LoginSessionAugmented>, ApiError> {
     if !login.is_admin() {
-        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
     let session = LoginSession::load(pool.inner(), id)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-        .and_then(|o| o.ok_or_else(|| Custom(Status::NotFound, format!("no loginsession id found for id {}", id))))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
+        .and_then(|o| o.ok_or_else(|| ApiError::new(Status::NotFound, format!("no loginsession id found for id {}", id))))?;
     Ok(Json(LoginSessionAugmented::augment(&session, session.sessionid == login.sessionid)))
 }
 
@@ -604,28 +635,28 @@ async fn delete_session_by_id(
     pool: &State<PgPool>,
     login: LoginSession,
     id: &str
-) -> Result<NoContent, Custom<String>> {
+) -> Result<NoContent, ApiError> {
     if !login.is_admin() {
-        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
     let result = query("DELETE FROM loginsession WHERE id = $1")
         .bind(id)
         .execute(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     if result.rows_affected() < 1 {
-        Err(Custom(Status::NotFound, "no login session with specified id".to_string()))
+        Err(ApiError::new(Status::NotFound, "no login session with specified id".to_string()))
     } else {
         Ok(NoContent)
     }
 }
 
-fn to_http_err(e: LoginError) -> Custom<String> {
+fn to_http_err(e: LoginError) -> ApiError {
     let status = match e {
         LoginError::Internal(_) => Status::InternalServerError,
         _ => Status::Unauthorized
     };
-    Custom(status, e.to_string())
+    ApiError::new(status, e.to_string())
 }
 
 #[cfg(test)]
@@ -850,6 +881,63 @@ mod tests {
         assert_eq!(count_session_rows(&pool).await, 2, "should be 2 sessions after second login without cookie");
         
         assert_ne!(login1.sessionid, login2.sessionid);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    fn dispatch_mobile_login_returns_token_and_no_cookie(pool: PgPool) {
+        let client = Client::untracked(rocket(pool.clone())).await.expect("valid rocket instance");
+
+        let mut post = client.post(uri!(crate::loginsession::login));
+        post.set_body(json!({
+            "email": "user1@example.com",
+            "password": "password",
+            "client": "mobile"
+        }).to_string());
+        let resp = post.dispatch().await;
+        assert_eq!(resp.status(), Status::Ok);
+        assert!(resp.cookies().get(SESSION_ID).is_none(), "token clients should not receive a session cookie");
+
+        let body: rocket::serde::json::Value = rocket::serde::json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        let token = body["token"].as_str().expect("token should be present in mobile login response").to_string();
+        assert!(body["expiry"].is_string(), "expiry should be present in mobile login response");
+        assert_eq!(count_session_rows(&pool).await, 1, "should be 1 session after mobile login");
+
+        // The token authenticates requests via the Authorization header
+        let resp_verify = client.get(uri!(crate::loginsession::verify_session))
+            .header(rocket::http::Header::new("Authorization", format!("Bearer {}", token)))
+            .dispatch().await;
+        assert_eq!(resp_verify.status(), Status::NoContent);
+
+        // An unknown token is rejected
+        let resp_bad = client.get(uri!(crate::loginsession::verify_session))
+            .header(rocket::http::Header::new("Authorization", "Bearer nonsense"))
+            .dispatch().await;
+        assert_eq!(resp_bad.status(), Status::Unauthorized);
+
+        // The token also works for logout, deleting the session record
+        let resp_logout = client.post(uri!(crate::loginsession::logout))
+            .header(rocket::http::Header::new("Authorization", format!("Bearer {}", token)))
+            .dispatch().await;
+        assert_eq!(resp_logout.status(), Status::NoContent);
+        assert_eq!(count_session_rows(&pool).await, 0, "should be 0 sessions after logout");
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    fn dispatch_browser_login_has_no_token_in_body(pool: PgPool) {
+        let client = Client::untracked(rocket(pool.clone())).await.expect("valid rocket instance");
+
+        let mut post = client.post(uri!(crate::loginsession::login));
+        post.set_body(json!({
+            "email": "user1@example.com",
+            "password": "password"
+        }).to_string());
+        let resp = post.dispatch().await;
+        assert_eq!(resp.status(), Status::Ok);
+        assert!(resp.cookies().get(SESSION_ID).is_some(), "browser clients should receive a session cookie");
+
+        let body: rocket::serde::json::Value = rocket::serde::json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert!(body.get("token").is_none(), "browser login response should not carry a token");
+        assert!(body.get("expiry").is_none(), "browser login response should not carry an expiry");
     }
 
     #[derive(Debug, PartialEq)]

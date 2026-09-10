@@ -1,6 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use rocket::http::Status;
-use rocket::response::status::{Created, Custom, NoContent};
+use rocket::response::status::{Created, NoContent};
+use crate::apierror::ApiError;
 use rocket::serde::json::Json;
 use rocket::serde::Deserialize;
 use rocket::{Route, State};
@@ -186,13 +187,13 @@ async fn list_sessions(
     pool: &State<PgPool>,
     login: Option<LoginSession>,
     from: Option<String>, to: Option<String>, trainer_id: Option<i64>, attended: bool
-) -> Result<Json<Vec<SessionFullRecord>>, Custom<String>> {
+) -> Result<Json<Vec<SessionFullRecord>>, ApiError> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
     let is_admin = login.as_ref().map_or(false, |c| c.has_role("admin"));
     let uid: Option<i64> = login.as_ref().map(|c| c.uid);
 
     if attended && !is_admin {
-        return Err(Custom(Status::Forbidden, "attendance data only available to admins".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "attendance data only available to admins".to_string()));
     }
     build_session_query(uid, from, to, trainer_id, attended, &mut qb)?;
     qb.push(" ORDER BY s.datetime ASC");
@@ -200,7 +201,7 @@ async fn list_sessions(
     let sessions = qb.build_query_as()
         .fetch_all(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     Ok(Json(sessions))
 }
 
@@ -208,9 +209,9 @@ async fn list_sessions(
 async fn get_session(
     pool: &State<PgPool>, login: LoginSession,
     session_id: i64, attended: bool
-) -> Result<Json<SessionFullRecord>, Custom<String>> {
+) -> Result<Json<SessionFullRecord>, ApiError> {
     if attended && !login.has_role("admin") {
-        return Err(Custom(Status::Forbidden, "attendance data only available to admins".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "attendance data only available to admins".to_string()));
     }
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::default();
     build_session_query(Some(login.uid), None, None, None, attended, &mut qb)?;
@@ -220,8 +221,8 @@ async fn get_session(
     qb.build_query_as()
         .fetch_optional(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or_else(|| Custom(Status::NotFound, format!("session with id {} not found", session_id)))
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| ApiError::new(Status::NotFound, format!("session with id {} not found", session_id)))
         .map(|r| Json(r))
 }
 
@@ -232,7 +233,7 @@ fn build_session_query(
     trainer_id: Option<i64>,
     show_attended: bool,
     qb: &mut QueryBuilder<Postgres>
-) -> Result<(), Custom<String>> {
+) -> Result<(), ApiError> {
     qb.push("SELECT s.id, s.datetime, s.duration_mins, s.notes, s.cost, s.booking_deadline_mins,
         t.id AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated,
         loc.id AS location_id, loc.name AS location_name, loc.address AS location_address, loc.url AS location_url,
@@ -301,22 +302,22 @@ async fn create_session(
     pool:  &State<PgPool>,
     login: LoginSession,
     new_session: Json<NewSession>
-) -> Result<Created<Json<i64>>, Custom<String>> {
+) -> Result<Created<Json<i64>>, ApiError> {
     // Admins can create any session. Trainers can only create sessions with themselves as the trainer.
     // Nobody else can create sessions.
     if !login.has_role("admin") {
         if login.has_role("trainer") {
             if !Some(login.uid).eq(&new_session.trainer_id) {
-                return Err(Custom(Status::Forbidden, "trainers can only create sessions for themselves".to_string()));
+                return Err(ApiError::new(Status::Forbidden, "trainers can only create sessions for themselves".to_string()));
             }
         } else {
-            return Err(Custom(Status::Forbidden, "only admins or trainers can create sessions".to_string()));
+            return Err(ApiError::new(Status::Forbidden, "only admins or trainers can create sessions".to_string()));
         }
     }
 
     new_session.validate(pool)
         .await
-        .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::BadRequest, e.to_string()))?;
 
     let id_row = query("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost, booking_deadline_mins) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id")
         .bind(&new_session.datetime)
@@ -330,15 +331,15 @@ async fn create_session(
         .bind(&new_session.booking_deadline_mins)
         .fetch_optional(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or_else(|| Custom(Status::Conflict, "no new record created".to_string()))?;
-    let id = id_row.try_get("id").map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| ApiError::new(Status::Conflict, "no new record created".to_string()))?;
+    let id = id_row.try_get("id").map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     info!("Created session id {}", id);
     Ok(Created::new(format!("/sessions/{}", id)).body(Json(id)))
 }
 
 #[delete("/sessions/<session_id>")]
-async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_id: i64) -> Result<NoContent, Custom<String>> {
+async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_id: i64) -> Result<NoContent, ApiError> {
     let mut qb = QueryBuilder::new("DELETE FROM session WHERE id = ");
     qb.push_bind(session_id);
 
@@ -347,17 +348,17 @@ async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_id: i
             qb.push(" AND trainer = ");
             qb.push_bind(login.uid);
         } else {
-            return Err(Custom(Status::Forbidden, "only admins and trainers can delete sessions".to_string()));
+            return Err(ApiError::new(Status::Forbidden, "only admins and trainers can delete sessions".to_string()));
         }
     }
     qb.push(" RETURNING id");
     let id: i64 = qb.build()
         .fetch_optional(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not deletable by current user", session_id)))?
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| ApiError::new(Status::NotFound, format!("session id {} not found, or not deletable by current user", session_id)))?
         .try_get("id")
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     info!("Deleted session id {}", id);
 
     Ok(NoContent)
@@ -369,7 +370,7 @@ async fn update_session(
     login: LoginSession,
     session_id: i64,
     new_session: Json<NewSession>
-) -> Result<NoContent, Custom<String>> {
+) -> Result<NoContent, ApiError> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("UPDATE session SET datetime = ");
     qb.push_bind(new_session.datetime);
 
@@ -405,36 +406,36 @@ async fn update_session(
             qb.push(" AND trainer = ");
             qb.push_bind(login.uid);
         } else {
-            return Err(Custom(Status::NotFound, "only admins and trainers can update sessions".to_string()));
+            return Err(ApiError::new(Status::NotFound, "only admins and trainers can update sessions".to_string()));
         }
     }
     qb.push(" RETURNING id");
 
     new_session.validate(pool)
         .await
-        .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::BadRequest, e.to_string()))?;
 
     let id: i64 = qb.build()
         .fetch_optional(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or_else(|| Custom(Status::NotFound, format!("session id {} not found, or not updatable by current user", session_id)))?
-        .try_get("id").map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| ApiError::new(Status::NotFound, format!("session id {} not found, or not updatable by current user", session_id)))?
+        .try_get("id").map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     info!("Updating session id {} with data {:?}", id, new_session);
     Ok(NoContent)
 }
 
 #[get("/locations")]
-async fn list_locations(pool: &State<PgPool>) -> Result<Json<Vec<SessionLocation>>, Custom<String>> {
+async fn list_locations(pool: &State<PgPool>) -> Result<Json<Vec<SessionLocation>>, ApiError> {
     query_as("SELECT id, name, address, url FROM location")
         .fetch_all(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
         .map(|v| Json(v))
 }
 
 #[get("/session_types?<deprecated>")]
-async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> Result<Json<Vec<SessionType>>, Custom<String>> {
+async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> Result<Json<Vec<SessionType>>, ApiError> {
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT id, name, requires_trainer, cost, deprecated FROM session_type");
     if let Some(deprecated) = deprecated {
         qb.push(" WHERE deprecated = ");
@@ -445,7 +446,7 @@ async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> R
     qb.build_query_as()
         .fetch_all(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
         .map(Json::from)
 }
 

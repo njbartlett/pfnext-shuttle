@@ -6,7 +6,8 @@ use chrono_tz::Tz;
 use futures::future::try_join_all;
 use rocket::http::Status;
 use rocket::http::ext::IntoCollection;
-use rocket::response::status::{Created, Custom, NoContent};
+use rocket::response::status::{Created, NoContent};
+use crate::apierror::ApiError;
 use rocket::serde::json::Json;
 use rocket::{Route, State};
 use serde::{Deserialize, Serialize};
@@ -343,10 +344,10 @@ impl ChallengeFull {
 }
 
 #[get("/activity_types")]
-async fn list_activity_types(pool: &State<PgPool>) -> Result<Json<Vec<ActivityType>>, Custom<String>> {
+async fn list_activity_types(pool: &State<PgPool>) -> Result<Json<Vec<ActivityType>>, ApiError> {
     ActivityType::query(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
         .map(Json::from)
 }
 
@@ -504,21 +505,21 @@ async fn list_activities(
     from: Option<String>,
     to: Option<String>,
     activity_type: Option<i32>
-) -> Result<Json<Vec<Activity>>, Custom<String>> {
+) -> Result<Json<Vec<Activity>>, ApiError> {
     if !login.is_admin() && Some(login.uid) != person_id {
-        return Err(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required to view other user activities".to_string()));
     }
     Activity::query(pool, challenge_id, person_id, parse_opt_naive_date(from, DATE_FORMAT)?, parse_opt_naive_date(to, DATE_FORMAT)?, activity_type)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
         .map(Json::from)
 }
 
-fn check_challenge_permission(login: &LoginSession, person_id: &Option<i64>, message: &str) -> Result<i64, Custom<String>> {
+fn check_challenge_permission(login: &LoginSession, person_id: &Option<i64>, message: &str) -> Result<i64, ApiError> {
     if let Some(person_id) = person_id {
         let person_id = person_id.clone();
         if !login.is_admin() && login.uid != person_id {
-            return Err(Custom(Status::Forbidden, message.to_string()));
+            return Err(ApiError::new(Status::Forbidden, message.to_string()));
         }
         return Ok(person_id);
     }
@@ -533,20 +534,20 @@ async fn list_challenges<'r>(
     person_id: Option<i64>,
     date_today: Option<String>,
     leaderboard_limit: Option<i32>
-) -> Result<Json<Vec<ChallengeFull>>, Custom<String>> {
+) -> Result<Json<Vec<ChallengeFull>>, ApiError> {
     let person_id_for_dailies = check_challenge_permission(&login, &person_id, "admin role required to view other user challenge totals")?;
     
     // Set date_now to the current time clock if not specified as a parameter
     let today = if let Some(date_today) = date_today {
-        NaiveDate::parse_from_str(&date_today, DATE_FORMAT).map_err(|e| Custom(Status::BadRequest, e.to_string()))?
+        NaiveDate::parse_from_str(&date_today, DATE_FORMAT).map_err(|e| ApiError::new(Status::BadRequest, e.to_string()))?
     } else {
-        let tz: Tz = config.get_timezone().map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        let tz: Tz = config.get_timezone().map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
         tz.from_utc_datetime(&Utc::now().naive_utc()).date_naive()
     };
 
     let records = ChallengeRecord::list(pool, person_id)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     let mut results = Vec::with_capacity(records.len());
     for record in &records {
         let mut full = ChallengeFull::copy_record(record);
@@ -577,17 +578,17 @@ async fn get_challenge<'r>(
     person_id: Option<i64>,
     leaderboard_limit: Option<i32>,
     date_now: Option<String>
-) -> Result<Json<ChallengeFull>, Custom<String>> {
+) -> Result<Json<ChallengeFull>, ApiError> {
     let person_id_for_dailies = check_challenge_permission(&login, &person_id, "admin role required to view other user challenge totals")?;
     let simple_record: ChallengeRecord = ChallengeRecord::query_by_id(pool, id, person_id)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     // Set date_now to the current time clock if not specified as a parameter
     let date_now = if let Some(date_now) = date_now {
-        NaiveDate::parse_from_str(&date_now, DATE_FORMAT).map_err(|e| Custom(Status::BadRequest, e.to_string()))?
+        NaiveDate::parse_from_str(&date_now, DATE_FORMAT).map_err(|e| ApiError::new(Status::BadRequest, e.to_string()))?
     } else {
-        let tz: Tz = config.get_timezone().map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        let tz: Tz = config.get_timezone().map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
         tz.from_utc_datetime(&Utc::now().naive_utc()).date_naive()
     };
 
@@ -603,12 +604,12 @@ async fn get_activity(
     pool: &State<PgPool>,
     login: LoginSession,
     activity_id: i64
-) -> Result<Json<Activity>, Custom<String>> {
+) -> Result<Json<Activity>, ApiError> {
     let activity = Activity::query_by_id(pool, activity_id).await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-        .and_then(|o: Option<Activity>| o.ok_or(Custom(Status::NotFound, "activity not found".to_string())))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
+        .and_then(|o: Option<Activity>| o.ok_or(ApiError::new(Status::NotFound, "activity not found".to_string())))?;
     if !login.is_admin() && login.uid != activity.person_id {
-        return Err(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required to view other user activities".to_string()));
     }
 
     Ok(Json::from(activity))
@@ -619,14 +620,14 @@ async fn create_activity(
     pool: &State<PgPool>,
     login: LoginSession,
     activity: Json<NewActivity>
-) -> Result<Created<&'static str>, Custom<String>> {
+) -> Result<Created<&'static str>, ApiError> {
     if !login.is_admin() && activity.person_id != login.uid {
-        return Err(Custom(Status::Forbidden, "admin role required to create activities for other users".to_owned()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required to create activities for other users".to_owned()));
     }  
     let activity_id = activity.save(pool).await
         .map_err(|e| match e {
-            sqlx::Error::InvalidArgument(msg) => Custom(Status::UnprocessableEntity, msg.to_string()),
-            _ => Custom(Status::InternalServerError, e.to_string())
+            sqlx::Error::InvalidArgument(msg) => ApiError::new(Status::UnprocessableEntity, msg.to_string()),
+            _ => ApiError::new(Status::InternalServerError, e.to_string())
         })?;
     Ok(Created::new(format!("/activities/{}", activity_id)))
 }
@@ -636,7 +637,7 @@ async fn delete_activity(
     pool: &State<PgPool>,
     login: LoginSession,
     activity_id: i64
-) -> Result<NoContent, Custom<String>> {
+) -> Result<NoContent, ApiError> {
     let mut qb = QueryBuilder::new("DELETE FROM activity");
     let mut wc = WhereClause::init();
     
@@ -649,8 +650,8 @@ async fn delete_activity(
     qb.build()
         .fetch_optional(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
-        .and_then(|r| r.ok_or(Custom(Status::NotFound, "activity not found or user not allowed to delete".to_string())))
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
+        .and_then(|r| r.ok_or(ApiError::new(Status::NotFound, "activity not found or user not allowed to delete".to_string())))
         .map(|_| NoContent)
 }
 
@@ -659,7 +660,7 @@ async fn delete_activity(
 mod tests {
     use chrono::{Days, NaiveDate, Utc};
     use rocket::http::Status;
-    use rocket::response::status::Custom;
+    use crate::apierror::ApiError;
     use rocket::serde::json::Json;
     use rocket::State;
     use sqlx::{query_scalar, PgPool, Row};
@@ -925,7 +926,7 @@ mod tests {
             None,
             None
         ).await.unwrap_err();
-        assert_eq!(Custom(Status::Forbidden, "admin role required to view other user challenge totals".to_string()), err);
+        assert_eq!(ApiError::new(Status::Forbidden, "admin role required to view other user challenge totals".to_string()), err);
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
@@ -983,7 +984,7 @@ mod tests {
 
         let login = find_user_login_by_name(&pool, "user2", "member").await;
         let err = crate::activities::get_activity(State::from(&pool), login, activity_id ).await.unwrap_err();
-        assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
+        assert_eq!(ApiError::new(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
@@ -1026,7 +1027,7 @@ mod tests {
         let nonadmin_login = find_user_login_by_name(&pool, "user2", "member").await;
 
         let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), Some(user1), None, None, None).await.unwrap_err();
-        assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
+        assert_eq!(ApiError::new(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql", "fixtures/activities.sql"))]
@@ -1035,7 +1036,7 @@ mod tests {
         let nonadmin_login = find_user_login_by_name(&pool, "user2", "member").await;
 
         let err = crate::activities::list_activities(State::from(&pool), nonadmin_login, Some(challenge), None, None, None, None).await.unwrap_err();
-        assert_eq!(Custom(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
+        assert_eq!(ApiError::new(Status::Forbidden, "admin role required to view other user activities".to_string()), err);
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql", "fixtures/challenges.sql"))]
@@ -1070,7 +1071,7 @@ mod tests {
         let login = find_user_login_by_name(&pool, "user2", "member").await;
         assert_eq!(0, count_activities(&pool).await);
         let error = crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.unwrap_err();
-        assert_eq!(Custom(Status::Forbidden, "admin role required to create activities for other users".to_string()), error);
+        assert_eq!(ApiError::new(Status::Forbidden, "admin role required to create activities for other users".to_string()), error);
         assert_eq!(0, count_activities(&pool).await);
     }
 
@@ -1119,7 +1120,7 @@ mod tests {
         let login = find_user_login_by_name(&pool, "user1", "member").await;
         assert_eq!(0, count_activities(&pool).await);
         let err = crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.unwrap_err();
-        assert_eq!(Custom(Status::UnprocessableEntity, "either challenge_id or activity_type required".to_string()), err);
+        assert_eq!(ApiError::new(Status::UnprocessableEntity, "either challenge_id or activity_type required".to_string()), err);
         assert_eq!(0, count_activities(&pool).await);
     }
 
@@ -1156,7 +1157,7 @@ mod tests {
         let login = find_user_login_by_name(&pool, "user1", "member").await;
         assert_eq!(0, count_activities(&pool).await);
         let err = crate::activities::create_activity(State::from(&pool), login, Json(activity)).await.unwrap_err();
-        assert_eq!(Custom(Status::UnprocessableEntity, "activity_type clashes with challenge activity type".to_string()), err);
+        assert_eq!(ApiError::new(Status::UnprocessableEntity, "activity_type clashes with challenge activity type".to_string()), err);
         assert_eq!(0, count_activities(&pool).await);
     }
 
@@ -1199,7 +1200,7 @@ mod tests {
         let login = find_user_login_by_name(&pool, "user2", "member").await;
         let count = count_activities(&pool).await;
         let error = crate::activities::delete_activity(State::from(&pool), login, activities.first().unwrap().id).await.unwrap_err();
-        assert_eq!(Custom(Status::NotFound, "activity not found or user not allowed to delete".to_string()), error);
+        assert_eq!(ApiError::new(Status::NotFound, "activity not found or user not allowed to delete".to_string()), error);
         assert_eq!(count, count_activities(&pool).await, "activity should not have been deleted");
     }
 

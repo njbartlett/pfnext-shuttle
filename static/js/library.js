@@ -56,6 +56,20 @@ async function httpGetJson(url, onjson) {
     })
 }
 
+// API errors are JSON of the form {"code": "...", "message": "..."}; extract the
+// human-readable message, falling back to the raw text for non-JSON bodies
+function parseApiError(error_text) {
+    try {
+        const parsed = JSON.parse(error_text)
+        if (parsed && parsed.message) {
+            return parsed.message
+        }
+    } catch (e) {
+        // Not JSON, fall through to the raw text
+    }
+    return error_text
+}
+
 async function handleHttpError(err) {
     if (err.status == 401) {
         setAuthenticatedUser(null)
@@ -65,7 +79,7 @@ async function handleHttpError(err) {
     }
     if (typeof err.text === 'function') {
         return err.text().then(error_text => {
-            http_err.value.text = error_text
+            http_err.value.text = parseApiError(error_text)
         })
     } else {
         http_err.value.text = err.message

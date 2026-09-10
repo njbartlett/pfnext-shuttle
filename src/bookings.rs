@@ -3,7 +3,8 @@ use chrono_tz::Tz;
 use rocket::futures::stream::BoxStream;
 use rocket::futures::StreamExt;
 use rocket::http::Status;
-use rocket::response::status::{Created, Custom, NoContent};
+use rocket::response::status::{Created, NoContent};
+use crate::apierror::{ApiError, CREDITS_OPT_IN_REQUIRED};
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::{Route, State};
@@ -181,7 +182,7 @@ async fn list_bookings(
     person_id: Option<i64>,
     from: Option<String>,
     to: Option<String>
-) -> Result<Json<Vec<SessionBookingFull>>, Custom<String>> {
+) -> Result<Json<Vec<SessionBookingFull>>, ApiError> {
     // Permission Check...
     let allowed: bool;
     if login.is_admin() {
@@ -204,7 +205,7 @@ async fn list_bookings(
         allowed = person_id == Some(login.uid);
     }
     if !allowed {
-        return Err(Custom(Status::Forbidden, "user is not allowed to view bookings for selected person and/or session".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "user is not allowed to view bookings for selected person and/or session".to_string()));
     }
 
     let bookings = SessionBookingFull::list(
@@ -218,11 +219,11 @@ async fn list_bookings(
     Ok(Json(bookings))
 }
 
-async fn take_result_from_stream<'a>(stream: &mut BoxStream<'a, Result<PgQueryResult, Error>>) -> Result<PgQueryResult, Custom<String>> {
+async fn take_result_from_stream<'a>(stream: &mut BoxStream<'a, Result<PgQueryResult, Error>>) -> Result<PgQueryResult, ApiError> {
     stream.next()
         .await
-        .ok_or(Custom(Status::InternalServerError, "no more results".to_string()))?
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .ok_or(ApiError::new(Status::InternalServerError, "no more results".to_string()))?
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
 }
 
 type CreditsCost = i16;
@@ -233,7 +234,7 @@ async fn create_booking(
     config: &State<Config>,
     login: LoginSession,
     booking: Json<SessionBooking>
-) -> Result<Created<Json<SessionBooking>>, Custom<String>> {
+) -> Result<Created<Json<SessionBooking>>, ApiError> {
     // Load details of the booking person and session
     let person_and_session = PersonSessionBookingDetails::load(pool, booking.person_id, booking.session_id).await?;
 
@@ -244,20 +245,20 @@ async fn create_booking(
         // Non-admins can only book on their own behalf
         if login.uid != booking.person_id {
             info!("person id {} attempted to book session on behalf of person id {}; denied: missing admin role", login.uid, booking.person_id);
-            return Err(Custom(Status::Forbidden, "Cannot create a booking for another user!".to_string()));
+            return Err(ApiError::new(Status::Forbidden, "Cannot create a booking for another user!".to_string()));
         }
 
         // Non-admins can only book future sessions
         let now = Utc::now();
         if person_and_session.datetime.lt(&now) {
             info!("person id {} attempted to book session in past (session id {}, date {}); denied: missing admin role", login.uid, booking.session_id, person_and_session.datetime);
-            return Err(Custom(Status::Forbidden, "Cannot create booking in the past".to_string()));
+            return Err(ApiError::new(Status::Forbidden, "Cannot create booking in the past".to_string()));
         }
         // Non-admins cannot book after the booking deadline
         let booking_deadline = person_and_session.datetime - Duration::minutes(person_and_session.booking_deadline_mins);
         if booking_deadline.lt(&now) {
             info!("person id {} attempted to book session id {} after booking deadline {}; denied: missing admin role", login.uid, booking.session_id, booking_deadline);
-            return Err(Custom(Status::Forbidden, "Cannot create booking after the booking deadline".to_string()));
+            return Err(ApiError::new(Status::Forbidden, "Cannot create booking after the booking deadline".to_string()));
         }
 
         let credits_to_use = booking.credits_used.unwrap_or(0);
@@ -275,9 +276,9 @@ async fn check_bookable(
     config: &Config,
     person_and_session: &PersonSessionBookingDetails,
     use_credits: bool
-) -> Result<CreditsCost, Custom<String>> {
+) -> Result<CreditsCost, ApiError> {
     // Check whether the user has full membership or a usable limited membership
-    let membership_check: Result<CreditsCost, Custom<String>>;
+    let membership_check: Result<CreditsCost, ApiError>;
    
     if person_and_session.person_roles.has_role(ROLE_FULL_MEMBER) {
         membership_check = Ok(0);
@@ -286,24 +287,24 @@ async fn check_bookable(
         membership_check = if person_and_session.cost == 0 {
             Ok(0)
         } else {
-            let timezone = config.get_timezone().map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+            let timezone = config.get_timezone().map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
             check_limited_member_has_no_bookings_in_same_week(pool, &timezone, person_and_session.person_id, &person_and_session.datetime)
                 .await
                 .map(|_| 0)
         }
     } else {
-        membership_check = Err(Custom(Status::Forbidden, "Missing or expired membership, and insufficient Pay As You Go credits.".to_string()));
+        membership_check = Err(ApiError::new(Status::Forbidden, "Missing or expired membership, and insufficient Pay As You Go credits.".to_string()));
     }
 
     // If no usable membership, check for credits
     if membership_check.is_err() && membership_check.as_ref().err().unwrap().0 == Status::Forbidden {
         // let user_record = UserLoginRecord::load_by_id(pool, person_id).await
-        //     .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        //     .ok_or(Custom(Status::Unauthorized, "missing user record".to_string()))?;
+        //     .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        //     .ok_or(ApiError::new(Status::Unauthorized, "missing user record".to_string()))?;
 
         if person_and_session.person_credits >= person_and_session.cost {
             if !use_credits {
-                Err(Custom(Status::PaymentRequired, "Opt in to use credits for booking.".to_string()))
+                Err(ApiError::with_code(Status::PaymentRequired, CREDITS_OPT_IN_REQUIRED, "Opt in to use credits for booking.".to_string()))
             } else {
                 Ok(person_and_session.cost)
             }
@@ -321,7 +322,7 @@ async fn make_booking(
     person_and_session: &PersonSessionBookingDetails,
     credits_to_use: CreditsCost,
     originator: String
-) -> Result<(), Custom<String>> {
+) -> Result<(), ApiError> {
     // Make the booking
     if let Some(max_booking_count) = person_and_session.max_booking_count {
         book_session_with_max_bookings(pool, person_and_session.person_id, person_and_session.session_id, max_booking_count, credits_to_use).await?;
@@ -335,14 +336,14 @@ async fn make_booking(
             .bind(credits_to_use)
             .bind(person_and_session.person_id)
             .fetch_one(pool)
-            .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+            .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     }
 
     append_log(pool, &Some(originator), "CREATED BOOKING", format!("{}, credits_used={}", person_and_session, credits_to_use).as_str()).await?;
     Ok(())
 }
 
-async fn user_is_admin_for_session(pool: &PgPool, login: &LoginSession, session_id: i64) -> Result<bool, Custom<String>> {
+async fn user_is_admin_for_session(pool: &PgPool, login: &LoginSession, session_id: i64) -> Result<bool, ApiError> {
     if login.is_admin() {
         return Ok(true);
     }
@@ -353,7 +354,7 @@ async fn user_is_admin_for_session(pool: &PgPool, login: &LoginSession, session_
             .fetch_one(pool)
             .await
             .and_then(|r| r.try_get("id"))
-            .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+            .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
         return Ok(session_trainer_id == login.uid);
     }
     return Ok(false);
@@ -389,7 +390,7 @@ impl Display for PersonSessionBookingDetails {
 }
 
 impl PersonSessionBookingDetails {
-    async fn load(pool: &PgPool, person_id: i64, session_id: i64) -> Result<PersonSessionBookingDetails, Custom<String>> {
+    async fn load(pool: &PgPool, person_id: i64, session_id: i64) -> Result<PersonSessionBookingDetails, ApiError> {
         query_as("SELECT p.id AS person_id, p.name AS person_name, p.email AS person_email, p.roles AS person_roles, p.credits AS person_credits, s.id AS session_id, s.datetime, s.booking_deadline_mins, s.cost, st.name AS session_type_name, l.name AS session_location_name, s.max_booking_count,
             (SELECT COUNT(*) FROM booking AS b WHERE b.session_id = $1) AS booking_count
             FROM person AS p, session as s
@@ -402,11 +403,11 @@ impl PersonSessionBookingDetails {
             .bind(session_id)
             .fetch_one(pool)
             .await
-            .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+            .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
     }
 }
 
-async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezone: &Tz, uid: i64, session_datetime: &DateTime<FixedOffset>) -> Result<(), Custom<String>> {
+async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezone: &Tz, uid: i64, session_datetime: &DateTime<FixedOffset>) -> Result<(), ApiError> {
     // Get the date/time of the session and work out the start and end of the week that the session occurs in
     let datetime_in_local = timezone.from_utc_datetime(&session_datetime.naive_utc());
     let start_of_week_local = datetime_in_local
@@ -429,17 +430,17 @@ async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezo
         .fetch_one(pool)
         .await
         .and_then(|r| r.try_get(0))
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     // Error if there is at least one existing booking
     if existing_bookings_count > 0 {
-        return Err(Custom(Status::Forbidden, format!("Cannot book session: member already has {} booking(s) in this week.", existing_bookings_count)));
+        return Err(ApiError::new(Status::Forbidden, format!("Cannot book session: member already has {} booking(s) in this week.", existing_bookings_count)));
     }
 
     Ok(())
 }
 
-async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, credits_used: CreditsCost) -> Result<(), Custom<String>> {
+async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, credits_used: CreditsCost) -> Result<(), ApiError> {
     let now = Utc::now();
     query_as("INSERT INTO booking (person_id, session_id, credits_used, booked_timestamp) VALUES ($1, $2, $3, $4) RETURNING person_id, session_id")
         .bind(person_id)
@@ -448,10 +449,10 @@ async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id:
         .bind(now)
         .fetch_one(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
 }
 
-async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, max_bookings: i64, credits_used: CreditsCost) -> Result<(), Custom<String>> {
+async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, max_bookings: i64, credits_used: CreditsCost) -> Result<(), ApiError> {
     let time_now_iso8601 = Utc::now().to_rfc3339();
     // Atomically update the booking table to insert a new booking if and only if the count of
     // bookings for the referenced session is less than the maximum. Adapted from this StackOverflow
@@ -478,7 +479,7 @@ async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_i
     info!("Insert result: {:?}", insert_result);
 
     if insert_result.rows_affected() == 0 {
-        return Err(Custom(Status::Conflict, format!("Session has reached it maximum number of bookings: {}.", max_bookings)));
+        return Err(ApiError::new(Status::Conflict, format!("Session has reached it maximum number of bookings: {}.", max_bookings)));
     }
     Ok(())
 }
@@ -491,25 +492,25 @@ async fn delete_booking(
     login: LoginSession,
     person_id: i64,
     session_id: i64
-) -> Result<Json<SessionBooking>, Custom<String>> {
+) -> Result<Json<SessionBooking>, ApiError> {
     let is_admin = user_is_admin_for_session(pool, &login, session_id).await?;
     if !is_admin && person_id != login.uid {
-        return Err(Custom(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string()));
     }
     let person_booking_details = PersonSessionBookingDetails::load(pool, person_id, session_id).await?;
     let was_fully_booked = Some(person_booking_details.booking_count) == person_booking_details.max_booking_count;
 
     // Error if session is in the past
     if !is_admin && person_booking_details.datetime.lt(&Utc::now()) {
-        return Err(Custom(Status::Forbidden, "Cannot cancel past booking.".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "Cannot cancel past booking.".to_string()));
     }
     let booking_deleted: SessionBooking = query_as("DELETE FROM booking WHERE person_id = $1 AND session_id = $2 RETURNING person_id, session_id, credits_used")
         .bind(person_id)
         .bind(session_id)
         .fetch_optional(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or(ApiError::new(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))?;
 
     // Restore the credits used for this booking
     let credits_refund = booking_deleted.credits_used.unwrap_or(0);
@@ -518,7 +519,7 @@ async fn delete_booking(
             .bind(booking_deleted.credits_used)
             .bind(person_id)
             .fetch_one(pool.inner())
-            .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+            .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     }
 
     let log_record = PersonSessionBookingDetails::load(pool, booking_deleted.person_id, booking_deleted.session_id).await?;
@@ -538,11 +539,11 @@ async fn promote_from_waitlist(
     config: &Config,
     app_env: &AppEnv,
     session_id: i64
-) -> Result<(), Custom<String>> {
-    let timezone = config.get_timezone().map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+) -> Result<(), ApiError> {
+    let timezone = config.get_timezone().map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     info!("Looking for a waitlist entry to promote to booking for session id {session_id}");
-    let mut waitlist_entry_opt = WaitlistEntryFull::take_top(pool, session_id).await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+    let mut waitlist_entry_opt = WaitlistEntryFull::take_top(pool, session_id).await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     while waitlist_entry_opt.is_some() {
         let waitlist_entry = waitlist_entry_opt.unwrap();
         info!("Taken waitlist entry: {:?}", waitlist_entry);
@@ -588,7 +589,7 @@ async fn promote_from_waitlist(
 
         // Top item on waitlist was not eligible, take the next one
         info!("Looking for next waitlist entry to promote to booking for session id {session_id}");
-        waitlist_entry_opt = WaitlistEntryFull::take_top(pool, session_id).await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        waitlist_entry_opt = WaitlistEntryFull::take_top(pool, session_id).await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     }
     info!("No more waitlist entries for session id {session_id}");
 
@@ -616,9 +617,9 @@ async fn list_feedback(
     pool: &State<PgPool>,
     login: LoginSession,
     session_id: i64
-) -> Result<Json<Vec<Feedback>>, Custom<String>> {
+) -> Result<Json<Vec<Feedback>>, ApiError> {
     if !user_is_admin_for_session(pool, &login, session_id).await? {
-        return Err(Custom(Status::Forbidden, "feedback listing requires session trainer or admin".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "feedback listing requires session trainer or admin".to_string()));
     }
     Ok(Json(Feedback::query_by_session_id(pool, session_id).await.map_err(to_internal_server_err)?))
 }
@@ -636,7 +637,7 @@ async fn update_booking(
     person_id: Option<i64>,
     session_id: i64,
     booking_update: Json<BookingUpdate>
-) -> Result<NoContent, Custom<String>> {
+) -> Result<NoContent, ApiError> {
     if let Some(attended) = booking_update.attended {
         update_attendance(pool, &login, person_id, session_id, attended).await?;
         if !attended && let Some(person_id) = person_id {
@@ -657,9 +658,9 @@ async fn update_attendance(
     person_id: Option<i64>,
     session_id: i64,
     attended: bool
-) -> Result<(), Custom<String>> {
+) -> Result<(), ApiError> {
     if !user_is_admin_for_session(pool, &login, session_id).await? {
-        return Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string()));
     }
 
     let mut qb = QueryBuilder::new("UPDATE booking SET attended = ");
@@ -673,7 +674,7 @@ async fn update_attendance(
         .await
         .map_err(to_internal_server_err)?;
     if query_result.rows_affected() == 0 {
-        return Err(Custom(Status::NotFound, format!("No booking(s) found for session_id={} and optional person_id={:?}", session_id, person_id)));
+        return Err(ApiError::new(Status::NotFound, format!("No booking(s) found for session_id={} and optional person_id={:?}", session_id, person_id)));
     }
     
     Ok(())
@@ -684,8 +685,8 @@ async fn update_attendance(
     //     .bind(session_id)
     //     .fetch_optional(pool)
     //     .await
-    //     .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-    //     .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))
+    //     .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+    //     .ok_or(ApiError::new(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))
 }
 
 async fn update_feedback(
@@ -693,16 +694,16 @@ async fn update_feedback(
     login: &LoginSession,
     person_id: i64, session_id: i64,
     feedback: &Feedback
-) -> Result<i64, Custom<String>> {
+) -> Result<i64, ApiError> {
     if login.uid != person_id {
-        return Err(Custom(Status::Forbidden, "invalid user".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "invalid user".to_string()));
     }
 
     let comment_length = feedback.comment.as_ref()
         .map(|s| s.graphemes(true).count())
         .unwrap_or(0);
     if comment_length > COMMENT_MAX_LENGTH {
-        return Err(Custom(Status::UnprocessableEntity, format!("comment length {comment_length} exceeds maximum length of {COMMENT_MAX_LENGTH} characters")));
+        return Err(ApiError::new(Status::UnprocessableEntity, format!("comment length {comment_length} exceeds maximum length of {COMMENT_MAX_LENGTH} characters")));
     }
     let comment: &Option<String> = match comment_length {
         0 => &None,
@@ -712,10 +713,10 @@ async fn update_feedback(
     let session_booking = SessionBookingFull::find(pool, session_id, person_id)
         .await
         .map_err(to_internal_server_err)?
-        .ok_or_else(|| Custom(Status::NotFound, "not found".to_string()))?;
+        .ok_or_else(|| ApiError::new(Status::NotFound, "not found".to_string()))?;
     
     if !session_booking.attended {
-        return Err(Custom(Status::Forbidden, "cannot rate a session that was not attended".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "cannot rate a session that was not attended".to_string()));
     }
 
     query_scalar("UPDATE booking SET rating = $1, comment = $2 WHERE person_id = $3 AND session_id = $4 RETURNING person_id")
@@ -726,21 +727,21 @@ async fn update_feedback(
         .fetch_optional(pool)
         .await
         .map_err(to_internal_server_err)?
-        .ok_or(Custom(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))
+        .ok_or(ApiError::new(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))
 }
 
 async fn delete_rating(
     pool: &PgPool,
     person_id: i64,
     session_id: i64
-) -> Result<i64, Custom<String>> {
+) -> Result<i64, ApiError> {
     query_scalar("UPDATE booking SET rating = NULL WHERE person_id = $1 AND session_id = $2 RETURNING person_id")
         .bind(person_id)
         .bind(session_id)
         .fetch_optional(pool)
         .await
         .map_err(to_internal_server_err)?
-        .ok_or(Custom(Status::NotFound, format!("No boollking found with person_id={} and session_id={}.", person_id, session_id)))
+        .ok_or(ApiError::new(Status::NotFound, format!("No boollking found with person_id={} and session_id={}.", person_id, session_id)))
 }
 
 #[derive(Serialize, FromRow)]
@@ -756,9 +757,9 @@ async fn get_attendance_stats(
     pool: &State<PgPool>,
     login: LoginSession,
     from: Option<String>, to: Option<String>, session_type: Vec<i32>
-) -> Result<Json<Vec<AttendanceStat>>, Custom<String>> {
+) -> Result<Json<Vec<AttendanceStat>>, ApiError> {
     if !login.is_admin() {
-        return Err(Custom(Status::Forbidden, "admin role required to view attendance stats".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required to view attendance stats".to_string()));
     }
     let mut qb = QueryBuilder::new("\
         SELECT p.id AS person_id, p.name AS name, p.email AS email, ( \
@@ -799,7 +800,7 @@ async fn get_attendance_stats(
     let stats = qb.build_query_as()
         .fetch_all(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     Ok(Json(stats))
 }
@@ -869,12 +870,12 @@ async fn list_waitlist(
     pool: &State<PgPool>,
     login: LoginSession,
     session_id: i64
-) -> Result<Json<Vec<WaitlistEntryFull>>, Custom<String>> {
+) -> Result<Json<Vec<WaitlistEntryFull>>, ApiError> {
     if !login.is_admin() {
-        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
     let waitlist = WaitlistEntryFull::list_by_session(pool, session_id).await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     Ok(Json(waitlist))
 }
 
@@ -889,9 +890,9 @@ async fn add_waitlist(
     pool: &State<PgPool>,
     login: LoginSession,
     new_entry: Json<WaitlistEntry>
-) -> Result<Created<Json<WaitlistEntryFull>>, Custom<String>> {
+) -> Result<Created<Json<WaitlistEntryFull>>, ApiError> {
     if !login.is_admin() && login.uid != new_entry.person_id {
-        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
     let waitlist_id: i64 = query("INSERT INTO waitlist (person_id, session_id) VALUES ($1, $2) RETURNING id")
         .bind(new_entry.person_id)
@@ -899,11 +900,11 @@ async fn add_waitlist(
         .fetch_one(pool.inner())
         .await
         .and_then(|row| row.try_get("id"))
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     let entry = WaitlistEntryFull::get_by_session_and_id(pool, new_entry.session_id, waitlist_id)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
    
     Ok(Created::new(format!("/waitlist/{waitlist_id}")).body(Json(entry)))
@@ -915,16 +916,16 @@ async fn delete_waitlist(
     login: LoginSession,
     person_id: i64,
     session_id: i64
-) -> Result<NoContent, Custom<String>> {
+) -> Result<NoContent, ApiError> {
     if !login.is_admin() && login.uid != person_id {
-        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
     query("DELETE FROM waitlist WHERE person_id = $1 AND session_id = $2 RETURNING id")
         .bind(person_id)
         .bind(session_id)
         .fetch_one(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     Ok(NoContent)
 }
 
@@ -933,9 +934,9 @@ async fn _promote_waitlist(
     pool: &State<PgPool>,
     login: LoginSession,
     waitlist_entry: Json<WaitlistEntry>
-) -> Result<NoContent, Custom<String>> {
+) -> Result<NoContent, ApiError> {
     if !login.is_admin() && login.uid != waitlist_entry.person_id {
-        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
     let result = query("
             WITH moved_entry AS (
@@ -948,9 +949,9 @@ async fn _promote_waitlist(
         .bind(waitlist_entry.session_id)
         .execute(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     if result.rows_affected() == 0 {
-        return Err(Custom(Status::NotFound, format!("no waitlist record found for persion_id={}, session_id={}", waitlist_entry.person_id, waitlist_entry.session_id)));
+        return Err(ApiError::new(Status::NotFound, format!("no waitlist record found for persion_id={}, session_id={}", waitlist_entry.person_id, waitlist_entry.session_id)));
     }
     Ok(NoContent)
 }
@@ -961,7 +962,7 @@ mod tests {
     use chrono::{DateTime, Days, Duration, FixedOffset, TimeDelta};
     use rocket::http::Status;
     use rocket::serde::json::Json;
-    use rocket::response::status::Custom;
+    use crate::apierror::{ApiError, CREDITS_OPT_IN_REQUIRED};
     use rocket::State;
     use sqlx::{query, query_as, query_scalar, Executor, FromRow, PgPool, Postgres, Row};
     use crate::loginsession::{LoginSession, Roles};
@@ -1120,7 +1121,7 @@ mod tests {
         // Create booking
         let login = create_login(member2_id, "member", "member");
         let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
-        assert_eq!(Err(Custom(Status::Forbidden, "Cannot create a booking for another user!".to_string())), result);
+        assert_eq!(Err(ApiError::new(Status::Forbidden, "Cannot create a booking for another user!".to_string())), result);
 
         assert_eq!(0, read_logged(&pool).await.len());
     }
@@ -1156,7 +1157,7 @@ mod tests {
 
         let login = create_login(member2_id, "member", "member");
         let result = crate::bookings::delete_booking(State::from(&pool), State::from(&Config::load().unwrap()), State::from(&AppEnv::default()), login, member1_id, session_id).await;
-        assert_eq!(Err(Custom(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string())), result);
+        assert_eq!(Err(ApiError::new(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string())), result);
 
         assert_eq!(0, read_logged(&pool).await.len());
     }
@@ -1214,7 +1215,7 @@ mod tests {
 
         let login = create_login(trainer2_id, "trainer2", "trainer");
         let result = crate::bookings::delete_booking(State::from(&pool), State::from(&Config::load().unwrap()), State::from(&AppEnv::default()), login, member_id, session_id).await;
-        assert_eq!(Err(Custom(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string())), result);
+        assert_eq!(Err(ApiError::new(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string())), result);
 
         assert_eq!(0, read_logged(&pool).await.len());
     }
@@ -1236,7 +1237,7 @@ mod tests {
         // Create booking
         let login = create_login(trainer2_id, "trainer2", "trainer");
         let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
-        assert_eq!(Err(Custom(Status::Forbidden, "Cannot create a booking for another user!".to_string())), result);
+        assert_eq!(Err(ApiError::new(Status::Forbidden, "Cannot create a booking for another user!".to_string())), result);
 
         assert_eq!(0, read_logged(&pool).await.len());
     }
@@ -1280,7 +1281,7 @@ mod tests {
 
         // Create booking as member: fails
         let member_login = create_login(member_id, "member", "member");
-        assert_eq!(Custom(Status::Forbidden, "Cannot create booking in the past".to_string()), crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), member_login, Json(booking.clone())).await.unwrap_err());
+        assert_eq!(ApiError::new(Status::Forbidden, "Cannot create booking in the past".to_string()), crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), member_login, Json(booking.clone())).await.unwrap_err());
 
         // Create booking as admin: succeeds
         let admin_login = create_login(admin_id, "admin", "admin");
@@ -1308,7 +1309,7 @@ mod tests {
 
         // Create booking as member: fails
         let member_login = create_login(member_id, "member", "member");
-        assert_eq!(Custom(Status::Forbidden, "Cannot create booking after the booking deadline".to_string()), crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), member_login, Json(booking.clone())).await.unwrap_err());
+        assert_eq!(ApiError::new(Status::Forbidden, "Cannot create booking after the booking deadline".to_string()), crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), member_login, Json(booking.clone())).await.unwrap_err());
 
         // Create booking as admin: succeeds
         let admin_login = create_login(admin_id, "admin", "admin");
@@ -1334,7 +1335,7 @@ mod tests {
         let login = create_login(member_id, "test", "");
         let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
         assert!(result.is_err());
-        assert_eq!(Custom(Status::Forbidden, "Missing or expired membership, and insufficient Pay As You Go credits.".to_string()), result.err().unwrap());
+        assert_eq!(ApiError::new(Status::Forbidden, "Missing or expired membership, and insufficient Pay As You Go credits.".to_string()), result.err().unwrap());
 
         // Postcondition: still zero bookings
         assert_eq!(0, count_bookings(&pool).await);
@@ -1375,7 +1376,7 @@ mod tests {
         // Create booking 2: fails
         let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login.clone(), Json(booking_2.clone())).await;
         assert!(result.is_err());
-        assert_eq!(Custom(Status::Forbidden, "Cannot book session: member already has 1 booking(s) in this week.".to_string()), result.err().unwrap());
+        assert_eq!(ApiError::new(Status::Forbidden, "Cannot book session: member already has 1 booking(s) in this week.".to_string()), result.err().unwrap());
 
         // Postcondition 2: one booking
         assert_eq!(1, count_bookings(&pool).await);
@@ -1462,7 +1463,7 @@ mod tests {
         let login = create_login(member_id, "nonmember", "");
         let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
         assert!(result.is_err());
-        assert_eq!(Custom(Status::PaymentRequired, "Opt in to use credits for booking.".to_string()), result.err().unwrap());
+        assert_eq!(ApiError::with_code(Status::PaymentRequired, CREDITS_OPT_IN_REQUIRED, "Opt in to use credits for booking.".to_string()), result.err().unwrap());
 
         // Postcondition: still zero bookings
         assert_eq!(0, count_bookings(&pool).await);
@@ -1541,7 +1542,7 @@ mod tests {
         // Create booking: fail due to max bookings reached
         let login = create_login(member_id, "PAYG User", "");
         let booking_result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await.err().unwrap();
-        assert_eq!(Custom(Status::Conflict, "Session has reached it maximum number of bookings: 0.".to_string()), booking_result);
+        assert_eq!(ApiError::new(Status::Conflict, "Session has reached it maximum number of bookings: 0.".to_string()), booking_result);
 
         // Still zero bookings
         assert_eq!(0, count_bookings(&pool).await);
@@ -1586,7 +1587,7 @@ mod tests {
         let login = create_login(member_id, "Test User", "");
         let result = crate::bookings::list_bookings(State::from(&pool), login, Some(session_id), None, None, None).await;
 
-        assert_eq!(Err(Custom(Status::Forbidden, "user is not allowed to view bookings for selected person and/or session".to_string())), result);
+        assert_eq!(Err(ApiError::new(Status::Forbidden, "user is not allowed to view bookings for selected person and/or session".to_string())), result);
     }
 
     #[sqlx::test]
@@ -1617,7 +1618,7 @@ mod tests {
         let login = create_login(trainer2_id, "trainer", "trainer");
         let result = crate::bookings::list_bookings(State::from(&pool), login, Some(session_id), None, None, None).await;
 
-        assert_eq!(Err(Custom(Status::Forbidden, "user is not allowed to view bookings for selected person and/or session".to_string())), result);
+        assert_eq!(Err(ApiError::new(Status::Forbidden, "user is not allowed to view bookings for selected person and/or session".to_string())), result);
     }
 
     #[sqlx::test]
@@ -1677,7 +1678,7 @@ mod tests {
         let err = crate::bookings::update_booking(State::from(&pool), login, None, 1000, Json(BookingUpdate{attended: Some(true), feedback: None}))
             .await
             .expect_err("Update booking should fail");
-        assert_eq!(err, Custom(Status::NotFound, "No booking(s) found for session_id=1000 and optional person_id=None".to_string()));
+        assert_eq!(err, ApiError::new(Status::NotFound, "No booking(s) found for session_id=1000 and optional person_id=None".to_string()));
         assert_eq!(0, count_bookings_attended(&pool, true).await);
     }
 
@@ -1693,7 +1694,7 @@ mod tests {
 
         let login = create_login(member_id, "member", "member");
         let result = crate::bookings::update_booking(State::from(&pool), login, Some(member_id), session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await;
-        assert_eq!(Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
+        assert_eq!(Err(ApiError::new(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
         assert_eq!(0, count_bookings_attended(&pool, true).await);
     }
 
@@ -1725,7 +1726,7 @@ mod tests {
 
         let login = create_login(trainer2_id, "trainer2", "trainer");
         let result = crate::bookings::update_booking(State::from(&pool), login, Some(member_id), session_id, Json(BookingUpdate{attended: Some(true), feedback: None})).await;
-        assert_eq!(Err(Custom(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
+        assert_eq!(Err(ApiError::new(Status::Forbidden, "cannot update booking: must be the session trainer or an admin".to_string())), result);
         assert_eq!(0, count_bookings_attended(&pool, true).await);
     }
 
@@ -1784,7 +1785,7 @@ mod tests {
         // User2 tries to book => fails
         let config = Config::load().unwrap();
         let err = crate::bookings::create_booking(State::from(&pool), State::from(&config), user2_login.clone(), Json(SessionBooking { person_id: user2_id, session_id, credits_used: None })).await.unwrap_err();
-        assert_eq!(Custom(Status::Conflict, "Session has reached it maximum number of bookings: 1.".to_string()), err);
+        assert_eq!(ApiError::new(Status::Conflict, "Session has reached it maximum number of bookings: 1.".to_string()), err);
         
         // User 2 joins waitlist
         add_waitlist(State::from(&pool), user2_login.clone(), Json(WaitlistEntry { person_id: user2_id, session_id })).await.unwrap();

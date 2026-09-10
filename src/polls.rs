@@ -1,4 +1,5 @@
-use rocket::{Route, State, http::Status, response::status::Custom, serde::json::Json};
+use rocket::{Route, State, http::Status, serde::json::Json};
+use crate::apierror::ApiError;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool, QueryBuilder, query, query_as, query_scalar};
 
@@ -194,9 +195,9 @@ async fn list_polls(
     pool: &State<PgPool>,
     login: LoginSession,
     person_id: Option<i64>,
-) -> Result<Json<Vec<PollWithVotes>>, Custom<String>> {
+) -> Result<Json<Vec<PollWithVotes>>, ApiError> {
     if !login.is_admin() && Some(login.uid) != person_id {
-        return Err(Custom(Status::Forbidden, "admin role required to view other user votes".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required to view other user votes".to_string()));
     }
     PollWithVotes::query(pool, None, person_id)
         .await
@@ -216,9 +217,9 @@ async fn post_vote(
     pool: &State<PgPool>,
     login: LoginSession,
     vote: Json<PostedVote>
-) -> Result<Json<Vote>, Custom<String>> {
+) -> Result<Json<Vote>, ApiError> {
     if !login.is_admin() && login.uid != vote.person_id {
-        return Err(Custom(Status::Forbidden, "admin role required to vote for other users".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required to vote for other users".to_string()));
     }
     Vote::create(pool, vote.poll_id, vote.person_id, &vote.value)
         .await
@@ -231,13 +232,13 @@ async fn delete_vote(
     pool: &State<PgPool>,
     login: LoginSession,
     vote_id: i64
-) -> Result<Json<Vote>, Custom<String>> {
+) -> Result<Json<Vote>, ApiError> {
     let vote = Vote::get_by_id(pool, vote_id)
         .await
         .map_err(to_internal_server_err)?
-        .ok_or_else(|| Custom(Status::NotFound, "vote not found".to_string()))?;
+        .ok_or_else(|| ApiError::new(Status::NotFound, "vote not found".to_string()))?;
     if !login.is_admin() && login.uid != vote.person_id {
-        return Err(Custom(Status::Forbidden, "admin role required to delete other users' votes".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required to delete other users' votes".to_string()));
     }
 
     vote.delete(pool).await
@@ -248,7 +249,8 @@ async fn delete_vote(
 
 #[cfg(test)]
 mod tests {
-    use rocket::{State, http::Status, response::status::Custom, serde::json::Json};
+    use rocket::{State, http::Status, serde::json::Json};
+    use crate::apierror::ApiError;
     use sqlx::PgPool;
 
     use crate::{polls::{PollWithVotes, PostedVote, Vote}, testcommon::{find_person_id_by_name, find_user_login_by_name}};
@@ -482,7 +484,7 @@ mod tests {
                 value: "Also yello".to_string()
             })
         ).await.expect_err("SHOULD NOT be able to post third vote when limit is 2");
-        assert_eq!(third_vote_err, Custom(Status::InternalServerError, "vote limit exceeded".to_string()));
+        assert_eq!(third_vote_err, ApiError::new(Status::InternalServerError, "vote limit exceeded".to_string()));
         let votes_after_second_post = Vote::query(&pool, Some(poll.id), Some(login.uid)).await.expect("Query after posting vote should succeed");
         assert_eq!(votes_after_second_post.len(), 2);
     }

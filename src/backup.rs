@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use rocket::{http::Status, Route};
-use rocket::response::status::Custom;
+use crate::apierror::ApiError;
 use rocket::serde::json::Json;
 use rocket::State;
 use serde::Serialize;
@@ -71,9 +71,9 @@ struct AllTables {
 }
 
 #[get("/backup")]
-async fn backup_all(pool: &State<PgPool>, login: LoginSession) -> Result<Json<AllTables>, Custom<String>> {
+async fn backup_all(pool: &State<PgPool>, login: LoginSession) -> Result<Json<AllTables>, ApiError> {
     if !login.is_admin() {
-        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
     Ok(Json(AllTables{
         session_type: session_type_table(pool).await?,
@@ -85,28 +85,28 @@ async fn backup_all(pool: &State<PgPool>, login: LoginSession) -> Result<Json<Al
 }
 
 
-async fn person_table(pool: &PgPool) -> Result<Vec<PersonRow>, Custom<String>> {
+async fn person_table(pool: &PgPool) -> Result<Vec<PersonRow>, ApiError> {
     query_as("SELECT * FROM person")
         .fetch_all(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, format!("person: {}", e)))
+        .map_err(|e| ApiError::new(Status::InternalServerError, format!("person: {}", e)))
 }
 
-async fn session_type_table(pool: &PgPool) -> Result<Vec<SessionTypeRow>, Custom<String>> {
+async fn session_type_table(pool: &PgPool) -> Result<Vec<SessionTypeRow>, ApiError> {
     query_as("SELECT * FROM session_type")
         .fetch_all(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, format!("session_type: {}", e)))
+        .map_err(|e| ApiError::new(Status::InternalServerError, format!("session_type: {}", e)))
 }
 
-async fn location_table(pool: &PgPool) -> Result<Vec<LocationRow>, Custom<String>> {
+async fn location_table(pool: &PgPool) -> Result<Vec<LocationRow>, ApiError> {
     query_as("SELECT * FROM location")
         .fetch_all(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, format!("location: {}", e)))
+        .map_err(|e| ApiError::new(Status::InternalServerError, format!("location: {}", e)))
 }
 
-async fn session_table(pool: &PgPool) -> Result<Vec<SessionRow>, Custom<String>> {
+async fn session_table(pool: &PgPool) -> Result<Vec<SessionRow>, ApiError> {
     query_as("SELECT s.id, s.datetime, s.duration_mins, s.max_booking_count AS max_booking_count, s.notes AS notes, s.cost AS cost, st.name AS session_type_name, l.name AS location_name, t.email AS trainer_email \
             FROM session AS s \
             JOIN session_type AS st ON s.session_type = st.id \
@@ -114,10 +114,10 @@ async fn session_table(pool: &PgPool) -> Result<Vec<SessionRow>, Custom<String>>
             LEFT JOIN person AS t ON s.trainer = t.id")
         .fetch_all(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, format!("session: {}", e)))
+        .map_err(|e| ApiError::new(Status::InternalServerError, format!("session: {}", e)))
 }
 
-async fn booking_table(pool: &PgPool) -> Result<Vec<BookingRow>, Custom<String>> {
+async fn booking_table(pool: &PgPool) -> Result<Vec<BookingRow>, ApiError> {
     query_as("SELECT p.email AS person_email, s.datetime AS session_datetime, l.name AS session_location_name, t.email AS session_trainer_email \
             FROM booking as b \
             JOIN person AS p ON b.person_id = p.id \
@@ -126,7 +126,7 @@ async fn booking_table(pool: &PgPool) -> Result<Vec<BookingRow>, Custom<String>>
             LEFT JOIN person AS t ON s.trainer = t.id")
         .fetch_all(pool)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, format!("booking: {}", e)))
+        .map_err(|e| ApiError::new(Status::InternalServerError, format!("booking: {}", e)))
 }
 
 #[cfg(test)]

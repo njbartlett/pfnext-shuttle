@@ -9,9 +9,9 @@ use dotenv::dotenv;
 
 use log::info;
 
-use rocket::http::Status;
-use rocket::response::status::Custom;
+use rocket::http::{Method, Status};
 use rocket::{Build, Request, Rocket, Route};
+use rocket_cors::{AllowedHeaders, AllowedOrigins, CorsOptions};
 use rocket_dyn_templates::Template;
 
 use sqlx::postgres::PgPoolOptions;
@@ -19,11 +19,13 @@ use sqlx::Executor;
 
 use user_agent_parser::{self, UserAgentParser};
 
+use crate::apierror::ApiError;
 use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
 use crate::templates::Templates;
 
 mod activities;
+mod apierror;
 mod backup;
 mod blog;
 mod bookings;
@@ -41,23 +43,23 @@ mod users;
 mod whereclause;
 
 #[catch(401)]
-fn api_unauthorized(request: &Request) -> Custom<String> {
+fn api_unauthorized(request: &Request) -> ApiError {
     let auth_error = request.local_cache::<Option<AuthenticationError>, _>(|| None);
     match auth_error {
         Some(err) => match err {
-            AuthenticationError::MissingSession => Custom(
+            AuthenticationError::MissingSession => ApiError::new(
                 Status::Unauthorized,
                 "Your login session has expired".to_string(),
             ),
-            AuthenticationError::MissingDatabase => Custom(
+            AuthenticationError::MissingDatabase => ApiError::new(
                 Status::InternalServerError,
                 "Failed to validate session".to_string(),
             ),
             AuthenticationError::DatabaseError(err) => {
-                Custom(Status::InternalServerError, err.to_string())
+                ApiError::new(Status::InternalServerError, err.to_string())
             }
         },
-        None => Custom(
+        None => ApiError::new(
             Status::InternalServerError,
             "Failed to authenticate user".to_string(),
         ),
@@ -65,8 +67,8 @@ fn api_unauthorized(request: &Request) -> Custom<String> {
 }
 
 #[catch(404)]
-fn api_notfound(_: &Request) -> Custom<String> {
-    Custom(Status::NotFound, "not found".to_string())
+fn api_notfound(_: &Request) -> ApiError {
+    ApiError::new(Status::NotFound, "not found".to_string())
 }
 
 #[launch]
@@ -109,6 +111,22 @@ async fn launch() -> Rocket<Build> {
         engines.tera.autoescape_on(vec![".html", ".xml", ".js"]);
     });
 
+    // Configure CORS for non-same-origin clients (e.g. the mobile app's
+    // capacitor://localhost and http://localhost origins), from the
+    // comma-separated CORS_ALLOWED environment variable
+    let cors = build_cors(&app_env.cors_allowed);
+
+    let api_routes = vec![
+        activities::routes(),
+        bookings::routes(),
+        loginsession::routes(),
+        sessions::routes(),
+        users::routes(),
+        transaction_log::routes(),
+        backup::routes(),
+        polls::routes(),
+    ].into_iter().flatten().collect::<Vec<Route>>();
+
     // Configure Rocket
     rocket::build()
         .manage(config)
@@ -117,18 +135,63 @@ async fn launch() -> Rocket<Build> {
         .manage(user_agent_parser)
         .manage(templates)
         .attach(templates_fairing)
+        .attach(cors)
         .mount("/", crate::templates::routes())
         .register("/", crate::templates::catchers())
         .mount("/blog", blog::routes())
+        // The "/api" catchers also cover the longer "/api/v1" prefix
         .register("/api", catchers![api_unauthorized, api_notfound])
-        .mount("/api", vec![
-            activities::routes(),
-            bookings::routes(),
-            loginsession::routes(),
-            sessions::routes(),
-            users::routes(),
-            transaction_log::routes(),
-            backup::routes(),
-            polls::routes(),
-        ].into_iter().flatten().collect::<Vec<Route>>())
+        // Unversioned mount consumed by the website; "/api/v1" is the frozen
+        // contract for mobile clients, which cannot be updated in lockstep
+        .mount("/api", api_routes.clone())
+        .mount("/api/v1", api_routes)
+}
+
+fn build_cors(cors_allowed: &str) -> rocket_cors::Cors {
+    // CORS_ALLOWED entries (comma-separated, so no commas within an entry):
+    //  - starting with "^": a regex matched against the whole Origin, e.g.
+    //    ^https?://localhost(:\d+)?$ for the local dev server on any port.
+    //    Browsers send an Origin header on all POST/PUT/PATCH/DELETE requests,
+    //    including same-origin ones, so the site's own origin must be allowed
+    //    or logins and bookings from the website itself get rejected.
+    //  - http(s) origins: matched exactly.
+    //  - other schemes (e.g. capacitor://localhost on iOS): "opaque" to the URL
+    //    parser and rejected by rocket_cors in the exact list, so matched via an
+    //    escaped regex instead.
+    let entries: Vec<&str> = cors_allowed
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let (regex, exact): (Vec<&str>, Vec<&str>) = entries.iter()
+        .partition(|o| o.starts_with('^') || !(o.starts_with("http://") || o.starts_with("https://")));
+    let regex_patterns: Vec<String> = regex.iter()
+        .map(|o| if o.starts_with('^') {
+            o.to_string()
+        } else {
+            format!("^{}$", o.replace('.', "\\."))
+        })
+        .collect();
+    CorsOptions {
+        allowed_origins: AllowedOrigins::some(&exact, &regex_patterns),
+        allowed_methods: [Method::Get, Method::Post, Method::Put, Method::Patch, Method::Delete, Method::Options]
+            .into_iter().map(From::from).collect(),
+        allowed_headers: AllowedHeaders::some(&["Authorization", "Content-Type", "Accept"]),
+        allow_credentials: true,
+        ..Default::default()
+    }
+    .to_cors()
+    .expect("Failed to build CORS fairing")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_cors;
+
+    #[test]
+    fn test_build_cors_accepts_mixed_entries() {
+        // Exact http(s) origins, an opaque scheme, and a raw regex must all build
+        build_cors("https://anotherlevelfitness.uk, capacitor://localhost, ^https?://localhost(:\\d+)?$");
+        build_cors("");
+    }
 }

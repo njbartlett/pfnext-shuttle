@@ -85,7 +85,7 @@ async function bookSession(session, credits_used) {
     })
     .catch(error => {
         error.text().then(error_text => {
-            http_err.value = error_text
+            http_err.value = parseApiError(error_text)
         })
     })
 }
@@ -336,7 +336,7 @@ function saveSessionFeedback() {
         return loadSessions()
     }).catch(err => {
         err.text().then(msg => {
-            selected_session_feedback.value.error = msg
+            selected_session_feedback.value.error = parseApiError(msg)
         })
     })
 }

@@ -48,7 +48,7 @@ async function onSubmit() {
     }).catch(error => {
         error.text().then(error_text => {
             register_result.value = {
-                message:  error_text,
+                message:  parseApiError(error_text),
                 is_error: true,
                 is_existing_user: error.status === 409 // Conflict
             }

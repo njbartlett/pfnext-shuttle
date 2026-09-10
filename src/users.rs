@@ -4,7 +4,8 @@ use chrono::{DateTime, Duration, Utc};
 use password_auth::{generate_hash, verify_password};
 use passwords::PasswordGenerator;
 use rocket::http::{Header, Status};
-use rocket::response::status::{Accepted, Custom, NoContent};
+use rocket::response::status::{Accepted, NoContent};
+use crate::apierror::ApiError;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
 use rocket::{Route, State};
@@ -91,26 +92,26 @@ struct LoggedInUser {
     access_token: String
 }
 
-async fn verify_user_by_id(pool: &PgPool, user_id: i64, password: &str) -> Result<UserLoginRecord, Custom<String>> {
+async fn verify_user_by_id(pool: &PgPool, user_id: i64, password: &str) -> Result<UserLoginRecord, ApiError> {
     let user_record = UserLoginRecord::load_by_id(pool, user_id)
-        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or_else(|| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
+        .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| ApiError::new(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
     verify_user(user_record, password)
 }
 
-async fn verify_user_by_email(pool: &PgPool, email: &str, password: &str) -> Result<UserLoginRecord, Custom<String>> {
+async fn verify_user_by_email(pool: &PgPool, email: &str, password: &str) -> Result<UserLoginRecord, ApiError> {
     let user_record = UserLoginRecord::load_by_email(pool, email)
-        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or_else(|| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
+        .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| ApiError::new(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
     verify_user(user_record, password)
 }
 
-fn verify_user(login_record: UserLoginRecord, password: &str) -> Result<UserLoginRecord, Custom<String>> {
+fn verify_user(login_record: UserLoginRecord, password: &str) -> Result<UserLoginRecord, ApiError> {
     let recorded_pwd = login_record.pwd
         .as_ref()
-        .ok_or_else(|| Custom(Status::Forbidden, "please reset your password".to_string()))?;
+        .ok_or_else(|| ApiError::new(Status::Forbidden, "please reset your password".to_string()))?;
     verify_password(password, &recorded_pwd)
-        .map_err(|_| Custom(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
+        .map_err(|_| ApiError::new(Status::Unauthorized, INVALID_LOGIN_MESSAGE.to_string()))?;
 
     Ok(login_record)
 }
@@ -152,10 +153,10 @@ async fn request_pwd_reset(
     config: &State<Config>,
     app_env: &State<AppEnv>,
     reset_request: Json<PasswordResetRequest>
-) -> Result<Accepted<String>, Custom<String>> {
+) -> Result<Accepted<String>, ApiError> {
     let user_record = UserLoginRecord::load_by_email(state.inner(), &reset_request.email)
-        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or(Custom(Status::BadRequest, format!("user does not exist: {}", reset_request.email)))?;
+        .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or(ApiError::new(Status::BadRequest, format!("user does not exist: {}", reset_request.email)))?;
 
     // Fail if we have sent an email to this address within the last 2 mins
     let latest_previous_sent_time = Utc::now().add(TEMP_PASSWORD_MINIMUM_RESEND_WAIT);
@@ -165,9 +166,9 @@ async fn request_pwd_reset(
         .fetch_one(state.inner())
         .await
         .and_then(|r| r.try_get(0))
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     if latest_previous_sent_count > 0 {
-        return Err(Custom(Status::BadRequest, format!("Cannot send another reset email within {} minutes.", TEMP_PASSWORD_MINIMUM_RESEND_WAIT.num_minutes().abs())));
+        return Err(ApiError::new(Status::BadRequest, format!("Cannot send another reset email within {} minutes.", TEMP_PASSWORD_MINIMUM_RESEND_WAIT.num_minutes().abs())));
     }
 
     // Create temp password and send
@@ -175,7 +176,7 @@ async fn request_pwd_reset(
     let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &reset_request.reset_url, encode(&user_record.email), encode(&temp_password));
     let text = format!(include_str!("reset_email.txt"), &config.inner().branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     send_email(config, app_env, &user_record.name, &user_record.email, &format!("Password Reset for {}", &config.inner().branding), &text)
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     Ok(Accepted(format!("Password reset email sent to {}. Please check your spam folder if not received!", &user_record.email)))
 }
@@ -186,12 +187,12 @@ async fn register_user(
     config: &State<Config>,
     app_env: &State<AppEnv>,
     new_user: Json<NewUserRequest>
-) -> Result<Accepted<String>, Custom<String>> {
+) -> Result<Accepted<String>, ApiError> {
     // Error if already existing record for the specified email
     let existing_user_record = UserLoginRecord::load_by_email(state.inner(), &new_user.email)
-        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     if let Some(_existing) = existing_user_record {
-        return Err(Custom(Status::Conflict, "User already exists with this email address".to_string()));
+        return Err(ApiError::new(Status::Conflict, "User already exists with this email address".to_string()));
     }
 
     // Create user record with null password (must use password reset)
@@ -204,7 +205,7 @@ async fn register_user(
         .bind(&new_user.medical_info)
         .fetch_one(state.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     info!("Created new user id {} for {:?}", user_updated.id, &new_user);
 
     // Create temp password and send to email
@@ -213,7 +214,7 @@ async fn register_user(
     let text = format!(include_str!("register_email.txt"), &config.branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     send_email_async(config, app_env, &new_user.name, &new_user.email, &format!("New User Registration for {}", &config.branding), &text)
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     // Send notification email to admin
     let text = format!(include_str!("register_notify_email.txt"),
@@ -225,15 +226,15 @@ async fn register_user(
         &new_user.medical_info.as_ref().unwrap_or(&"None provided".to_string())
     );
     send_admin_email(config, app_env, &format!("New User Registration for {}", &config.branding), &text)
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     Ok(Accepted(format!("New user instructions email sent to {}. Please check your spam folder if not received!", &new_user.email)))
 }
 
-async fn create_temp_password(pool: &PgPool, user_id: i64) -> Result<String, Custom<String>> {
+async fn create_temp_password(pool: &PgPool, user_id: i64) -> Result<String, ApiError> {
     // Generate a temp password and expiry time
     let temp_password = PASSWORD_GENERATOR.generate_one()
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     let temp_password_hash = generate_hash(&temp_password);
     let now = Utc::now();
     let expiry_time = Utc::now().add(TEMP_PASSWORD_EXPIRY);
@@ -253,7 +254,7 @@ async fn create_temp_password(pool: &PgPool, user_id: i64) -> Result<String, Cus
         .bind(&expiry_time)
         .fetch_one(pool)
         .await
-        .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::BadRequest, e.to_string()))?;
     info!("Created temporary password for user with id {}", user_updated.id);
 
     // Since we are here, delete expired temp passwords
@@ -286,25 +287,25 @@ async fn reset_pwd(
     config: &State<Config>,
     app_env: &State<AppEnv>,
     user_pwd_reset: Json<UserPasswordReset>
-) -> Result<Accepted<String>, Custom<String>> {
+) -> Result<Accepted<String>, ApiError> {
     verify_suitable_password(&user_pwd_reset.new_password, &user_pwd_reset.temp_password)?;
 
     // Get the user => error if not found
     let user_record = UserLoginRecord::load_by_email(state.inner(), &user_pwd_reset.email)
-        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or(Custom(Status::BadRequest, format!("User does not exist with email address {}", &user_pwd_reset.email)))?;
+        .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or(ApiError::new(Status::BadRequest, format!("User does not exist with email address {}", &user_pwd_reset.email)))?;
 
     // Get the temporary password record and verify against user input
     let temp_pwd_record: TempPasswordRecord = query_as("SELECT person_id, pwd, expiry FROM temp_password WHERE person_id = $1")
         .bind(&user_record.id)
         .fetch_one(state.inner())
         .await
-        .map_err(|_e| Custom(Status::Forbidden, "Password reset has not been requested, or it has expired.".to_string()))?;
+        .map_err(|_e| ApiError::new(Status::Forbidden, "Password reset has not been requested, or it has expired.".to_string()))?;
     if temp_pwd_record.expiry.lt(&Utc::now()) {
-        return Err(Custom(Status::Forbidden, "Password reset has expired.".to_string()))
+        return Err(ApiError::new(Status::Forbidden, "Password reset has expired.".to_string()))
     }
     verify_password(&user_pwd_reset.temp_password, &temp_pwd_record.pwd)
-        .map_err(|_e| Custom(Status::Forbidden, INVALID_LOGIN_MESSAGE.to_string()))?;
+        .map_err(|_e| ApiError::new(Status::Forbidden, INVALID_LOGIN_MESSAGE.to_string()))?;
 
     // Update the user's main password
     let updated_user: UserUpdated = query_as("UPDATE person SET pwd = $1 WHERE id = $2 RETURNING id")
@@ -312,7 +313,7 @@ async fn reset_pwd(
         .bind(user_record.id)
         .fetch_one(state.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     info!("Updated password for user id {}", updated_user.id);
 
     // Clean up the temporary password record
@@ -361,7 +362,7 @@ impl FromRow<'_, PgRow> for UserListingEntry {
     }
 }
 
-async fn query_users(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<UserListingEntry>, Custom<String>> {
+async fn query_users(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<UserListingEntry>, ApiError> {
     let mut qb: QueryBuilder<Postgres> = Default::default();
     qb.push("SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits, \
             (CASE WHEN pwd IS NULL THEN false ELSE true END) AS pwd_defined \
@@ -378,7 +379,7 @@ async fn query_users(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<UserList
         .await
         .map_err(|e| {
             error!("Failed to fetch user listing: {}", e);
-            Custom(Status::InternalServerError, e.to_string())
+            ApiError::new(Status::InternalServerError, e.to_string())
         })
 }
 
@@ -387,14 +388,14 @@ async fn get_user(
     pool: &State<PgPool>,
     login: LoginSession,
     user_id: i64
-) -> Result<Json<UserListingEntry>, Custom<String>> {
+) -> Result<Json<UserListingEntry>, ApiError> {
     if !login.is_admin() && !login.uid == user_id {
-        return Err(Custom(Status::Forbidden, "cannot view user record for other users".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "cannot view user record for other users".to_string()));
     }
     let res = query_users(pool.inner(), Some(user_id))
         .await?
         .into_iter().next()
-        .ok_or(Custom(Status::NotFound, format!("no user found for id {}", user_id)))?;
+        .ok_or(ApiError::new(Status::NotFound, format!("no user found for id {}", user_id)))?;
     Ok(Json(res))
 }
 
@@ -403,7 +404,7 @@ async fn list_users(
     pool: &State<PgPool>,
     login: LoginSession,
     role: Option<String>
-) -> Result<Json<Vec<UserListingEntry>>, Custom<String>> {
+) -> Result<Json<Vec<UserListingEntry>>, ApiError> {
     // If the user is not admin or trainer, list only returns the user
     let query_person_id = if login.is_admin() || login.has_role("trainer") {
         None
@@ -435,20 +436,20 @@ async fn delete_user(
     login: LoginSession,
     user_id: i64,
     deletion: Json<UserDeletionRequest>
-) -> Result<NoContent, Custom<String>> {
+) -> Result<NoContent, ApiError> {
     // Load the user record
     let mut login_record = UserLoginRecord::load_by_id(state.inner(), user_id)
-        .await.map_err(|e| Custom(Status::InternalServerError, e.to_string()))?
-        .ok_or(Custom(Status::NotFound, format!("user id not found: {}", user_id)))?;
+        .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or(ApiError::new(Status::NotFound, format!("user id not found: {}", user_id)))?;
 
     if user_id == login.uid {
         // If this is the current user, require correct password even if the user is an admin
-        let password = deletion.password.as_ref().ok_or(Custom(Status::Forbidden, "password is required to delete profile".to_string()))?;
+        let password = deletion.password.as_ref().ok_or(ApiError::new(Status::Forbidden, "password is required to delete profile".to_string()))?;
         login_record = verify_user(login_record, password)?;
     } else {
         // Not the current user, only admins can perform
         if !login.is_admin() {
-            return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+            return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
         }
     }
 
@@ -457,7 +458,7 @@ async fn delete_user(
         .bind(user_id)
         .execute(state.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     // Send an email to the user confirming their account has been deleted
     let text = format!(include_str!("post_delete_profile_email.txt"), &login_record.email, &deletion.website_url);
@@ -484,9 +485,9 @@ async fn update_user(
     login: LoginSession,
     user_id: i64,
     update: Json<UserUpdate>
-) -> Result<Accepted<String>, Custom<String>> {
+) -> Result<Accepted<String>, ApiError> {
     if !login.is_admin() && !login.uid == user_id {
-        return Err(Custom(Status::Forbidden, "cannot edit user record for other users".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "cannot edit user record for other users".to_string()));
     }
 
     let roles_str = &update.roles.join(",");
@@ -502,7 +503,7 @@ async fn update_user(
         .bind(user_id)
         .fetch_one(state.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     Ok(Accepted(String::from("user updated")))
 }
@@ -521,9 +522,9 @@ async fn patch_user(
     login: LoginSession,
     user_id: i64,
     patch: Json<UserPatch>
-) -> Result<Accepted<String>, Custom<String>> {
+) -> Result<Accepted<String>, ApiError> {
     if !login.uid == user_id && !login.is_admin() {
-        return Err(Custom(Status::Forbidden, "admin role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
 
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("UPDATE person");
@@ -570,18 +571,18 @@ async fn patch_user(
     qb.build()
         .execute(pool.inner())
         .await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     Ok(Accepted(String::from("user updated")))
 }
 
-fn verify_suitable_password(new_password: &str, current_password: &str) -> Result<(), Custom<String>> {
+fn verify_suitable_password(new_password: &str, current_password: &str) -> Result<(), ApiError> {
     // Check suitability of new password
     if new_password.eq(current_password) {
-        return Err(Custom(Status::Forbidden, "new password cannot be the same as the current password".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "new password cannot be the same as the current password".to_string()));
     }
     if new_password.chars().count() < 8 {
-        return Err(Custom(Status::Forbidden, "new password must be at least 8 characters in length".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "new password must be at least 8 characters in length".to_string()));
     }
     Ok(())
 }
@@ -602,8 +603,8 @@ fn parse_roles(roles_str: &str) -> Vec<String> {
 mod tests {
     use chrono::{Days, Utc};
     use rocket::http::Status;
-    use rocket::response::status::Custom;
     use rocket::State;
+    use crate::apierror::ApiError;
     use sqlx::{query, query_as, Column, Executor, FromRow, PgPool, Row};
     use crate::users::{get_user, list_users};
     use crate::loginsession::{LoginSession, Roles};
@@ -662,7 +663,7 @@ mod tests {
 
         let person_id = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
         let verify_result = crate::users::verify_user_by_id(&pool, person_id, "wrong").await;
-        assert_eq!(Custom(Status::Unauthorized, "incorrect username or password".to_string()), verify_result.err().unwrap());
+        assert_eq!(ApiError::new(Status::Unauthorized, "incorrect username or password".to_string()), verify_result.err().unwrap());
     }
 
     #[sqlx::test]
@@ -674,7 +675,7 @@ mod tests {
         let login = create_login(-1, "admin", "admin");
         assert_eq!("joe@example.com", get_user(State::from(&pool), login.clone(), pid1).await.unwrap().email);
         assert_eq!("bob@example.com", get_user(State::from(&pool), login.clone(), pid2).await.unwrap().email);
-        assert_eq!(Err(Custom(Status::NotFound, "no user found for id -1".to_string())), get_user(State::from(&pool), login.clone(), -1).await);
+        assert_eq!(Err(ApiError::new(Status::NotFound, "no user found for id -1".to_string())), get_user(State::from(&pool), login.clone(), -1).await);
     }
 
     #[sqlx::test]

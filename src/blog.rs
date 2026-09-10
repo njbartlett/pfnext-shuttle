@@ -11,7 +11,8 @@ use rocket::http::{ContentType, MediaType, Status};
 use rocket::serde::json::Json;
 use rocket::{Request, Response, Route, State};
 use rocket::response::{self, Responder};
-use rocket::response::status::{Created, Custom, NoContent};
+use rocket::response::status::{Created, NoContent};
+use crate::apierror::ApiError;
 use rocket_dyn_templates::{context, Template};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::types::Oid;
@@ -207,9 +208,9 @@ async fn get_index(
     pool: &State<PgPool>,
     login: Option<LoginSession>,
     mode: IndexMode
-) -> Result<Template, Custom<String>> {
+) -> Result<Template, ApiError> {
     if mode == IndexMode::AllPosts && !login.map(|l| l.is_editor()).unwrap_or(false) {
-        return Err(Custom(Status::Forbidden, "admin or editor role required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin or editor role required".to_string()));
     }
 
     let published_before = match mode {
@@ -218,7 +219,7 @@ async fn get_index(
     };
 
     let posts = PostSummary::query_list(pool.inner(), None, published_before.as_ref()).await
-        .map_err(|e| Custom(Status::InternalServerError, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     let context = context!{
         common: common_context,
@@ -238,7 +239,7 @@ async fn get_post(
     common_context: CommonPageContext<'_>,
     pool: &State<PgPool>,
     path: PathBuf
-) -> Result<Template, Custom<String>> {
+) -> Result<Template, ApiError> {
     if let Some(post) = PostFull::from_location(pool, &path.display().to_string()).await.map_err(to_internal_server_err)? {
         let context = PostPageContext {
             post_id: &Some(post.id),
@@ -262,7 +263,7 @@ async fn get_post(
         };
         Ok(Template::render(POST_TEMPLATE, context))
     } else {
-        Err(Custom(Status::NotFound, "not found".to_string()))
+        Err(ApiError::new(Status::NotFound, "not found".to_string()))
     }
 }
 
@@ -277,9 +278,9 @@ async fn post_post(
     pool: &State<PgPool>,
     login: LoginSession,
     update: Json<SavePost>
-) -> Result<Created<Json<PostFull>>, Custom<String>> {
+) -> Result<Created<Json<PostFull>>, ApiError> {
     if !login.is_editor() {
-        return Err(Custom(Status::Forbidden, "admin or editor required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin or editor required".to_string()));
     }
     let update = update.0;
     let post = PostFull::create(pool, update.title, login.uid, login.name, login.email, update.published, update.content)
@@ -309,14 +310,14 @@ async fn put_post(
     login: LoginSession,
     path: PathBuf,
     update: Json<SavePost>
-) -> Result<PutPostResponse, Custom<String>> {
+) -> Result<PutPostResponse, ApiError> {
     if !login.is_editor() {
-        return Err(Custom(Status::Forbidden, "admin or editor required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin or editor required".to_string()));
     }
 
     let id = path.display().to_string()
         .parse::<i64>()
-        .map_err(|e| Custom(Status::UnprocessableEntity, format!("Failed to parse input path {} to int: {e}", path.display())))?;
+        .map_err(|e| ApiError::new(Status::UnprocessableEntity, format!("Failed to parse input path {} to int: {e}", path.display())))?;
     if let Some(mut post) = PostFull::query_by_id(pool, id).await.map_err(to_internal_server_err)? {
         let updated_title = post.title != update.title;
         post.title = update.title.clone();
@@ -336,7 +337,7 @@ async fn put_post(
             Ok(PutPostResponse::UnchangedTitle)
         }
     } else {
-        Err(Custom(Status::NotFound, "not found".to_string()))
+        Err(ApiError::new(Status::NotFound, "not found".to_string()))
     }
 }
 
@@ -345,20 +346,20 @@ async fn delete_post(
     pool: &State<PgPool>,
     login: LoginSession,
     path: PathBuf
-) -> Result<NoContent, Custom<String>> {
+) -> Result<NoContent, ApiError> {
     if !login.is_editor() {
-        return Err(Custom(Status::Forbidden, "admin or editor required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin or editor required".to_string()));
     }
     let id = path.display().to_string()
         .parse::<i64>()
-        .map_err(|e| Custom(Status::UnprocessableEntity, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::UnprocessableEntity, e.to_string()))?;
     if let Some(post) = PostFull::query_by_id(pool, id).await.map_err(to_internal_server_err)? {
         post.delete(pool)
             .await
             .map_err(to_internal_server_err)
             .map(|_| NoContent)
     } else {
-         Err(Custom(Status::NotFound, "not found".to_string()))
+         Err(ApiError::new(Status::NotFound, "not found".to_string()))
     }
 }
 
@@ -387,9 +388,9 @@ async fn get_post_editor(
     pool: &State<PgPool>,
     path: PathBuf,
     login: LoginSession
-) -> Result<Template, Custom<String>> {
+) -> Result<Template, ApiError> {
     if !login.is_editor() {
-        return Err(Custom(Status::Forbidden, "admin or editor required".to_string()));
+        return Err(ApiError::new(Status::Forbidden, "admin or editor required".to_string()));
     }
     let path_str = path.display().to_string();
     if "new" == path_str {
@@ -438,7 +439,7 @@ async fn get_post_editor(
         info!("Loading template {} with context {context:?}", EDIT_POST_TEMPLATE);
         Ok(Template::render(EDIT_POST_TEMPLATE, context))
     } else {
-        Err(Custom(Status::NotFound, "not found".to_string()))
+        Err(ApiError::new(Status::NotFound, "not found".to_string()))
     }
 }
 
@@ -452,12 +453,12 @@ async fn post_blob(
     pool: &State<PgPool>,
     content_type: &ContentType,
     data: Data<'_>
-) -> Result<Created<Json<PostBlobResult>>, Custom<String>> {
+) -> Result<Created<Json<PostBlobResult>>, ApiError> {
     use tokio_util::io::ReaderStream;
 
     info!("Parsing POST wth content-type: {content_type:?}");
     let boundary = parse_boundary(&content_type.to_string())
-        .map_err(|e| Custom(Status::BadRequest, e.to_string()))?;
+        .map_err(|e| ApiError::new(Status::BadRequest, e.to_string()))?;
     info!("Multipart boundary is {boundary}");
 
     // Turn rocket::Data into an AsyncRead
@@ -489,7 +490,7 @@ async fn post_blob(
         // Stream the field’s contents
         let mut size: usize = 0;
         while let Some(chunk) = field.chunk().await
-                .map_err(|e| Custom(Status::InternalServerError, e.to_string()))? {
+                .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))? {
             info!("Read chunk of {} bytes", chunk.len());
             size += chunk.len();
 
@@ -551,7 +552,7 @@ async fn post_blob(
         };
         Ok(Created::new(location).body(Json(result)))
     } else {
-        Err(Custom(Status::BadRequest, "missing multipart file".to_string()))
+        Err(ApiError::new(Status::BadRequest, "missing multipart file".to_string()))
     }
 }
 
@@ -593,16 +594,16 @@ async fn get_blob<'r>(
     id: &str
 ) -> Result<
         MediaStream<impl Stream<Item = Vec<u8>> + use<'r>>,
-        Custom<String>
+        ApiError
     > {
     let metadata: BlobMetadata = query_as("SELECT * FROM blobs WHERE id = $1")
         .bind(id)
         .fetch_optional(pool.inner())
         .await
         .map_err(to_internal_server_err)?
-        .ok_or_else(|| Custom(Status::NotFound, format!("blob with id {id} not found")))?;
+        .ok_or_else(|| ApiError::new(Status::NotFound, format!("blob with id {id} not found")))?;
     let media_type = MediaType::parse_flexible(&metadata.mime_type)
-        .ok_or_else(|| Custom(Status::UnsupportedMediaType, metadata.mime_type))?;
+        .ok_or_else(|| ApiError::new(Status::UnsupportedMediaType, metadata.mime_type))?;
 
     let mut tx = pool.begin()
         .await
