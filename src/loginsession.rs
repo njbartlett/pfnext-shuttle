@@ -732,6 +732,7 @@ mod tests {
     fn rocket(pool: PgPool) -> Rocket<Build> {
         rocket::build()
             .manage(pool)
+            .manage(crate::config::AppEnv::default())
             .manage(user_agent_parser::UserAgentParser::from_path("user_agents.yaml").unwrap())
             .mount("/", routes![
                 crate::loginsession::login,
