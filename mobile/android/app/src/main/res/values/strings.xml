@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Another Level</string>
+    <string name="title_activity_main">Another Level</string>
+    <string name="package_name">uk.anotherlevelfitness.app</string>
+    <string name="custom_url_scheme">uk.anotherlevelfitness.app</string>
+</resources>

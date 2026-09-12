@@ -1,0 +1,88 @@
+// Thin client for the pfnext JSON API. Errors arrive as {"code", "message"}
+// bodies (backend src/apierror.rs) and are surfaced as ApiError instances.
+
+export const API_BASE_URL: string =
+  import.meta.env.VITE_API_BASE_URL ?? 'https://anotherlevelfitness.uk/api/v1'
+
+// The credits opt-in handshake: booking without credits_used when the session
+// costs credits returns 402 with this code (backend src/bookings.rs).
+export const CREDITS_OPT_IN_REQUIRED = 'credits_opt_in_required'
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+let bearerToken: string | null = null
+let onUnauthorized: (() => void) | null = null
+
+export function setBearerToken(token: string | null) {
+  bearerToken = token
+}
+
+export function setOnUnauthorized(handler: () => void) {
+  onUnauthorized = handler
+}
+
+interface RequestOptions {
+  method?: string
+  body?: unknown
+  query?: Record<string, string | number | boolean | undefined>
+  // Skip the global 401 handler, e.g. for the login call itself
+  skipUnauthorizedHandler?: boolean
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const url = new URL(API_BASE_URL + path, window.location.origin)
+  for (const [key, value] of Object.entries(options.query ?? {})) {
+    if (value !== undefined) {
+      url.searchParams.set(key, String(value))
+    }
+  }
+
+  const headers: Record<string, string> = {}
+  if (bearerToken) {
+    headers['Authorization'] = `Bearer ${bearerToken}`
+  }
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
+
+  const response = await fetch(url.toString(), {
+    method: options.method ?? 'GET',
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined
+  })
+
+  if (!response.ok) {
+    if (response.status === 401 && !options.skipUnauthorizedHandler) {
+      onUnauthorized?.()
+    }
+    throw await toApiError(response)
+  }
+
+  if (response.status === 204) {
+    return undefined as T
+  }
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
+async function toApiError(response: Response): Promise<ApiError> {
+  const text = await response.text().catch(() => '')
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed && typeof parsed.message === 'string') {
+      return new ApiError(response.status, parsed.code ?? 'error', parsed.message)
+    }
+  } catch {
+    // Not a JSON error body, fall through to the raw text
+  }
+  return new ApiError(response.status, 'error', text || `Request failed (${response.status})`)
+}

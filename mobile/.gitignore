@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+
+# Capacitor native build output
+ios/App/Pods/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+ios/DerivedData/
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
