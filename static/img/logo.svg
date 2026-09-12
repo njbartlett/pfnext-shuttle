@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   version="1.1"
+   width="938.50555"
+   height="730.99152"
+   viewBox="0 0 938.50557 730.99149"
+   id="svg3"
+   sodipodi:docname="logo.svg"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs3">
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#SvgjsLinearGradient18160"
+       id="linearGradient3"
+       gradientTransform="scale(1.1330844,0.88254682)"
+       x1="0"
+       y1="20.327534"
+       x2="47.657528"
+       y2="20.327534"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#SvgjsLinearGradient18160"
+       id="linearGradient4"
+       gradientTransform="scale(1.1330844,0.88254682)"
+       x1="0"
+       y1="20.327534"
+       x2="47.657528"
+       y2="20.327534"
+       gradientUnits="userSpaceOnUse" />
+    <defs
+       id="SvgjsDefs18153">
+      <linearGradient
+         id="SvgjsLinearGradient18160">
+        <stop
+           id="SvgjsStop18161"
+           stop-color="#905e26"
+           offset="0" />
+        <stop
+           id="SvgjsStop18162"
+           stop-color="#f5ec9b"
+           offset="0.5" />
+        <stop
+           id="SvgjsStop18163"
+           stop-color="#905e26"
+           offset="1" />
+      </linearGradient>
+      <linearGradient
+         id="SvgjsLinearGradient18164">
+        <stop
+           id="SvgjsStop18165"
+           stop-color="#905e26"
+           offset="0" />
+        <stop
+           id="SvgjsStop18166"
+           stop-color="#f5ec9b"
+           offset="0.5" />
+        <stop
+           id="SvgjsStop18167"
+           stop-color="#905e26"
+           offset="1" />
+      </linearGradient>
+      <linearGradient
+         id="SvgjsLinearGradient18168">
+        <stop
+           id="SvgjsStop18169"
+           stop-color="#905e26"
+           offset="0" />
+        <stop
+           id="SvgjsStop18170"
+           stop-color="#f5ec9b"
+           offset="0.5" />
+        <stop
+           id="SvgjsStop18171"
+           stop-color="#905e26"
+           offset="1" />
+      </linearGradient>
+    </defs>
+  </defs>
+  <sodipodi:namedview
+     id="namedview3"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="0.65875333"
+     inkscape:cx="1506.6338"
+     inkscape:cy="365.84255"
+     inkscape:window-width="3008"
+     inkscape:window-height="1633"
+     inkscape:window-x="0"
+     inkscape:window-y="31"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg3" />
+  <g
+     id="SvgjsG18154"
+     featureKey="monogramFeature-0"
+     transform="matrix(17.379732,0,0,17.379732,0,-311.79239)"
+     fill="url(#SvgjsLinearGradient18160)"
+     style="fill:url(#linearGradient4)">
+    <path
+       d="m 29.64,45.96 2.7,-4.68 8.16,14.04 h 5.4 C 44.7,53.4 33.3,33.9 32.34,31.98 L 20.58,52.38 16.2,60 H 0 C 0.9,58.5 6.96,47.94 12.78,37.8 16.2,31.86 19.98,25.2 24.24,17.94 h 5.4 L 18.48,37.26 8.1,55.32 h 5.4 C 20.88,42.3 25.5,34.62 32.34,22.62 32.76,23.34 53.88,59.94 54,60 H 37.8 Z"
+       id="path1"
+       style="fill:url(#linearGradient3)" />
+  </g>
+</svg>
