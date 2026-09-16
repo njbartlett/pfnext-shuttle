@@ -63,6 +63,10 @@ url = "/attendance.html"
 title = "Create/Edit Session"
 url = "/edit_session.html"
 
+[bulk_sessions]
+title = "Create Multiple Sessions"
+url = "/bulk_sessions.html"
+
 [feedback]
 title = "Session Feedback"
 url = "/feedback.html"

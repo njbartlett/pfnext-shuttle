@@ -34,6 +34,7 @@
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-gear-fill"></i></a>
                     <ul class="dropdown-menu">
                         <li><a class="dropdown-item" href="/edit_session.html"><i class="bi bi-plus-circle"></i>&nbsp;Create Sessions</a></li>
+                        <li><a class="dropdown-item" href="/bulk_sessions.html"><i class="bi bi-list-ol"></i>&nbsp;Create Multiple Sessions</a></li>
                         <li><a class="dropdown-item" href="/members.html"><i class="bi bi-people-fill"></i>&nbsp;Members</a></li>
                         <li><a class="dropdown-item" href="/loginlist.html"><i class="bi bi-person-lines-fill"></i>&nbsp;Logged-in Users</a></li>
                         <li><a class="dropdown-item" href="/sessions_report.html"><i class="bi bi-file-earmark-text"></i>&nbsp;Sessions Report</a></li>

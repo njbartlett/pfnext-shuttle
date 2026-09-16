@@ -7,7 +7,7 @@ use rocket::serde::Deserialize;
 use rocket::{Route, State};
 use serde::Serialize;
 use sqlx::postgres::PgRow;
-use sqlx::{query, query_as, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::{query, query_as, query_scalar, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
 
 use crate::common::parse_opt_date;
 use crate::loginsession::LoginSession;
@@ -17,6 +17,7 @@ pub fn routes() -> Vec<Route> {
         list_sessions,
         get_session,
         create_session,
+        create_sessions_batch,
         delete_session,
         list_locations,
         list_session_types,
@@ -338,6 +339,64 @@ async fn create_session(
     Ok(Created::new(format!("/sessions/{}", id)).body(Json(id)))
 }
 
+#[post("/sessions/batch", data="<new_sessions>")]
+async fn create_sessions_batch(
+    pool:  &State<PgPool>,
+    login: LoginSession,
+    new_sessions: Json<Vec<NewSession>>
+) -> Result<Created<Json<Vec<i64>>>, ApiError> {
+    if new_sessions.is_empty() {
+        return Err(ApiError::new(Status::BadRequest, "at least one session is required".to_string()));
+    }
+
+    // Same rules as single creation: admins can create any session, trainers only
+    // sessions with themselves as the trainer.
+    if !login.has_role("admin") {
+        if login.has_role("trainer") {
+            if new_sessions.iter().any(|s| !Some(login.uid).eq(&s.trainer_id)) {
+                return Err(ApiError::new(Status::Forbidden, "trainers can only create sessions for themselves".to_string()));
+            }
+        } else {
+            return Err(ApiError::new(Status::Forbidden, "only admins or trainers can create sessions".to_string()));
+        }
+    }
+
+    // Validate every row before inserting anything
+    for (index, new_session) in new_sessions.iter().enumerate() {
+        new_session.validate(pool)
+            .await
+            .map_err(|e| ApiError::new(Status::BadRequest, format!("Row {}: {}", index + 1, e)))?;
+    }
+
+    // All-or-nothing: insert every session in a single transaction
+    let mut tx = pool.begin()
+        .await
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
+    let mut ids: Vec<i64> = Vec::with_capacity(new_sessions.len());
+    for (index, new_session) in new_sessions.iter().enumerate() {
+        let id = query_scalar("INSERT INTO session (datetime, duration_mins, session_type, location, trainer, max_booking_count, notes, cost, booking_deadline_mins) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id")
+            .bind(&new_session.datetime)
+            .bind(&new_session.duration_mins)
+            .bind(&new_session.session_type_id)
+            .bind(&new_session.location_id)
+            .bind(&new_session.trainer_id)
+            .bind(&new_session.max_bookings)
+            .bind(&new_session.notes)
+            .bind(&new_session.cost)
+            .bind(&new_session.booking_deadline_mins)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| ApiError::new(Status::InternalServerError, format!("Row {}: {}", index + 1, e)))?;
+        ids.push(id);
+    }
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
+
+    info!("Created {} sessions with ids {:?}", ids.len(), ids);
+    Ok(Created::new("/sessions".to_string()).body(Json(ids)))
+}
+
 #[delete("/sessions/<session_id>")]
 async fn delete_session(pool: &State<PgPool>, login: LoginSession, session_id: i64) -> Result<NoContent, ApiError> {
     let mut qb = QueryBuilder::new("DELETE FROM session WHERE id = ");
@@ -453,9 +512,11 @@ async fn list_session_types(pool: &State<PgPool>, deprecated: Option<bool>) -> R
 #[cfg(test)]
 mod tests {
     use chrono::{Days, Duration, Utc};
+    use rocket::http::Status;
+    use rocket::serde::json::Json;
     use rocket::State;
     use sqlx::{query, query_scalar, PgPool, Postgres};
-    use crate::{loginsession::{LoginSession, Roles}, sessions::{list_sessions, SessionFullRecord}, users::UserLoginRecord};
+    use crate::{loginsession::{LoginSession, Roles}, sessions::{create_sessions_batch, list_sessions, NewSession, SessionFullRecord}, users::UserLoginRecord};
 
     #[sqlx::test(fixtures("../schema.sql"))]
     async fn browse_sessions_not_logged_in(pool: PgPool) {
@@ -552,6 +613,86 @@ mod tests {
         assert_eq!("2025-01-01 00:00:00 UTC", session.datetime.to_string());
         assert_eq!(120, session.booking_deadline_duration_mins);
         assert_eq!("2024-12-31 22:00:00 UTC", session.booking_deadline.to_string());
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn batch_create_sessions_as_admin(pool: PgPool) {
+        let trainer = UserLoginRecord::load_by_email(&pool, "user1@example.com").await.unwrap().unwrap();
+        let login = create_login(trainer.id, &trainer.name, "admin");
+
+        let rows = vec![
+            new_session_row("2025-06-01T08:00:00Z", 1, Some(trainer.id)),
+            new_session_row("2025-06-01T09:00:00Z", 2, Some(trainer.id)),
+        ];
+        create_sessions_batch(State::from(&pool), login, Json(rows)).await.unwrap();
+
+        let count: i64 = query_scalar("SELECT count(*) FROM session")
+            .fetch_one(&pool)
+            .await.unwrap();
+        assert_eq!(2, count);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn batch_create_rolls_back_on_failure(pool: PgPool) {
+        let trainer = UserLoginRecord::load_by_email(&pool, "user1@example.com").await.unwrap().unwrap();
+        let login = create_login(trainer.id, &trainer.name, "admin");
+
+        // Second row references a session type that doesn't exist; the trainer being
+        // set means it passes validation and only fails at insert time.
+        let rows = vec![
+            new_session_row("2025-06-01T08:00:00Z", 1, Some(trainer.id)),
+            new_session_row("2025-06-01T09:00:00Z", 9999, Some(trainer.id)),
+        ];
+        let err = create_sessions_batch(State::from(&pool), login, Json(rows)).await.unwrap_err();
+        assert_eq!(Status::InternalServerError, err.0);
+        assert!(err.1.message.starts_with("Row 2:"), "error should name the failing row: {}", err.1.message);
+
+        let count: i64 = query_scalar("SELECT count(*) FROM session")
+            .fetch_one(&pool)
+            .await.unwrap();
+        assert_eq!(0, count, "no sessions should be created when any row fails");
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn batch_create_rejects_empty_list(pool: PgPool) {
+        let trainer = UserLoginRecord::load_by_email(&pool, "user1@example.com").await.unwrap().unwrap();
+        let login = create_login(trainer.id, &trainer.name, "admin");
+
+        let err = create_sessions_batch(State::from(&pool), login, Json(vec![])).await.unwrap_err();
+        assert_eq!(Status::BadRequest, err.0);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn batch_create_trainer_only_for_self(pool: PgPool) {
+        let user1 = UserLoginRecord::load_by_email(&pool, "user1@example.com").await.unwrap().unwrap();
+        let user2 = UserLoginRecord::load_by_email(&pool, "user2@example.com").await.unwrap().unwrap();
+        let login = create_login(user1.id, &user1.name, "trainer");
+
+        let rows = vec![
+            new_session_row("2025-06-01T08:00:00Z", 1, Some(user1.id)),
+            new_session_row("2025-06-01T09:00:00Z", 1, Some(user2.id)),
+        ];
+        let err = create_sessions_batch(State::from(&pool), login, Json(rows)).await.unwrap_err();
+        assert_eq!(Status::Forbidden, err.0);
+
+        let count: i64 = query_scalar("SELECT count(*) FROM session")
+            .fetch_one(&pool)
+            .await.unwrap();
+        assert_eq!(0, count);
+    }
+
+    fn new_session_row(datetime: &str, session_type_id: i32, trainer_id: Option<i64>) -> NewSession {
+        NewSession {
+            datetime: datetime.parse().unwrap(),
+            duration_mins: 60,
+            session_type_id,
+            location_id: None,
+            trainer_id,
+            max_bookings: None,
+            notes: None,
+            cost: 1,
+            booking_deadline_mins: 0
+        }
     }
 
     fn create_login(uid: i64, name: &str, role: &str) -> LoginSession {
