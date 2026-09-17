@@ -43,7 +43,13 @@
                 </thead>
                 <tbody>
                     <tr v-for="booking in bookings" class="align-middle">
-                        <td>${booking.person_name}</td>
+                        <td>
+                            <img v-if="booking.person_status === 'green'" class="icon" src="/img/bib-green.svg" title="Green Bib Member" alt="Green Bib">
+                            <img v-else-if="booking.person_status === 'red'" class="icon" src="/img/bib-red.svg" title="Red Bib Member" alt="Red Bib">
+                            <img v-else-if="booking.person_status === 'blue'" class="icon" src="/img/bib-blue.svg" title="Blue Bib Member" alt="Blue Bib">
+                            <span v-else class="icon d-inline-block"></span>
+                            &nbsp;${booking.person_name}
+                        </td>
                         <td><form><input type="checkbox" class="form-check larger align-middle" v-model="booking.attended" @input.prevent="toggleAttendance(booking)"></form></td>
                         <td>${displayDateTime(booking.booked_timestamp)}</td>
                         <td><button type="button" class="btn btn-outline-danger btn-sm float-end" @click="removeMember(session.id, booking.person_id)"><i class="bi bi-trash-fill"></i></button></td>
@@ -82,7 +88,13 @@
                 <tbody>
                     <tr v-for="waitlist_entry in waitlist" class="align-middle">
                         <td>${waitlist_entry.rank}</td>
-                        <td width="100%">${waitlist_entry.person_name}</td>
+                        <td width="100%">
+                            <img v-if="waitlist_entry.person_status === 'green'" class="icon" src="/img/bib-green.svg" title="Green Bib Member" alt="Green Bib">
+                            <img v-else-if="waitlist_entry.person_status === 'red'" class="icon" src="/img/bib-red.svg" title="Red Bib Member" alt="Red Bib">
+                            <img v-else-if="waitlist_entry.person_status === 'blue'" class="icon" src="/img/bib-blue.svg" title="Blue Bib Member" alt="Blue Bib">
+                            <span v-else class="icon d-inline-block"></span>
+                            &nbsp;${waitlist_entry.person_name}
+                        </td>
                         <td>
                             <button type="button" class="btn btn-outline-danger btn-sm" @click="removeWaitlistEntry(waitlist_entry)" title="Remove"><i class="bi bi-trash-fill"></i></button>
                         </td>

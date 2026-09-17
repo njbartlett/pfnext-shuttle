@@ -60,6 +60,8 @@ struct SessionBookingFull {
     person_id: i64,
     person_name: String,
     person_email: String,
+    // Bib status of the member: "green", "red", "blue" or None
+    person_status: Option<String>,
     session_id: i64,
     session_datetime: DateTime<FixedOffset>,
     session_duration_mins: i32,
@@ -87,6 +89,7 @@ impl FromRow<'_, PgRow> for SessionBookingFull {
             person_id: row.try_get("person_id")?,
             person_name: row.try_get("person_name")?,
             person_email: row.try_get("person_email")?,
+            person_status: row.try_get("person_status").unwrap_or(None),
             session_id: row.try_get("session_id")?,
             session_datetime: row.try_get("session_datetime")?,
             session_duration_mins: row.try_get("session_duration_mins")?,
@@ -113,7 +116,7 @@ impl SessionBookingFull {
         to: Option<DateTime<FixedOffset>>
     ) -> QueryBuilder<'a, Postgres> {
         // Build the Query
-        let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, b.session_id, b.credits_used, b.booked_timestamp, \
+        let mut qb = QueryBuilder::new("SELECT b.person_id, p.name AS person_name, p.email AS person_email, p.status AS person_status, b.session_id, b.credits_used, b.booked_timestamp, \
                     s.datetime AS session_datetime, s.duration_mins AS session_duration_mins, s.location AS session_location_id, l.name AS session_location_name, l.address AS session_location_address, l.url AS session_location_url, \
                     s.session_type AS session_type_id, t.name AS session_type_name, t.requires_trainer AS session_type_requires_trainer, t.cost AS session_type_cost, t.deprecated AS session_type_deprecated, b.attended \
                 FROM booking as b \
@@ -812,11 +815,13 @@ struct WaitlistEntryFull {
     person_id: i64,
     person_name: String,
     person_email: String,
+    // Bib status of the member: "green", "red", "blue" or None
+    person_status: Option<String>,
     session_id: i64
 }
 
 impl WaitlistEntryFull {
-    const BASE_QUERY: &str = "SELECT ROW_NUMBER() OVER (ORDER BY w.id ASC) AS waitlist_rank, w.id, w.person_id, p.name AS person_name, p.email AS person_email, w.session_id
+    const BASE_QUERY: &str = "SELECT ROW_NUMBER() OVER (ORDER BY w.id ASC) AS waitlist_rank, w.id, w.person_id, p.name AS person_name, p.email AS person_email, p.status AS person_status, w.session_id
         FROM waitlist w
         JOIN person p ON w.person_id = p.id
         WHERE w.session_id = $1
@@ -828,6 +833,7 @@ impl WaitlistEntryFull {
             person_id: row.try_get("person_id")?,
             person_name: row.try_get("person_name")?,
             person_email: row.try_get("person_email")?,
+            person_status: row.try_get("person_status").unwrap_or(None),
             session_id: row.try_get("session_id")?
         })
     }
@@ -855,7 +861,7 @@ impl WaitlistEntryFull {
             USING person p
             WHERE w.person_id = p.id
             AND w.id = (SELECT id FROM waitlist WHERE session_id = $1 ORDER BY id ASC LIMIT 1)
-            RETURNING w.*, 0::INT8 AS waitlist_rank, p.name AS person_name, p.email AS person_email")
+            RETURNING w.*, 0::INT8 AS waitlist_rank, p.name AS person_name, p.email AS person_email, p.status AS person_status")
             .bind(session_id)
             .fetch_optional(pool)
             .await? {
@@ -1573,6 +1579,38 @@ mod tests {
 
         assert_eq!(1,  bookings.len());
         assert_eq!(Some(now), bookings.get(0).unwrap().booked_timestamp);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql"))]
+    async fn list_bookings_and_waitlist_include_person_status(pool: PgPool) {
+        let admin_id = create_person(&pool, "Admin", "admin@example.com", "admin", 0).await;
+        let admin_login = create_login(admin_id, "Admin", "admin");
+        let trainer_id = create_person(&pool, "Trainer", "trainer@example.org", "trainer", 0).await;
+        let booked_id = create_person(&pool, "Booked", "booked@example.com", "member", 0).await;
+        let waiting_id = create_person(&pool, "Waiting", "waiting@example.com", "member", 0).await;
+        let waiting_login = create_login(waiting_id, "Waiting", "member");
+        query("UPDATE person SET status = 'green' WHERE id = $1").bind(booked_id).execute(&pool).await.unwrap();
+        query("UPDATE person SET status = 'blue' WHERE id = $1").bind(waiting_id).execute(&pool).await.unwrap();
+
+        // Session with a single place: one member booked, one on the waitlist
+        let session_id = create_session_max_bookings(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park", Some(1)).await;
+        create_booking(&pool, booked_id, session_id, None).await;
+        add_waitlist(State::from(&pool), waiting_login, Json(WaitlistEntry { person_id: waiting_id, session_id })).await.unwrap();
+
+        let bookings = list_bookings(State::from(&pool), admin_login.clone(), Some(session_id), None, None, None).await.unwrap().0;
+        assert_eq!(1, bookings.len());
+        assert_eq!(Some("green".to_string()), bookings.get(0).unwrap().person_status);
+
+        let waitlist = list_waitlist(State::from(&pool), admin_login.clone(), session_id).await.unwrap().0;
+        assert_eq!(1, waitlist.len());
+        assert_eq!(Some("blue".to_string()), waitlist.get(0).unwrap().person_status);
+
+        // A member with no status is reported as None
+        let no_status_id = create_person(&pool, "Plain", "plain@example.com", "member", 0).await;
+        create_booking(&pool, no_status_id, session_id, None).await;
+        let bookings = list_bookings(State::from(&pool), admin_login.clone(), Some(session_id), None, None, None).await.unwrap().0;
+        assert_eq!(2, bookings.len());
+        assert_eq!(None, bookings.iter().find(|b| b.person_id == no_status_id).unwrap().person_status);
     }
 
     #[sqlx::test]
