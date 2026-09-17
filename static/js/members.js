@@ -12,7 +12,9 @@ const searching = ref(false)
 
 const selected_user_orig = ref(null)
 const selected_user = reactive({
-    id: null, name: null, email: null, phone: null, emergency_name: null, emergency_phone: null, medical_info: null, credits: 0, pwd_defined: false, roles: []
+    id: null, name: null, email: null, phone: null, emergency_name: null, emergency_phone: null, medical_info: null, credits: 0, pwd_defined: false, roles: [],
+    // Bib status: 'green', 'red', 'blue' or null for none
+    status: null
 })
 const edit_user_changed = ref(false)
 const new_role = reactive({
@@ -90,6 +92,7 @@ function setSelectedMember(user) {
     selected_user.credits = user ? user.credits : 0
     selected_user.pwd_defined = user ? user.pwd_defined : false
     selected_user.roles = user ? user.roles.slice()  : null // clone
+    selected_user.status = user && user.status ? user.status : null
 }
 
 async function deleteRole(role, user) {

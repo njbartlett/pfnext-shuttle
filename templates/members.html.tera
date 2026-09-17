@@ -52,6 +52,11 @@
                     <table v-cloak v-else class="table table-borderless table-hover table-sm">
                         <tbody>
                             <tr v-for="user in user_data">
+                                <td class="text-center" style="width: 2em;">
+                                    <img v-if="user.status === 'green'" class="icon" src="/img/bib-green.svg" title="Green Bib Member" alt="Green Bib">
+                                    <img v-else-if="user.status === 'red'" class="icon" src="/img/bib-red.svg" title="Red Bib Member" alt="Red Bib">
+                                    <img v-else-if="user.status === 'blue'" class="icon" src="/img/bib-blue.svg" title="Blue Bib Member" alt="Blue Bib">
+                                </td>
                                 <td><a href="#" @click.prevent="onSelectedMember(user)">${user.name}&nbsp;&lt;${user.email}&gt;</a></td>
                                 <td>
                                     <span v-for="role in user.roles" class="badge rounded-pill text-bg-primary" style="margin-right: 1px;">${role}</span>
@@ -99,6 +104,24 @@
                             <tr>
                                 <td>Medical Info</td>
                                 <td><textarea class="form-control" v-model="selected_user.medical_info" rows="5"></textarea></td>
+                            </tr>
+                            <tr>
+                                <td>Status</td>
+                                <td>
+                                    <div class="input-group">
+                                        <span class="input-group-text" style="width: 2.5em;">
+                                            <img v-if="selected_user.status === 'green'" class="icon" src="/img/bib-green.svg" alt="Green Bib">
+                                            <img v-else-if="selected_user.status === 'red'" class="icon" src="/img/bib-red.svg" alt="Red Bib">
+                                            <img v-else-if="selected_user.status === 'blue'" class="icon" src="/img/bib-blue.svg" alt="Blue Bib">
+                                        </span>
+                                        <select class="form-select" v-model="selected_user.status">
+                                            <option :value="null">None</option>
+                                            <option value="green">Green Bib</option>
+                                            <option value="red">Red Bib</option>
+                                            <option value="blue">Blue Bib</option>
+                                        </select>
+                                    </div>
+                                </td>
                             </tr>
                             <tr>
                                 <td>Credits</td>

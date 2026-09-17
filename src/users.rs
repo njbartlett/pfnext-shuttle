@@ -514,7 +514,7 @@ async fn update_user(
     }
 
     let roles_str = &update.roles.join(",");
-    let _: UserLoginRecord = query_as("UPDATE person SET name = $1, email = $2, phone = $3, emergency_name = $4, emergency_phone = $5, medical_info = $6, roles = $7, credits = $8, status = $9 WHERE id = $10 RETURNING id, name, email, phone, pwd, roles, credits")
+    let _: UserLoginRecord = query_as("UPDATE person SET name = $1, email = $2, phone = $3, emergency_name = $4, emergency_phone = $5, medical_info = $6, roles = $7, credits = $8, status = $9 WHERE id = $10 RETURNING id, name, email, phone, pwd, roles, credits, status")
         .bind(&update.name)
         .bind(&update.email)
         .bind(&update.phone)
@@ -824,6 +824,34 @@ mod tests {
 
         let result = list_users(State::from(&pool), admin.clone(), Some("jones".to_string()), Some("jj".to_string()), None).await.unwrap();
         assert_eq!(vec!["Joe Jones"], result.iter().map(|u| u.name.as_str()).collect::<Vec<_>>());
+    }
+
+    #[sqlx::test]
+    async fn update_user_status(pool: PgPool) {
+        use rocket::serde::json::Json;
+        use crate::users::{update_user, UserUpdate};
+
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let pid = create_named_person(&pool, "Joe Bloggs", "joe@example.com", "member").await;
+        let admin = create_login(-1, "admin", "admin");
+
+        let update = |status: Option<&str>| Json(UserUpdate {
+            name: "Joe Bloggs".to_string(),
+            email: "joe@example.com".to_string(),
+            phone: None, emergency_name: None, emergency_phone: None, medical_info: None,
+            roles: vec!["member".to_string()],
+            credits: 0,
+            status: status.map(|s| s.to_string())
+        });
+
+        assert_eq!(None, get_user(State::from(&pool), admin.clone(), pid).await.unwrap().status);
+
+        update_user(State::from(&pool), admin.clone(), pid, update(Some("green"))).await.unwrap();
+        assert_eq!(Some("green".to_string()), get_user(State::from(&pool), admin.clone(), pid).await.unwrap().status);
+
+        // Status can be cleared again ("None")
+        update_user(State::from(&pool), admin.clone(), pid, update(None)).await.unwrap();
+        assert_eq!(None, get_user(State::from(&pool), admin.clone(), pid).await.unwrap().status);
     }
 
     #[sqlx::test]

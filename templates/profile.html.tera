@@ -49,6 +49,15 @@
                     <td :class="{'text-success': user_data.credits > 0, 'text-secondary': user_data.credits <= 0}">${user_data.credits}&nbsp;<i class="bi bi-ticket-perforated"></i></td>
                 </tr>
                 <tr>
+                    <td>Status</td>
+                    <td>
+                        <span v-if="user_data.status === 'green'"><img class="icon" src="/img/bib-green.svg" alt="Green Bib">&nbsp;Green Bib Member</span>
+                        <span v-else-if="user_data.status === 'red'"><img class="icon" src="/img/bib-red.svg" alt="Red Bib">&nbsp;Red Bib Member</span>
+                        <span v-else-if="user_data.status === 'blue'"><img class="icon" src="/img/bib-blue.svg" alt="Blue Bib">&nbsp;Blue Bib Member</span>
+                        <span v-else class="text-secondary"><em>None</em></span>
+                    </td>
+                </tr>
+                <tr>
                     <td>Roles</td>
                     <td>
                         <span v-for="role in user_data.roles">
