@@ -166,7 +166,8 @@ impl PollWithVotes {
     async fn query(
         pool: &PgPool,
         poll_id: Option<i64>,
-        person_id: Option<i64>
+        person_id: Option<i64>,
+        include_closed: bool,
     ) -> Result<Vec<Self>, sqlx::Error> {
         let polls = if let Some(poll_id) = poll_id {
             let poll = Poll::get_by_id(pool, poll_id).await?;
@@ -180,6 +181,9 @@ impl PollWithVotes {
 
         let mut result = Vec::new();
         for poll in polls {
+            if !poll.open && !include_closed {
+                continue;
+            }
             let votes = Vote::query(pool, Some(poll.id), person_id).await?;
             result.push(Self {
                 poll,
@@ -190,16 +194,18 @@ impl PollWithVotes {
     }
 }
 
-#[get("/polls?<person_id>")]
+#[get("/polls?<person_id>&<closed>")]
 async fn list_polls(
     pool: &State<PgPool>,
     login: LoginSession,
     person_id: Option<i64>,
+    closed: Option<bool>,
 ) -> Result<Json<Vec<PollWithVotes>>, ApiError> {
     if !login.is_admin() && Some(login.uid) != person_id {
         return Err(ApiError::new(Status::Forbidden, "admin role required to view other user votes".to_string()));
     }
-    PollWithVotes::query(pool, None, person_id)
+    let closed = closed.unwrap_or(false);
+    PollWithVotes::query(pool, None, person_id, closed)
         .await
         .map(Json)
         .map_err(to_internal_server_err)
@@ -287,7 +293,8 @@ mod tests {
         let results = crate::polls::list_polls(
             &State::from(&pool),
             login,
-            None
+            None,
+            Some(false)
         ).await.expect("Admin SHOULD be able to query all polls").into_inner();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].poll.id, poll.id);
@@ -310,7 +317,8 @@ mod tests {
         crate::polls::list_polls(
             &State::from(&pool),
             login,
-            None
+            None,
+            Some(false)
         ).await.expect_err("Non-admin SHOULD NOT be able to query all polls");
     }
 
@@ -326,7 +334,8 @@ mod tests {
         let results = crate::polls::list_polls(
             &State::from(&pool),
             login,
-            Some(user1)
+            Some(user1),
+            Some(false)
         ).await.expect("Non-admin SHOULD be able to query poll for self").into_inner();
         assert_eq!(results[0].votes.len(), 1);
         assert_eq!(results[0].votes[0].person_id, user1);
@@ -350,7 +359,8 @@ mod tests {
         let polls = PollWithVotes::query(
             &pool,
             Some(poll.id),
-            None
+            None,
+            false
         ).await.expect("Query after posting vote should succeed");
         assert_eq!(polls.len(), 1);
         assert_eq!(polls[0].poll.id, poll.id);
@@ -378,7 +388,8 @@ mod tests {
         let polls = PollWithVotes::query(
             &pool,
             Some(poll.id),
-            None
+            None,
+            false
         ).await.expect("Query after posting vote should succeed");
         assert_eq!(polls.len(), 1);
         assert_eq!(polls[0].poll.id, poll.id);
@@ -403,7 +414,8 @@ mod tests {
         let polls = PollWithVotes::query(
             &pool,
             Some(poll.id),
-            None
+            None,
+            false
         ).await.expect("Query after posting vote should succeed");
         assert_eq!(polls.len(), 1);
         assert_eq!(polls[0].poll.id, poll.id);
@@ -487,6 +499,62 @@ mod tests {
         assert_eq!(third_vote_err, ApiError::new(Status::InternalServerError, "vote limit exceeded".to_string()));
         let votes_after_second_post = Vote::query(&pool, Some(poll.id), Some(login.uid)).await.expect("Query after posting vote should succeed");
         assert_eq!(votes_after_second_post.len(), 2);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_query_polls_open_and_closed(pool: PgPool) {
+        let poll1 = crate::polls::Poll::create(&pool, "What is your favorite colour?", 1, None, true).await.unwrap();
+        let poll2 = crate::polls::Poll::create(&pool, "What's the air-speed velocity of an unladen swallow?", 1, None, false).await.unwrap();
+
+        let user1 = find_person_id_by_name(&pool, "user1").await;
+        let user2 = find_person_id_by_name(&pool, "user2").await;
+
+        crate::polls::Vote::create(&pool, poll1.id, user1, "Blue").await.unwrap();
+        crate::polls::Vote::create(&pool, poll1.id, user2, "Green").await.unwrap();
+
+        crate::polls::Vote::create(&pool, poll2.id, user1, "I don't know that!").await.unwrap();
+        crate::polls::Vote::create(&pool, poll2.id, user2, "What do you mean, an African or European swallow?").await.unwrap();
+
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
+
+        // Include closed polls in query
+        let results = crate::polls::list_polls(
+            &State::from(&pool),
+            login.clone(),
+            Some(user1),
+            Some(true)
+        ).await.unwrap().into_inner();
+        assert_eq!(2, results.len());
+        assert_eq!(results[0].votes.len(), 1);
+        assert_eq!(results[0].votes[0].person_id, user1);
+        assert_eq!(results[0].votes[0].value, "Blue");
+        assert_eq!(results[1].votes.len(), 1);
+        assert_eq!(results[1].votes[0].person_id, user1);
+        assert_eq!(results[1].votes[0].value, "I don't know that!");
+
+        // Exclude closed polls in query
+        let results = crate::polls::list_polls(
+            &State::from(&pool),
+            login.clone(),
+            Some(user1),
+            Some(false)
+        ).await.unwrap().into_inner();
+        assert_eq!(1, results.len());
+        assert_eq!(results[0].votes.len(), 1);
+        assert_eq!(results[0].votes[0].person_id, user1);
+        assert_eq!(results[0].votes[0].value, "Blue");
+
+        // Default = exclude closed polls in query
+        let results = crate::polls::list_polls(
+            &State::from(&pool),
+            login.clone(),
+            Some(user1),
+            None
+        ).await.unwrap().into_inner();
+        assert_eq!(1, results.len());
+        assert_eq!(results[0].votes.len(), 1);
+        assert_eq!(results[0].votes[0].person_id, user1);
+        assert_eq!(results[0].votes[0].value, "Blue");
     }
 
 }

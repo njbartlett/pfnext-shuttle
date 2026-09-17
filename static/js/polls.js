@@ -1,4 +1,7 @@
 const polls_data = ref([])
+const controls = reactive({
+    show_closed: false
+})
 const admin_controls = reactive({
     all_members: false
 })
@@ -8,6 +11,9 @@ function loadPollsWithVotes() {
     let params = new URLSearchParams()
     if (!admin_controls.all_members) {
         params.set("person_id", loggedin.value.id)
+    }
+    if (controls.show_closed) {
+        params.set("closed", "true")
     }
     httpGetJson("/polls?" + params.toString(), json => {
         polls_data.value = json
@@ -81,7 +87,7 @@ let app = createApp({
         return {
             // Data
             loggedin, http_err,
-            polls_data, admin_controls, admin_all_members,
+            polls_data, controls, admin_controls, admin_all_members,
 
             // Functions
             isAdmin, onLogout, encodeLoginReturnUrl, removeVote, adminSubmitVote, submitVote, formatNameAndEmail, exportPollsCSV
@@ -92,6 +98,7 @@ app.config.compilerOptions.delimiters = ['${', '}']
 app.mount('#app')
 
 loadPollsWithVotes()
+watch(controls, loadPollsWithVotes)
 watch(admin_controls, loadPollsWithVotes)
 
 loadAllUsers(users => {

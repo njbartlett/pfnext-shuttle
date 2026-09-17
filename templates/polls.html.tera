@@ -17,9 +17,18 @@
         </form>
     </div>    
 
+    <!-- Display Controls -->
+    <div class="my-3">
+        <form submit.prevent>
+            <input class="checkbox form-check-input" type="checkbox" id="show_closed" v-model="controls.show_closed">&nbsp;
+            <label class="form-label" for="show_closed">Show Closed Polls</label>
+        </form>
+    </div>
+
     <!-- Display "no polls" message if applicable -->
     <div v-cloak class="alert alert-secondary" role="alert" v-if="polls_data.length == 0">
-        <em>No polls available at this time.</em>
+        <em v-if="controls.show_closed">No polls available at this time.</em>
+        <em v-else>No open polls available at this time.</em>
     </div>
     
     <!-- Poll Cards -->
