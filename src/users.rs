@@ -16,6 +16,7 @@ use urlencoding::encode;
 use crate::config::{AppEnv, Config};
 use crate::loginsession::LoginSession;
 use crate::notifications::{send_admin_email, send_email, send_email_async};
+use crate::whereclause::{like_contains, Operator, WhereClause};
 
 const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
     length: 6,
@@ -362,16 +363,30 @@ impl FromRow<'_, PgRow> for UserListingEntry {
     }
 }
 
-async fn query_users(pool: &PgPool, user_id: Option<i64>) -> Result<Vec<UserListingEntry>, ApiError> {
+/// Optional search criteria for the user listing. Text criteria are case-insensitive
+/// "contains" matches; blank criteria are ignored.
+#[derive(Default, Debug)]
+struct UserSearch {
+    user_id: Option<i64>,
+    name: Option<String>,
+    email: Option<String>
+}
+
+/// Trim a search term, treating a blank term as "no filter"
+fn search_term(term: Option<String>) -> Option<String> {
+    term.map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
+}
+
+async fn query_users(pool: &PgPool, search: UserSearch) -> Result<Vec<UserListingEntry>, ApiError> {
     let mut qb: QueryBuilder<Postgres> = Default::default();
     qb.push("SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits, \
             (CASE WHEN pwd IS NULL THEN false ELSE true END) AS pwd_defined \
             FROM person");
 
-    if let Some(user_id) = user_id {
-        qb.push(" WHERE id = ");
-        qb.push_bind(user_id);
-    }
+    WhereClause::init()
+        .opt_append_to(&mut qb, "id", Operator::Equal, search.user_id)
+        .opt_append_to(&mut qb, "name", Operator::ILike, search_term(search.name).map(|t| like_contains(&t)))
+        .opt_append_to(&mut qb, "email", Operator::ILike, search_term(search.email).map(|t| like_contains(&t)));
     qb.push(" ORDER BY name");
 
     qb.build_query_as()
@@ -392,28 +407,32 @@ async fn get_user(
     if !login.is_admin() && !login.uid == user_id {
         return Err(ApiError::new(Status::Forbidden, "cannot view user record for other users".to_string()));
     }
-    let res = query_users(pool.inner(), Some(user_id))
+    let res = query_users(pool.inner(), UserSearch { user_id: Some(user_id), ..Default::default() })
         .await?
         .into_iter().next()
         .ok_or(ApiError::new(Status::NotFound, format!("no user found for id {}", user_id)))?;
     Ok(Json(res))
 }
 
-#[get("/users/list?<role>")]
+/// List users, optionally restricted by name and/or email (case-insensitive "contains"
+/// matches) and/or an exact role. All criteria are combined with AND.
+#[get("/users/list?<name>&<email>&<role>")]
 async fn list_users(
     pool: &State<PgPool>,
     login: LoginSession,
+    name: Option<String>,
+    email: Option<String>,
     role: Option<String>
 ) -> Result<Json<Vec<UserListingEntry>>, ApiError> {
     // If the user is not admin or trainer, list only returns the user
-    let query_person_id = if login.is_admin() || login.has_role("trainer") {
+    let user_id = if login.is_admin() || login.has_role("trainer") {
         None
     } else {
         Some(login.uid)
     };
 
-    let mut users = query_users(pool.inner(), query_person_id).await?;
-    if let Some(filter_role) = role {
+    let mut users = query_users(pool.inner(), UserSearch { user_id, name, email }).await?;
+    if let Some(filter_role) = search_term(role) {
         users = users.into_iter()
             .filter(|u| u.roles.contains(&filter_role))
             .collect();
@@ -627,6 +646,16 @@ mod tests {
         member_id.id
     }
 
+    async fn create_named_person(pool: &PgPool, name: &str, email: &str, roles: &str) -> i64 {
+        let member_id: BigintRecord = query_as("insert into person (name, email, roles, credits) values ($1, $2, $3, 0) returning id")
+            .bind(name)
+            .bind(email)
+            .bind(roles)
+            .fetch_one(pool)
+            .await.unwrap();
+        member_id.id
+    }
+
     fn create_login(uid: i64, name: &str, role: &str) -> LoginSession {
         LoginSession {
             sessionid: "xxx".to_string(),
@@ -684,7 +713,7 @@ mod tests {
         create_person(&pool, "joe@example.com", None, "member", 0).await;
         create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        let result = list_users(State::from(&pool), create_login(-1, "admin", "admin"), None).await.unwrap();
+        let result = list_users(State::from(&pool), create_login(-1, "admin", "admin"), None, None, None).await.unwrap();
 
         assert_eq!(2, result.len());
     }
@@ -695,9 +724,100 @@ mod tests {
         let user1 = create_person(&pool, "joe@example.com", None, "member", 0).await;
         let user2 = create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        let result = list_users(State::from(&pool), create_login(user1, "user1§", "member"), None).await.unwrap();
+        let result = list_users(State::from(&pool), create_login(user1, "user1§", "member"), None, None, None).await.unwrap();
         assert_eq!(1, result.len());
         assert_eq!("joe@example.com", result[0].email);
+    }
+
+    #[sqlx::test]
+    async fn list_users_nonadmin_search_other_user(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let user1 = create_person(&pool, "joe@example.com", None, "member", 0).await;
+        create_person(&pool, "bob@example.com", None, "member", 0).await;
+
+        // A non-admin searching for someone else still only ever sees themselves (here: nobody)
+        let result = list_users(State::from(&pool), create_login(user1, "user1", "member"), None, Some("bob".to_string()), None).await.unwrap();
+        assert_eq!(0, result.len());
+    }
+
+    #[sqlx::test]
+    async fn list_users_filter_by_name(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        create_named_person(&pool, "Joe Bloggs", "joe@example.com", "member").await;
+        create_named_person(&pool, "Bob Jones", "bob@example.com", "member").await;
+        create_named_person(&pool, "Mary O'Brien", "mary@example.com", "member").await;
+
+        let admin = create_login(-1, "admin", "admin");
+
+        // Case-insensitive substring match, surrounding whitespace ignored
+        let result = list_users(State::from(&pool), admin.clone(), Some("  jo  ".to_string()), None, None).await.unwrap();
+        assert_eq!(vec!["Bob Jones", "Joe Bloggs"], result.iter().map(|u| u.name.as_str()).collect::<Vec<_>>());
+
+        let result = list_users(State::from(&pool), admin.clone(), Some("o'b".to_string()), None, None).await.unwrap();
+        assert_eq!(vec!["Mary O'Brien"], result.iter().map(|u| u.name.as_str()).collect::<Vec<_>>());
+
+        // A blank name is the same as no filter
+        let result = list_users(State::from(&pool), admin.clone(), Some("   ".to_string()), None, None).await.unwrap();
+        assert_eq!(3, result.len());
+
+        // Pattern metacharacters are matched literally, not as wildcards
+        let result = list_users(State::from(&pool), admin.clone(), Some("%".to_string()), None, None).await.unwrap();
+        assert_eq!(0, result.len());
+        let result = list_users(State::from(&pool), admin.clone(), Some("_".to_string()), None, None).await.unwrap();
+        assert_eq!(0, result.len());
+    }
+
+    #[sqlx::test]
+    async fn list_users_filter_by_email(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        create_named_person(&pool, "Joe Bloggs", "joe@example.com", "member").await;
+        create_named_person(&pool, "Bob Jones", "bob@example.org", "member").await;
+
+        let admin = create_login(-1, "admin", "admin");
+
+        let result = list_users(State::from(&pool), admin.clone(), None, Some("EXAMPLE.ORG".to_string()), None).await.unwrap();
+        assert_eq!(vec!["bob@example.org"], result.iter().map(|u| u.email.as_str()).collect::<Vec<_>>());
+
+        let result = list_users(State::from(&pool), admin.clone(), None, Some("@example".to_string()), None).await.unwrap();
+        assert_eq!(2, result.len());
+
+        let result = list_users(State::from(&pool), admin.clone(), None, Some("nobody".to_string()), None).await.unwrap();
+        assert_eq!(0, result.len());
+    }
+
+    #[sqlx::test]
+    async fn list_users_filter_by_role(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        create_named_person(&pool, "Joe Bloggs", "joe@example.com", "member,trainer").await;
+        create_named_person(&pool, "Bob Jones", "bob@example.com", "member").await;
+        create_named_person(&pool, "Tina Trainer", "tina@example.com", "trainer-assistant").await;
+
+        let admin = create_login(-1, "admin", "admin");
+
+        // Role is an exact match on one of the person's roles
+        let result = list_users(State::from(&pool), admin.clone(), None, None, Some("trainer".to_string())).await.unwrap();
+        assert_eq!(vec!["Joe Bloggs"], result.iter().map(|u| u.name.as_str()).collect::<Vec<_>>());
+
+        // Blank role is ignored
+        let result = list_users(State::from(&pool), admin.clone(), None, None, Some("".to_string())).await.unwrap();
+        assert_eq!(3, result.len());
+    }
+
+    #[sqlx::test]
+    async fn list_users_filters_combined(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        create_named_person(&pool, "Joe Bloggs", "joe@example.com", "member,trainer").await;
+        create_named_person(&pool, "Joe Jones", "jj@example.com", "member").await;
+        create_named_person(&pool, "Bob Jones", "bob@example.com", "trainer").await;
+
+        let admin = create_login(-1, "admin", "admin");
+
+        // All criteria must match
+        let result = list_users(State::from(&pool), admin.clone(), Some("joe".to_string()), Some("example.com".to_string()), Some("trainer".to_string())).await.unwrap();
+        assert_eq!(vec!["Joe Bloggs"], result.iter().map(|u| u.name.as_str()).collect::<Vec<_>>());
+
+        let result = list_users(State::from(&pool), admin.clone(), Some("jones".to_string()), Some("jj".to_string()), None).await.unwrap();
+        assert_eq!(vec!["Joe Jones"], result.iter().map(|u| u.name.as_str()).collect::<Vec<_>>());
     }
 
     #[sqlx::test]
@@ -706,7 +826,7 @@ mod tests {
         create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
         create_person(&pool, "bob@example.com", None, "member", 0).await;
 
-        let result = list_users(State::from(&pool), create_login(-1, "admin", "admin"), None).await.unwrap();
+        let result = list_users(State::from(&pool), create_login(-1, "admin", "admin"), None, None, None).await.unwrap();
 
         assert_eq!(2, result.len());
         assert_eq!(true, result.get(0).unwrap().pwd_defined);

@@ -6,15 +6,53 @@
         <h1 class="display-4 fw-normal text-body-emphasis">{{page.title}}</h1>
     </div>    
 
+    <!-- Search Parameters -->
+    <div class="my-3 card">
+        <h5 class="card-header">Find Members</h5>
+        <div class="card-body">
+            <form @submit.prevent="searchMembers()">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md">
+                        <label for="searchName" class="form-label">Name</label>
+                        <input id="searchName" type="search" class="form-control" v-model="search.name" placeholder="Any part of the name" autocomplete="off">
+                    </div>
+                    <div class="col-md">
+                        <label for="searchEmail" class="form-label">Email Address</label>
+                        <input id="searchEmail" type="search" class="form-control" v-model="search.email" placeholder="Any part of the email address" autocomplete="off">
+                    </div>
+                    <div class="col-md">
+                        <label for="searchRole" class="form-label">Role</label>
+                        <input id="searchRole" type="search" class="form-control" v-model="search.role" placeholder="e.g. member, trainer, admin" autocomplete="off">
+                    </div>
+                    <div class="col-md-auto">
+                        <button type="submit" class="btn btn-primary" :disabled="!hasSearchCriteria() || searching"><i class="bi bi-search"></i>&nbsp;Search</button>
+                        <button type="button" class="btn btn-outline-secondary" @click="clearSearch()">Clear</button>
+                    </div>
+                </div>
+                <div class="form-text">Enter at least one criterion. Name and email match any part of the text; role must match exactly.</div>
+            </form>
+        </div>
+    </div>
+
     <div class="my-3 row">
         <div class="col">
             <div class="card">
-                <h5 class="card-header">Member List</h5>
+                <h5 class="card-header d-flex align-items-center">
+                    <span>Member List</span>
+                    <span v-cloak v-if="searched" class="badge rounded-pill text-bg-secondary ms-auto">${user_data.length} found</span>
+                </h5>
                 <div class="card-body">
-                    <table class="table table-borderless table-hover table-sm">
+                    <!-- Nothing is listed until a search has been run -->
+                    <div v-cloak v-if="!searched" class="alert alert-secondary mb-0" role="alert">
+                        <em>Enter a name, email address and/or role above and click Search to list matching members.</em>
+                    </div>
+                    <div v-cloak v-else-if="user_data.length == 0" class="alert alert-secondary mb-0" role="alert">
+                        <em>No members match your search.</em>
+                    </div>
+                    <table v-cloak v-else class="table table-borderless table-hover table-sm">
                         <tbody>
                             <tr v-for="user in user_data">
-                                <td><a href="#" @click="onSelectedMember(user)">${user.name}&nbsp;&lt;${user.email}&gt;</a></td>
+                                <td><a href="#" @click.prevent="onSelectedMember(user)">${user.name}&nbsp;&lt;${user.email}&gt;</a></td>
                                 <td>
                                     <span v-for="role in user.roles" class="badge rounded-pill text-bg-primary" style="margin-right: 1px;">${role}</span>
                                 </td>

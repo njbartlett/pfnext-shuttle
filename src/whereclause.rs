@@ -6,7 +6,10 @@ pub enum Operator {
     LessThan,
     LessThanOrEqual,
     GreaterThan,
-    GreaterThanOrEqual
+    GreaterThanOrEqual,
+    /// Case-insensitive pattern match (Postgres `ILIKE`). Use [`like_contains`] to build a
+    /// safe "contains" pattern from user input.
+    ILike
 }
 
 impl Operator {
@@ -17,8 +20,25 @@ impl Operator {
             Operator::LessThanOrEqual => " <= ",
             Operator::GreaterThan => " > ",
             Operator::GreaterThanOrEqual => " >= ",
+            Operator::ILike => " ILIKE ",
         }.to_string()
     }
+}
+
+/// Build a `LIKE`/`ILIKE` pattern matching any value that contains `term`, escaping the
+/// pattern metacharacters (`%`, `_` and the default escape character `\`) so that they
+/// match literally.
+pub fn like_contains(term: &str) -> String {
+    let mut pattern = String::with_capacity(term.len() + 2);
+    pattern.push('%');
+    for c in term.chars() {
+        if c == '\\' || c == '%' || c == '_' {
+            pattern.push('\\');
+        }
+        pattern.push(c);
+    }
+    pattern.push('%');
+    pattern
 }
 
 pub struct WhereClause {
@@ -78,7 +98,24 @@ mod tests {
 
     use sqlx::{Execute, Postgres, QueryBuilder};
 
-    use crate::whereclause::{Operator, WhereClause};
+    use crate::whereclause::{like_contains, Operator, WhereClause};
+
+    #[test]
+    fn test_like_contains() {
+        assert_eq!("%joe%", like_contains("joe"));
+        assert_eq!("%%", like_contains(""));
+        assert_eq!("%100\\%\\_off\\\\%", like_contains("100%_off\\"));
+    }
+
+    #[test]
+    fn test_ilike_append() {
+        let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM things");
+        let mut wc = WhereClause::init();
+
+        wc.append_to(&mut qb, "name", Operator::ILike, like_contains("thing"));
+
+        assert_eq!("SELECT * FROM things WHERE name ILIKE $1", qb.build().sql());
+    }
 
     #[test]
     fn test_one_appends() {
