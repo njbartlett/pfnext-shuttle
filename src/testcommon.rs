@@ -16,6 +16,7 @@ pub async fn find_user_login_by_name(pool: &PgPool, name: &str, role: &str) -> L
         name: name.to_string(),
         email: format!("{}@example.com", name),
         roles: Roles::parse(role),
+        status: None,
         loggedin: None, loggedin_from: None,
         expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
     }

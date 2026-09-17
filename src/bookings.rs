@@ -1883,6 +1883,7 @@ mod tests {
             name: name.to_string(),
             email: format!("{}@example.org", name),
             roles: Roles::parse(role),
+            status: None,
             loggedin: None, loggedin_from: None,
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }

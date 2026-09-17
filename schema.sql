@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS person (
     medical_info text,
     pwd text,
     roles text,
+    status text,
     credits int2 DEFAULT 0 NOT NULL CHECK (credits >= 0),
     url text NULL
 );

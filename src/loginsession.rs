@@ -103,6 +103,7 @@ pub struct LoginSession {
     pub name: String,
     pub email: String,
     pub roles: Roles,
+    pub status: Option<String>,
     pub loggedin: Option<DateTime<FixedOffset>>,
     pub loggedin_from: Option<String>,
     pub expiry: DateTime<FixedOffset>
@@ -169,6 +170,7 @@ impl FromRow<'_, PgRow> for LoginSession {
             name: row.try_get("name")?,
             email: row.try_get("email")?,
             roles: row.try_get("roles").map(|r| Roles::parse(r))?,
+            status: row.try_get("status").ok(),
             loggedin: row.try_get("loggedin")?,
             loggedin_from: row.try_get("loggedin_from")?,
             expiry: row.try_get("expiry")?
@@ -184,7 +186,7 @@ impl LoginSession {
     }
 
     fn query_base<'a>() -> QueryBuilder<'a, Postgres> {
-        return QueryBuilder::new("SELECT s.id AS sessionid, s.loggedin, s.loggedin_from, s.expiry, p.id AS uid, p.name, p.email, p.roles FROM loginsession s JOIN person p ON s.uid = p.id");
+        return QueryBuilder::new("SELECT s.id AS sessionid, s.loggedin, s.loggedin_from, s.expiry, p.id AS uid, p.name, p.email, p.roles, p.status FROM loginsession s JOIN person p ON s.uid = p.id");
     }
 
     async fn load_all(pool: &PgPool) -> Result<Vec<LoginSession>, sqlx::Error> {
@@ -259,6 +261,7 @@ impl LoginSession {
             name: login_record.name,
             email: login_record.email,
             roles: Roles::parse(&login_record.roles),
+            status: login_record.status,
             loggedin: Some(now),
             loggedin_from: ipinfo.clone(),
             expiry: expiry.fixed_offset()
@@ -301,6 +304,7 @@ impl LoginSession {
             email: self.email.clone(),
             name: self.name.clone(),
             roles: self.roles.clone(),
+            status: self.status.clone(),
             loggedin: None, loggedin_from: None,
             expiry
         })
@@ -361,6 +365,7 @@ struct LoggedInUser {
     name: String,
     email: String,
     roles: Vec<String>,
+    status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -518,6 +523,7 @@ async fn login(
         name: login_session.name,
         email: login_session.email,
         roles: login_session.roles.0,
+        status: login_session.status,
         token: wants_token.then(|| login_session.sessionid.clone()),
         expiry: wants_token.then_some(login_session.expiry),
     };

@@ -53,18 +53,19 @@ pub struct UserLoginRecord {
     pub phone: Option<String>,
     pub pwd: Option<String>,
     pub roles: String,
-    pub credits: i16
+    pub credits: i16,
+    pub status: Option<String>,
 }
 
 impl UserLoginRecord {
     pub async fn load_by_id(pool: &PgPool, user_id: i64) -> Result<Option<UserLoginRecord>, sqlx::Error> {
-        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE id = $1")
+        query_as("SELECT id, name, email, phone, pwd, roles, credits, status FROM person WHERE id = $1")
             .bind(user_id)
             .fetch_optional(pool)
             .await
     }
     pub async fn load_by_email(pool: &PgPool, user_email: &str) -> Result<Option<UserLoginRecord>, sqlx::Error> {
-        query_as("SELECT id, name, email, phone, pwd, roles, credits FROM person WHERE LOWER(email) = LOWER($1)")
+        query_as("SELECT id, name, email, phone, pwd, roles, credits, status FROM person WHERE LOWER(email) = LOWER($1)")
             .bind(user_email)
             .fetch_optional(pool)
             .await
@@ -343,7 +344,8 @@ struct UserListingEntry {
     medical_info: Option<String>,
     roles: Vec<String>,
     credits: i16,
-    pwd_defined: bool
+    pwd_defined: bool,
+    status: Option<String>,
 }
 
 impl FromRow<'_, PgRow> for UserListingEntry {
@@ -358,7 +360,8 @@ impl FromRow<'_, PgRow> for UserListingEntry {
             medical_info: row.try_get("medical_info").ok(),
             roles: parse_roles(row.try_get("roles")?),
             credits: row.try_get("credits")?,
-            pwd_defined: row.try_get("pwd_defined")?
+            pwd_defined: row.try_get("pwd_defined")?,
+            status: row.try_get("status").ok(),
         })
     }
 }
@@ -379,7 +382,7 @@ fn search_term(term: Option<String>) -> Option<String> {
 
 async fn query_users(pool: &PgPool, search: UserSearch) -> Result<Vec<UserListingEntry>, ApiError> {
     let mut qb: QueryBuilder<Postgres> = Default::default();
-    qb.push("SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits, \
+    qb.push("SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits, status, \
             (CASE WHEN pwd IS NULL THEN false ELSE true END) AS pwd_defined \
             FROM person");
 
@@ -495,7 +498,8 @@ struct UserUpdate {
     emergency_phone: Option<String>,
     medical_info: Option<String>,
     roles: Vec<String>,
-    credits: i32
+    credits: i32,
+    status: Option<String>,
 }
 
 #[put("/users/<user_id>", data="<update>")]
@@ -510,7 +514,7 @@ async fn update_user(
     }
 
     let roles_str = &update.roles.join(",");
-    let _: UserLoginRecord = query_as("UPDATE person SET name = $1, email = $2, phone = $3, emergency_name = $4, emergency_phone = $5, medical_info = $6, roles = $7, credits = $8 WHERE id = $9 RETURNING id, name, email, phone, pwd, roles, credits")
+    let _: UserLoginRecord = query_as("UPDATE person SET name = $1, email = $2, phone = $3, emergency_name = $4, emergency_phone = $5, medical_info = $6, roles = $7, credits = $8, status = $9 WHERE id = $10 RETURNING id, name, email, phone, pwd, roles, credits")
         .bind(&update.name)
         .bind(&update.email)
         .bind(&update.phone)
@@ -519,6 +523,7 @@ async fn update_user(
         .bind(&update.medical_info)
         .bind(roles_str)
         .bind(&update.credits)
+        .bind(&update.status)
         .bind(user_id)
         .fetch_one(state.inner())
         .await
@@ -663,6 +668,7 @@ mod tests {
             name: name.to_string(),
             email: format!("{}@example.com", name),
             roles: Roles::parse(role),
+            status: None,
             loggedin: None, loggedin_from: None,
             expiry: Utc::now().checked_add_days(Days::new(1)).unwrap().fixed_offset()
         }

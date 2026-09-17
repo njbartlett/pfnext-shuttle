@@ -51,7 +51,13 @@
             <!-- User Account Links if Logged In --> 
             <div v-cloak v-if="loggedin">
                 <a href="#" role="button" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                    <span class="navbar-text"><i class="bi bi-person-fill"></i>&nbsp;${loggedin.name}</a></span>
+                    <span class="navbar-text">
+                        <img v-if="loggedin.status === 'green'" class="icon" src="/img/bib-green.svg" title="Green Bib Member">
+                        <img v-else-if="loggedin.status === 'red'" class="icon" src="/img/bib-red.svg" title="Red Bib Member">
+                        <img v-else-if="loggedin.status === 'blue'" class="icon" src="/img/bib-blue.svg" title="Blue Bib Member">
+                        <i v-else class="bi bi-person-fill"></i>
+                        &nbsp;${loggedin.name}
+                    </span>
                 </a>
                 <ul class="dropdown-menu dropdown-menu-lg-end">
                     <li><a href="bookings.html" class="dropdown-item">Bookings</a></li>
