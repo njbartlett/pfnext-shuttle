@@ -1,4 +1,4 @@
-use rocket::{Route, State, http::Status, serde::json::Json};
+use rocket::{Route, State, http::Status, response::status::{Created, NoContent}, serde::json::Json};
 use crate::apierror::ApiError;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool, QueryBuilder, query, query_as, query_scalar};
@@ -7,7 +7,8 @@ use crate::{common::to_internal_server_err, loginsession::LoginSession, wherecla
 
 pub fn routes() -> Vec<Route> {
     routes![
-        list_polls, post_vote, delete_vote
+        list_polls, create_poll, update_poll, delete_poll,
+        post_vote, delete_vote
     ]
 }
 
@@ -70,6 +71,75 @@ impl Poll {
             description,
             open,
         })
+    }
+
+    /// Update all editable fields of a poll, returning the updated record or
+    /// None if no poll with the given id exists.
+    async fn update(
+        pool: &PgPool,
+        poll_id: i64,
+        question: &str,
+        limit_per_person: i16,
+        description: Option<String>,
+        open: bool
+    ) -> Result<Option<Self>, sqlx::Error> {
+        query_as(
+            "UPDATE poll SET question = $1, limit_per_person = $2, description = $3, open = $4
+                WHERE id = $5
+                RETURNING id, question, limit_per_person, description, open")
+            .bind(question)
+            .bind(limit_per_person)
+            .bind(description)
+            .bind(open)
+            .bind(poll_id)
+            .fetch_optional(pool)
+            .await
+    }
+
+    /// Delete a poll (and, via ON DELETE CASCADE, all of its votes). Returns
+    /// true if a poll was deleted, false if no poll with the given id exists.
+    async fn delete(pool: &PgPool, poll_id: i64) -> Result<bool, sqlx::Error> {
+        let result = query("DELETE FROM poll WHERE id = $1")
+            .bind(poll_id)
+            .execute(pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+}
+
+/// Request body for creating or updating a poll.
+#[derive(Debug, Deserialize, Serialize)]
+struct NewPoll {
+    question: String,
+    limit_per_person: i16,
+    description: Option<String>,
+    #[serde(default = "default_open")]
+    open: bool
+}
+
+fn default_open() -> bool { true }
+
+impl NewPoll {
+    fn validate(&self) -> Result<(), String> {
+        if self.question.trim().is_empty() {
+            return Err("poll question is required".to_string());
+        }
+        if self.limit_per_person < 1 {
+            return Err("limit per person must be at least 1".to_string());
+        }
+        Ok(())
+    }
+
+    fn question(&self) -> &str {
+        self.question.trim()
+    }
+
+    /// Trimmed description, with blank descriptions normalised to None
+    fn description(&self) -> Option<String> {
+        self.description.as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(str::to_string)
     }
 }
 
@@ -211,6 +281,68 @@ async fn list_polls(
         .map_err(to_internal_server_err)
 }
 
+fn require_admin(login: &LoginSession, action: &str) -> Result<(), ApiError> {
+    if login.is_admin() {
+        Ok(())
+    } else {
+        Err(ApiError::new(Status::Forbidden, format!("admin role required to {} polls", action)))
+    }
+}
+
+#[post("/polls", data = "<new_poll>")]
+async fn create_poll(
+    pool: &State<PgPool>,
+    login: LoginSession,
+    new_poll: Json<NewPoll>
+) -> Result<Created<Json<Poll>>, ApiError> {
+    require_admin(&login, "create")?;
+    new_poll.validate()
+        .map_err(|e| ApiError::new(Status::BadRequest, e))?;
+
+    let poll = Poll::create(pool, new_poll.question(), new_poll.limit_per_person, new_poll.description(), new_poll.open)
+        .await
+        .map_err(to_internal_server_err)?;
+    info!("Created poll id {}", poll.id);
+    Ok(Created::new(format!("/polls/{}", poll.id)).body(Json(poll)))
+}
+
+#[put("/polls/<poll_id>", data = "<new_poll>")]
+async fn update_poll(
+    pool: &State<PgPool>,
+    login: LoginSession,
+    poll_id: i64,
+    new_poll: Json<NewPoll>
+) -> Result<Json<Poll>, ApiError> {
+    require_admin(&login, "update")?;
+    new_poll.validate()
+        .map_err(|e| ApiError::new(Status::BadRequest, e))?;
+
+    let poll = Poll::update(pool, poll_id, new_poll.question(), new_poll.limit_per_person, new_poll.description(), new_poll.open)
+        .await
+        .map_err(to_internal_server_err)?
+        .ok_or_else(|| ApiError::new(Status::NotFound, format!("poll id {} not found", poll_id)))?;
+    info!("Updated poll id {}", poll.id);
+    Ok(Json(poll))
+}
+
+#[delete("/polls/<poll_id>")]
+async fn delete_poll(
+    pool: &State<PgPool>,
+    login: LoginSession,
+    poll_id: i64
+) -> Result<NoContent, ApiError> {
+    require_admin(&login, "delete")?;
+
+    let deleted = Poll::delete(pool, poll_id)
+        .await
+        .map_err(to_internal_server_err)?;
+    if !deleted {
+        return Err(ApiError::new(Status::NotFound, format!("poll id {} not found", poll_id)));
+    }
+    info!("Deleted poll id {}", poll_id);
+    Ok(NoContent)
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct PostedVote {
     person_id: i64,
@@ -259,7 +391,7 @@ mod tests {
     use crate::apierror::ApiError;
     use sqlx::PgPool;
 
-    use crate::{polls::{PollWithVotes, PostedVote, Vote}, testcommon::{find_person_id_by_name, find_user_login_by_name}};
+    use crate::{polls::{NewPoll, Poll, PollWithVotes, PostedVote, Vote}, testcommon::{find_person_id_by_name, find_user_login_by_name}};
 
     #[sqlx::test(fixtures("../schema.sql"))]
     async fn test_create_and_query_poll(pool: PgPool) {
@@ -555,6 +687,170 @@ mod tests {
         assert_eq!(results[0].votes.len(), 1);
         assert_eq!(results[0].votes[0].person_id, user1);
         assert_eq!(results[0].votes[0].value, "Blue");
+    }
+
+    fn new_poll(question: &str, limit_per_person: i16, description: Option<&str>, open: bool) -> Json<NewPoll> {
+        Json(NewPoll {
+            question: question.to_string(),
+            limit_per_person,
+            description: description.map(str::to_string),
+            open
+        })
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_create_poll_as_admin(pool: PgPool) {
+        let login = find_user_login_by_name(&pool, "admin", "admin").await;
+        crate::polls::create_poll(
+            &State::from(&pool),
+            login,
+            new_poll("  What is your favorite colour?  ", 2, Some("   "), false)
+        ).await.expect("Admin SHOULD be able to create a poll");
+
+        let polls = Poll::query_all(&pool).await.unwrap();
+        assert_eq!(polls.len(), 1);
+        // Question is trimmed and blank description is normalised to None
+        assert_eq!(polls[0].question, "What is your favorite colour?");
+        assert_eq!(polls[0].limit_per_person, 2);
+        assert_eq!(polls[0].description, None);
+        assert_eq!(polls[0].open, false);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_create_poll_as_member_forbidden(pool: PgPool) {
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
+        let err = crate::polls::create_poll(
+            &State::from(&pool),
+            login,
+            new_poll("What is your favorite colour?", 1, None, true)
+        ).await.expect_err("Non-admin SHOULD NOT be able to create a poll");
+        assert_eq!(err.0, Status::Forbidden);
+        assert_eq!(Poll::query_all(&pool).await.unwrap().len(), 0);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_create_poll_validation(pool: PgPool) {
+        let login = find_user_login_by_name(&pool, "admin", "admin").await;
+
+        let err = crate::polls::create_poll(
+            &State::from(&pool),
+            login.clone(),
+            new_poll("   ", 1, None, true)
+        ).await.expect_err("Blank question SHOULD be rejected");
+        assert_eq!(err.0, Status::BadRequest);
+
+        let err = crate::polls::create_poll(
+            &State::from(&pool),
+            login.clone(),
+            new_poll("What is your favorite colour?", 0, None, true)
+        ).await.expect_err("Zero vote limit SHOULD be rejected");
+        assert_eq!(err.0, Status::BadRequest);
+
+        assert_eq!(Poll::query_all(&pool).await.unwrap().len(), 0);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_update_poll_as_admin(pool: PgPool) {
+        let poll = Poll::create(&pool, "What is your favorite colour?", 1, None, true).await.unwrap();
+        let login = find_user_login_by_name(&pool, "admin", "admin").await;
+
+        // Edit the question and close the poll
+        let updated = crate::polls::update_poll(
+            &State::from(&pool),
+            login.clone(),
+            poll.id,
+            new_poll("What is your favourite colour?", 3, Some("Pick up to three"), false)
+        ).await.expect("Admin SHOULD be able to update a poll").into_inner();
+        assert_eq!(updated.id, poll.id);
+        assert_eq!(updated.question, "What is your favourite colour?");
+        assert_eq!(updated.limit_per_person, 3);
+        assert_eq!(updated.description, Some("Pick up to three".to_string()));
+        assert_eq!(updated.open, false);
+
+        let stored = Poll::get_by_id(&pool, poll.id).await.unwrap().unwrap();
+        assert_eq!(stored.question, "What is your favourite colour?");
+        assert_eq!(stored.limit_per_person, 3);
+        assert_eq!(stored.description, Some("Pick up to three".to_string()));
+        assert_eq!(stored.open, false);
+
+        // Reopen the poll
+        let reopened = crate::polls::update_poll(
+            &State::from(&pool),
+            login.clone(),
+            poll.id,
+            new_poll("What is your favourite colour?", 3, Some("Pick up to three"), true)
+        ).await.expect("Admin SHOULD be able to reopen a poll").into_inner();
+        assert_eq!(reopened.open, true);
+        assert_eq!(Poll::get_by_id(&pool, poll.id).await.unwrap().unwrap().open, true);
+
+        // Unknown poll id
+        let err = crate::polls::update_poll(
+            &State::from(&pool),
+            login.clone(),
+            poll.id + 1000,
+            new_poll("Does not exist", 1, None, true)
+        ).await.expect_err("Updating an unknown poll SHOULD fail");
+        assert_eq!(err.0, Status::NotFound);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_update_poll_as_member_forbidden(pool: PgPool) {
+        let poll = Poll::create(&pool, "What is your favorite colour?", 1, None, true).await.unwrap();
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
+        let err = crate::polls::update_poll(
+            &State::from(&pool),
+            login,
+            poll.id,
+            new_poll("Hacked", 1, None, false)
+        ).await.expect_err("Non-admin SHOULD NOT be able to update a poll");
+        assert_eq!(err.0, Status::Forbidden);
+
+        let stored = Poll::get_by_id(&pool, poll.id).await.unwrap().unwrap();
+        assert_eq!(stored.question, "What is your favorite colour?");
+        assert_eq!(stored.open, true);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_delete_poll_as_admin_cascades_votes(pool: PgPool) {
+        let poll = Poll::create(&pool, "What is your favorite colour?", 1, None, true).await.unwrap();
+        let other_poll = Poll::create(&pool, "Unrelated poll", 1, None, true).await.unwrap();
+        let user1 = find_person_id_by_name(&pool, "user1").await;
+        let user2 = find_person_id_by_name(&pool, "user2").await;
+        Vote::create(&pool, poll.id, user1, "Blue").await.unwrap();
+        Vote::create(&pool, poll.id, user2, "Green").await.unwrap();
+        Vote::create(&pool, other_poll.id, user1, "Keep me").await.unwrap();
+
+        let login = find_user_login_by_name(&pool, "admin", "admin").await;
+        crate::polls::delete_poll(
+            &State::from(&pool),
+            login.clone(),
+            poll.id
+        ).await.expect("Admin SHOULD be able to delete a poll");
+
+        assert!(Poll::get_by_id(&pool, poll.id).await.unwrap().is_none());
+        assert_eq!(Vote::query(&pool, Some(poll.id), None).await.unwrap().len(), 0, "votes on the deleted poll should be removed");
+        assert_eq!(Vote::query(&pool, Some(other_poll.id), None).await.unwrap().len(), 1, "votes on other polls should be untouched");
+
+        // Deleting again is a 404
+        let err = crate::polls::delete_poll(
+            &State::from(&pool),
+            login,
+            poll.id
+        ).await.expect_err("Deleting an unknown poll SHOULD fail");
+        assert_eq!(err.0, Status::NotFound);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_delete_poll_as_member_forbidden(pool: PgPool) {
+        let poll = Poll::create(&pool, "What is your favorite colour?", 1, None, true).await.unwrap();
+        let login = find_user_login_by_name(&pool, "user1", "member").await;
+        let err = crate::polls::delete_poll(
+            &State::from(&pool),
+            login,
+            poll.id
+        ).await.expect_err("Non-admin SHOULD NOT be able to delete a poll");
+        assert_eq!(err.0, Status::Forbidden);
+        assert!(Poll::get_by_id(&pool, poll.id).await.unwrap().is_some());
     }
 
 }

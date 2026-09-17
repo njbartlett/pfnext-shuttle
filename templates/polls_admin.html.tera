@@ -1,0 +1,142 @@
+{% extends "loggedin_layout" %}
+
+{% block loggedin_content %}
+<div class="container">
+
+    <!-- Page Title -->
+    <div class="my-2 mx-auto text-center">
+        <h1 class="display-4 fw-normal text-body-emphasis">{{page.title}}</h1>
+    </div>
+
+    <!-- Non-admin guard -->
+    <div v-if="!isAdmin()" class="alert alert-danger my-3" role="alert">
+        <i class="bi bi-exclamation-triangle-fill"></i>&nbsp;This page is only available to administrators.
+    </div>
+
+    <div v-else class="my-3 row g-3">
+
+        <!-- Poll List -->
+        <div class="col-lg-7">
+            <div class="card">
+                <h5 class="card-header d-flex align-items-center">
+                    <span>All Polls</span>
+                    <button type="button" class="btn btn-primary btn-sm ms-auto" @click="newPoll()"><i class="bi bi-plus-circle"></i>&nbsp;New Poll</button>
+                </h5>
+                <div class="card-body">
+                    <div v-if="polls_data.length == 0" class="alert alert-secondary mb-0" role="alert">
+                        <em>No polls have been created yet.</em>
+                    </div>
+                    <div v-else class="table-responsive">
+                        <table class="table table-hover table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Question</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col" class="text-end">Votes</th>
+                                    <th scope="col" class="text-end" title="Maximum votes per member">Limit</th>
+                                    <th scope="col"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="poll in polls_data" :id="'poll-' + poll.poll.id" :class="{'table-active': edit_poll.id === poll.poll.id}">
+                                    <td>
+                                        <a href="#" @click.prevent="onEditPoll(poll.poll)">${poll.poll.question}</a>
+                                        <div v-if="poll.poll.description" class="small text-secondary text-truncate" style="max-width: 24rem;">${poll.poll.description}</div>
+                                    </td>
+                                    <td>
+                                        <span class="badge rounded-pill" :class="poll.poll.open ? 'text-bg-primary' : 'text-bg-secondary'">${poll.poll.open ? 'Open' : 'Closed'}</span>
+                                    </td>
+                                    <td class="text-end">${poll.votes.length}</td>
+                                    <td class="text-end">${poll.poll.limit_per_person}</td>
+                                    <td class="text-end text-nowrap">
+                                        <div class="btn-group btn-group-sm" role="group">
+                                            <button type="button" class="btn btn-outline-primary" title="Edit poll" @click="onEditPoll(poll.poll)"><i class="bi bi-pencil"></i></button>
+                                            <button v-if="poll.poll.open" type="button" class="btn btn-outline-secondary" title="Close poll" @click="setPollOpen(poll.poll, false)"><i class="bi bi-lock-fill"></i></button>
+                                            <button v-else type="button" class="btn btn-outline-success" title="Reopen poll" @click="setPollOpen(poll.poll, true)"><i class="bi bi-unlock-fill"></i></button>
+                                            <button type="button" class="btn btn-outline-danger" title="Delete poll" data-bs-toggle="modal" data-bs-target="#deleteConfirmDialog" @click="onClickDeletePoll(poll)"><i class="bi bi-trash-fill"></i></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer text-secondary small">
+                    Members can only vote on open polls. Closed polls remain visible with their results. Deleting a poll also deletes all of its votes.
+                </div>
+            </div>
+        </div> <!-- End Poll List -->
+
+        <!-- Create / Edit Poll Form -->
+        <div class="col-lg-5">
+            <div class="card">
+                <h5 class="card-header">${edit_poll.id ? 'Edit Poll' : 'Create New Poll'}</h5>
+                <div class="card-body">
+                    <form @submit.prevent="savePoll()">
+                        <div class="mb-3">
+                            <label for="editPollQuestion" class="form-label">Question</label>
+                            <input id="editPollQuestion" type="text" class="form-control" :class="{'is-invalid': edit_poll_validation.question}" v-model="edit_poll.question" placeholder="e.g. Which day suits you best for the next social?" required>
+                            <div class="invalid-feedback">${edit_poll_validation.question}</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editPollDescription" class="form-label">Description <span class="text-secondary">(optional)</span></label>
+                            <textarea id="editPollDescription" class="form-control" rows="4" v-model="edit_poll.description" placeholder="Extra detail or instructions shown under the question"></textarea>
+                        </div>
+                        <div class="mb-3 row">
+                            <div class="col-6">
+                                <label for="editPollLimit" class="form-label">Votes per Member</label>
+                                <input id="editPollLimit" type="number" min="1" step="1" class="form-control" :class="{'is-invalid': edit_poll_validation.limit_per_person}" v-model="edit_poll.limit_per_person" required>
+                                <div class="invalid-feedback">${edit_poll_validation.limit_per_person}</div>
+                            </div>
+                            <div class="col-6 d-flex align-items-end">
+                                <div class="form-check form-switch mb-2">
+                                    <input id="editPollOpen" class="form-check-input" type="checkbox" role="switch" v-model="edit_poll.open">
+                                    <label for="editPollOpen" class="form-check-label">Open for voting</label>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="d-flex card-footer align-items-center">
+                    <div class="me-auto p-2">
+                        <span v-if="outcome" :class="{'text-danger': outcome.is_error, 'text-success': !outcome.is_error}">${outcome.message}</span>
+                    </div>
+                    <div v-if="edit_poll.id" class="p-2">
+                        <button type="button" class="btn btn-outline-secondary" @click="newPoll()">Cancel</button>
+                    </div>
+                    <div class="p-2">
+                        <button id="editPollSubmit" type="button" class="btn btn-primary" :disabled="!edit_poll_validation.ready" @click="savePoll()">${edit_poll.id ? 'Save' : 'Create'}</button>
+                    </div>
+                </div>
+            </div>
+        </div> <!-- End Create / Edit Poll Form -->
+
+    </div>
+
+    <!-- Deletion Confirm Dialog -->
+    <div class="modal fade" id="deleteConfirmDialog" tabindex="-1" aria-labelledby="deleteConfirmModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header text-bg-danger">
+                    <h5 class="modal-title" id="deleteConfirmModalLabel"><i class="bi bi-exclamation-triangle-fill"></i>&nbsp;Delete Poll</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" v-if="deleting_poll">
+                    <p>Are you sure you want to delete the following poll?</p>
+                    <ul>
+                        <li><strong>${deleting_poll.poll.question}</strong></li>
+                        <li>${deleting_poll.poll.open ? 'Open' : 'Closed'}</li>
+                        <li>${deleting_poll.votes.length} vote(s) submitted</li>
+                    </ul>
+                    <p>This cannot be undone. All votes on this poll will be deleted.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" @click="deletePoll(deleting_poll)" data-bs-dismiss="modal"><i class="bi bi-trash"></i> Delete</button>
+                </div>
+            </div>
+        </div>
+    </div> <!-- End Deletion Confirm Dialog -->
+
+</div>
+{% endblock loggedin_content %}

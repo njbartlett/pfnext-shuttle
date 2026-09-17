@@ -67,6 +67,10 @@ url = "/edit_session.html"
 title = "Create Multiple Sessions"
 url = "/bulk_sessions.html"
 
+[polls_admin]
+title = "Manage Polls"
+url = "/polls_admin.html"
+
 [feedback]
 title = "Session Feedback"
 url = "/feedback.html"

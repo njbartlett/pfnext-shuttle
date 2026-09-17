@@ -11,11 +11,14 @@
     <!-- Admin Only Card -->
     <div v-if="isAdmin()" class="alert alert-warning my-3 position-relative">
         <div class="position-absolute top-0 end-0"><i class="bi bi-lightning-fill" title="Admin Only"></i></div>
-        <form submit.prevent>
-            <input class="checkbox form-check-input" type="checkbox" id="admin_all_members" v-model="admin_controls.all_members">&nbsp;
-            <label class="form-label" for="admin_all_members">View Votes for All Members</label>
+        <form submit.prevent class="d-flex align-items-center flex-wrap">
+            <div>
+                <input class="checkbox form-check-input" type="checkbox" id="admin_all_members" v-model="admin_controls.all_members">&nbsp;
+                <label class="form-label" for="admin_all_members">View Votes for All Members</label>
+            </div>
+            <a href="/polls_admin.html" class="btn btn-outline-primary btn-sm ms-auto me-4"><i class="bi bi-card-checklist"></i>&nbsp;Manage Polls</a>
         </form>
-    </div>    
+    </div>
 
     <!-- Display Controls -->
     <div class="my-3">
