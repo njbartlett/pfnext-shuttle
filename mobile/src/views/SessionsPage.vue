@@ -50,9 +50,9 @@ import {
   onIonViewWillEnter
 } from '@ionic/vue'
 import { listSessions, spacesLeft } from '@/lib/bookingService'
-import { displayDate, displayTime, groupByDay } from '@/lib/format'
+import { displayDate, displayTime, groupByDay } from '@pfnext/shared'
+import type { Session } from '@pfnext/shared'
 import SessionStatusBadge from '@/components/SessionStatusBadge.vue'
-import type { Session } from '@/types'
 
 const DAYS_AHEAD = 14
 

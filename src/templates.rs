@@ -63,6 +63,10 @@ impl<'r> FromRequest<'r> for CommonPageContext<'r> {
 pub struct PageContext<'a> {
     pub title: &'a str,
     pub scripted: bool,
+    /// Rendered by the Vite-built ES module web/src/pages/<template_name>.ts
+    /// (via the generic "module_page" template) rather than a page template
+    /// plus a static/js/<template_name>.js global script
+    pub module: bool,
     pub template_name: &'a str,
 }
 
@@ -77,8 +81,11 @@ pub struct TemplatePage {
     title: String,
     url: String,
     navigable: bool,
-    scripted: bool
+    scripted: bool,
+    module: bool
 }
+
+const MODULE_PAGE_TEMPLATE: &str = "module_page";
 
 #[derive(Serialize)]
 pub struct Templates {
@@ -115,7 +122,10 @@ impl Templates {
             let scripted = table.get("script")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            page_map.insert(url.to_string(), TemplatePage { title, url, navigable, scripted });
+            let module = table.get("module")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            page_map.insert(url.to_string(), TemplatePage { title, url, navigable, scripted, module });
         }
         Ok(Templates{page_map})
     }
@@ -139,8 +149,14 @@ async fn template_files(
             template_name: &template_name,
             title: &template_page.title,
             scripted: template_page.scripted,
+            module: template_page.module,
         };
-        Ok(ContentResponse::Template(Template::render(template_name.clone(), NavigablePageContext {
+        let template = if template_page.module {
+            MODULE_PAGE_TEMPLATE.to_string()
+        } else {
+            template_name.clone()
+        };
+        Ok(ContentResponse::Template(Template::render(template, NavigablePageContext {
             common: common_context,
             page: page_context
         })))
@@ -172,6 +188,7 @@ async fn not_found(
             template_name: "404",
             title: "Not Found",
             scripted: false,
+            module: false,
         }
     })
 }

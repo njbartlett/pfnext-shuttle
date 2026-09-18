@@ -2,7 +2,7 @@
 // the sessions list and the session detail page.
 import { alertController, toastController } from '@ionic/vue'
 import * as service from './bookingService'
-import type { Session } from '@/types'
+import type { Session } from '@pfnext/shared'
 
 export function useBookingActions(refresh: () => Promise<void>) {
   async function toast(message: string, color: 'success' | 'danger' = 'success') {

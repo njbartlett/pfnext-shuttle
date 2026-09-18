@@ -49,7 +49,7 @@ import {
 } from '@ionic/vue'
 import { logout, user } from '@/lib/auth'
 import { getMyUserRecord } from '@/lib/bookingService'
-import type { UserRecord } from '@/types'
+import type { UserRecord } from '@pfnext/shared'
 
 const router = useRouter()
 const record = ref<UserRecord | null>(null)

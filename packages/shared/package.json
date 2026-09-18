@@ -1,0 +1,19 @@
+{
+  "name": "@pfnext/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Framework-independent client code shared by the web and mobile front-ends: API client, types, booking service, formatting.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

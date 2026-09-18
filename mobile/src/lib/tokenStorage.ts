@@ -2,7 +2,7 @@
 // Android Keystore via @aparajita/capacitor-secure-storage; in a plain browser
 // (dev server) the plugin falls back to encrypted localStorage.
 import { SecureStorage } from '@aparajita/capacitor-secure-storage'
-import type { LoggedInUser } from '@/types'
+import type { LoggedInUser } from '@pfnext/shared'
 
 const KEY = 'login'
 

@@ -1,7 +1,12 @@
+# Pages with `module = true` are rendered by web/src/pages/<name>.ts via the
+# Vite build (see web/README.md); all others by templates/<name>.html.tera
+# plus static/js/<name>.js unless `script = false`.
+
 [home]
 title = "Home"
 url = "/index.html"
 nav = true
+module = true
 
 [about]
 title = "About"

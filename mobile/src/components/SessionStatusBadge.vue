@@ -7,7 +7,7 @@
 
 <script setup lang="ts">
 import { IonBadge } from '@ionic/vue'
-import type { Session } from '@/types'
+import type { Session } from '@pfnext/shared'
 
 defineProps<{ session: Session }>()
 </script>

@@ -1,0 +1,13 @@
+{
+  "name": "pfnext",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm run build -w web",
+    "watch": "npm run watch -w web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

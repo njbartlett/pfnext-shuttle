@@ -1,4 +1,4 @@
-// Response shapes of the pfnext /api/v1 endpoints (see src/sessions.rs,
+// Response shapes of the pfnext API endpoints (see src/sessions.rs,
 // src/bookings.rs, src/loginsession.rs, src/users.rs in the backend).
 
 export interface LoggedInUser {
@@ -6,6 +6,9 @@ export interface LoggedInUser {
   name: string
   email: string
   roles: string[]
+  // Bib colour ("green" | "red" | "blue") or null for members without one
+  status?: string | null
+  // Present only for bearer-token clients (mobile); the website uses a cookie
   token?: string
   expiry?: string
 }

@@ -1,8 +1,16 @@
 // Thin client for the pfnext JSON API. Errors arrive as {"code", "message"}
 // bodies (backend src/apierror.rs) and are surfaced as ApiError instances.
+//
+// The client is configured once per app with configureApi(): the website
+// talks to the unversioned "/api" mount with cookie credentials, the mobile
+// app to the frozen "/api/v1" contract with a bearer token.
 
-export const API_BASE_URL: string =
-  import.meta.env.VITE_API_BASE_URL ?? 'https://anotherlevelfitness.uk/api/v1'
+export interface ApiConfig {
+  // Base URL including any version prefix, e.g. "/api" or "https://host/api/v1"
+  baseUrl: string
+  // Passed through to fetch(); the website needs 'include' for its session cookie
+  credentials?: RequestCredentials
+}
 
 // The credits opt-in handshake: booking without credits_used when the session
 // costs credits returns 402 with this code (backend src/bookings.rs).
@@ -19,8 +27,17 @@ export class ApiError extends Error {
   }
 }
 
+let config: ApiConfig = { baseUrl: '/api' }
 let bearerToken: string | null = null
 let onUnauthorized: (() => void) | null = null
+
+export function configureApi(newConfig: ApiConfig) {
+  config = { ...newConfig }
+}
+
+export function apiBaseUrl(): string {
+  return config.baseUrl
+}
 
 export function setBearerToken(token: string | null) {
   bearerToken = token
@@ -30,7 +47,7 @@ export function setOnUnauthorized(handler: () => void) {
   onUnauthorized = handler
 }
 
-interface RequestOptions {
+export interface RequestOptions {
   method?: string
   body?: unknown
   query?: Record<string, string | number | boolean | undefined>
@@ -39,7 +56,7 @@ interface RequestOptions {
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const url = new URL(API_BASE_URL + path, window.location.origin)
+  const url = new URL(config.baseUrl + path, window.location.origin)
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value !== undefined) {
       url.searchParams.set(key, String(value))
@@ -57,6 +74,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const response = await fetch(url.toString(), {
     method: options.method ?? 'GET',
     headers,
+    credentials: config.credentials,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined
   })
 

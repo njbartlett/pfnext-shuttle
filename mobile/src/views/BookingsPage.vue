@@ -47,8 +47,8 @@ import {
   alertController, onIonViewWillEnter, toastController
 } from '@ionic/vue'
 import { cancelBooking, listMyBookings } from '@/lib/bookingService'
-import { displayDate, displayTime } from '@/lib/format'
-import type { Booking } from '@/types'
+import { displayDate, displayTime } from '@pfnext/shared'
+import type { Booking } from '@pfnext/shared'
 
 const DAYS_AHEAD = 60
 

@@ -48,12 +48,19 @@ env -u GEM_PATH -u GEM_HOME npx cap sync ios
 
 ## Structure
 
-- `src/lib/api.ts` — fetch wrapper: base URL, bearer token, `{code, message}` error parsing
+The API client, response types, booking service and date formatting live in
+the repo-level `packages/shared` package (`@pfnext/shared`), which is also
+used by the website build in `web/`. It is linked here as a `file:`
+dependency rather than an npm workspace because the Capacitor native projects
+hard-code `mobile/node_modules/...` paths and would break under hoisting.
+
+- `@pfnext/shared` `api.ts` — fetch wrapper: base URL, bearer token,
+  `{code, message}` error parsing; configured in `src/main.ts`
 - `src/lib/auth.ts` — login/logout/restore; session persisted via Keychain/Keystore
   (`src/lib/tokenStorage.ts`)
-- `src/lib/bookingService.ts` — sessions, bookings, waitlist calls; the
-  `credits_opt_in_required` (402) handshake surfaces as a `credits_required`
-  result that the UI confirms with the user before re-booking with
-  `credits_used` set
+- `src/lib/bookingService.ts` — binds the shared sessions, bookings and
+  waitlist calls to the logged-in user; the `credits_opt_in_required` (402)
+  handshake surfaces as a `credits_required` result that the UI confirms with
+  the user before re-booking with `credits_used` set
 - `src/views/` — Login, Sessions list, Session detail (book / cancel /
   waitlist), My Bookings, Profile

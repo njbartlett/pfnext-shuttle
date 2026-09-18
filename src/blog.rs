@@ -226,6 +226,7 @@ async fn get_index(
         page: PageContext {
             title: "Posts",
             scripted: true,
+            module: false,
             template_name: INDEX_TEMPLATE,
         },
         posts,
@@ -257,6 +258,7 @@ async fn get_post(
             common: common_context,
             page: PageContext {
                 scripted: true,
+                module: false,
                 title: &post.title,
                 template_name: POST_TEMPLATE
             }
@@ -410,6 +412,7 @@ async fn get_post_editor(
             common: common_context,
             page: PageContext {
                 scripted: true,
+                module: false,
                 title: "Create Post",
                 template_name: EDIT_POST_TEMPLATE
             }
@@ -432,6 +435,7 @@ async fn get_post_editor(
             common: common_context,
             page: PageContext {
                 scripted: true,
+                module: false,
                 title: &format!("Edit Post – {}", post.title),
                 template_name: EDIT_POST_TEMPLATE
             }

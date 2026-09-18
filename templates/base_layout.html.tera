@@ -28,6 +28,13 @@
 
 </body>
 
+{% if page.module %}
+{# Page ported to the Vite/Vue build in web/: Vue and the shared code are
+   bundled into the module, and the page context is passed as JSON. #}
+<script id="page-context" type="application/json">{"common": {{ common | json_encode() | safe }}, "page": {{ page | json_encode() | safe }}}</script>
+<script type="module" src="/js/pages/{{page.template_name}}.js"></script>
+{% else %}
+
 {% if prod %}
 <script src="/js/vue.global.prod.js"></script>
 {% else %}
@@ -52,6 +59,7 @@
     app.config.compilerOptions.delimiters = ['${', '}']
     app.mount('#app')
 </script>
+{% endif %}
 {% endif %}
 {% block extra_script %}{% endblock%}
 

@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
-import { apiRequest, setBearerToken, setOnUnauthorized } from './api'
+import { apiRequest, setBearerToken, setOnUnauthorized } from '@pfnext/shared'
+import type { LoggedInUser } from '@pfnext/shared'
 import { clearLogin, loadLogin, saveLogin } from './tokenStorage'
-import type { LoggedInUser } from '@/types'
 
 const currentUser = ref<LoggedInUser | null>(null)
 const restored = ref(false)

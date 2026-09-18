@@ -95,9 +95,9 @@ import {
 } from '@ionic/vue'
 import { getSession, isFull, isPastBookingDeadline } from '@/lib/bookingService'
 import { useBookingActions } from '@/lib/useBookingActions'
-import { displayLongDate, displayTime, isPast } from '@/lib/format'
+import { displayLongDate, displayTime, isPast } from '@pfnext/shared'
+import type { Session } from '@pfnext/shared'
 import SessionStatusBadge from '@/components/SessionStatusBadge.vue'
-import type { Session } from '@/types'
 
 const route = useRoute()
 const session = ref<Session | null>(null)

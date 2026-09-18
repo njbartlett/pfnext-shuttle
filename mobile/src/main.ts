@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import { IonicVue } from '@ionic/vue'
+import { configureApi } from '@pfnext/shared'
 import App from './App.vue'
 import router from './router'
 
@@ -15,6 +16,11 @@ import '@ionic/vue/css/text-alignment.css'
 import '@ionic/vue/css/palettes/dark.system.css'
 
 import './theme.css'
+
+// Mobile clients use the frozen /api/v1 contract with a bearer token
+configureApi({
+  baseUrl: import.meta.env.VITE_API_BASE_URL ?? 'https://anotherlevelfitness.uk/api/v1'
+})
 
 const app = createApp(App).use(IonicVue).use(router)
 
