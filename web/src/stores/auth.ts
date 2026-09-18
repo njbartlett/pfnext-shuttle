@@ -3,7 +3,7 @@
 // the same key as static/js/library.js so that module pages and legacy pages
 // agree on who is logged in during the migration.
 import { computed, ref } from 'vue'
-import { apiRequest, setOnUnauthorized, type LoggedInUser } from '@pfnext/shared'
+import { login as loginRequest, logout as logoutRequest, setOnUnauthorized, type LoggedInUser } from '@pfnext/shared'
 
 const LOGIN_STORAGE_KEY = 'anotherlevellogin'
 
@@ -48,13 +48,35 @@ export function loginReturnUrl(): string {
   return encodeURIComponent(window.location.pathname + window.location.hash)
 }
 
-export async function logout(): Promise<void> {
+export async function login(email: string, password: string): Promise<LoggedInUser> {
+  setUser(null)
+  const loggedIn = await loginRequest(email, password)
+  setUser(loggedIn)
+  return loggedIn
+}
+
+export interface LogoutOptions {
+  // Stay on the current page instead of returning to the home page
+  stay?: boolean
+}
+
+// Pages that remain useful when logged out (sessions, blog) opt in to
+// staying put after the navbar's Logout; replaces the afterLogout global
+let stayOnLogoutByDefault = false
+
+export function configureLogout(options: LogoutOptions) {
+  stayOnLogoutByDefault = options.stay ?? false
+}
+
+export async function logout(options: LogoutOptions = {}): Promise<void> {
   setUser(null)
   try {
-    await apiRequest<void>('/logout', { method: 'POST' })
+    await logoutRequest()
   } catch (e) {
     // Best effort: the local state is cleared regardless
     console.warn('Logout request failed', e)
   }
-  window.location.href = '/'
+  if (!(options.stay ?? stayOnLogoutByDefault)) {
+    window.location.href = '/'
+  }
 }

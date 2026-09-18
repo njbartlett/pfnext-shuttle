@@ -3,7 +3,7 @@
 // that this module does not depend on either app's notion of "the current
 // user" (the website lets admins act on behalf of other members).
 import { apiRequest, ApiError, CREDITS_OPT_IN_REQUIRED } from './api'
-import type { Booking, Session, UserRecord } from './types'
+import type { Booking, Session, UserRecord, WaitlistEntry } from './types'
 
 export type BookResult =
   | { outcome: 'booked' }
@@ -67,8 +67,9 @@ export async function cancelBooking(personId: number, sessionId: number): Promis
   })
 }
 
-export async function joinWaitlist(personId: number, sessionId: number): Promise<void> {
-  await apiRequest<unknown>('/waitlist', {
+// Resolves to the new entry, including the member's position in the queue
+export async function joinWaitlist(personId: number, sessionId: number): Promise<WaitlistEntry> {
+  return apiRequest<WaitlistEntry>('/waitlist', {
     method: 'POST',
     body: { person_id: personId, session_id: sessionId }
   })

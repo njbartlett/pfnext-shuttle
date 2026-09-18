@@ -1,15 +1,14 @@
 // BEGIN library.js
-// {% if jekyll.environment == "production" %}
-// import { createApp, onMounted, reactive, ref, watch } from '/static/js/vue.esm-browser.prod.js'
-// {% else %}
-// import { createApp, onMounted, reactive, ref, watch } from '/static/js/vue.esm-browser.js'
-// {% endif %}
+//
+// Shared globals for the remaining legacy (Tera + global script) pages: the
+// blog index, blog post and blog editor. Every other page has moved to the
+// Vite/Vue build in web/, which has its own equivalents (web/src/stores).
+// Keep LOGIN_STORAGE_KEY in step with web/src/stores/auth.ts.
 
 const { createApp, onMounted, reactive, ref, watch, computed } = Vue
 
 const SERVER_URL = '/api'
 const LOGIN_STORAGE_KEY = "anotherlevellogin"
-const TIMEZONE = "Europe/London"
 
 const http_err = ref(null)
 const loggedin = ref((_ => {
@@ -27,33 +26,6 @@ function setAuthenticatedUser(user) {
     } else {
         localStorage.setItem(LOGIN_STORAGE_KEY, JSON.stringify(user))
     }
-}
-
-async function httpCall(url, method, body, onres) {
-    let request = {
-        method: method,
-        credentials: 'include'
-    }
-    if (body) {
-        request.headers = {
-            'Content-Type': 'application/json'
-        }
-        request.body = JSON.stringify(body)
-    }
-    return fetch(SERVER_URL + url, request).then(res => {
-        if (!res.ok) throw res
-        if (onres != null) {
-            return onres(res)
-        } else {
-            return res
-        }
-    }).catch(handleHttpError)
-}
-
-async function httpGetJson(url, onjson) {
-    return httpCall(url, 'GET', null, res => {
-        return res.json().then(onjson)
-    })
 }
 
 // API errors are JSON of the form {"code": "...", "message": "..."}; extract the
@@ -104,200 +76,8 @@ function isAdmin() {
     return loggedin.value && loggedin.value.roles && loggedin.value.roles.includes('admin')
 }
 
-function isTrainer() {
-    return loggedin.value && loggedin.value.roles && loggedin.value.roles.includes('trainer')
-}
-
-function validateEmail(email) {
-    return String(email)
-        .toLowerCase()
-        .match(
-            /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|.(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/
-        );
-}
-
-function validatePhone(phone) {
-    return String(phone).match(/^\+?\d+$/)
-}
-
-function displayDate(datestr) {
-    return new Date(datestr).toLocaleDateString("en-GB", {
-        timeZone: TIMEZONE,
-        weekday: "short",
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-    })
-}
-
-function displayTime(datetimestr) {
-    const datetime = new Date(datetimestr)
-    return datetime.toLocaleTimeString("en-GB", {
-        timeZone: TIMEZONE,
-        timeStyle: "short",
-        hour12: false
-    })
-}
-
-function displayDateTime(datetimestr) {
-    if (datetimestr === null) {
-        return null
-    }
-    const datetime = new Date(datetimestr)
-    return datetime.toLocaleDateString("en-GB", {
-        timeZone: TIMEZONE,
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-    }) + ' ' + datetime.toLocaleTimeString("en-GB", {
-        timeZone: TIMEZONE
-    })
-}
-
-function displayNumber(num) {
-    return num.toLocaleString("en-GB")
-}
-
-function displayPercent(num, places) {
-    return (num).toLocaleString(undefined, {
-        style: 'percent',
-        minimumFractionDigits: places,
-        maximumFractionDigits: places
-    })
-}
-
-function formatNameAndEmail(name, email) {
-    return name + ' <' + email + '>'
-}
-
-function formatDuration(ms) {
-    if (ms < 0) ms = -ms
-    const days = Math.floor(ms / 86400000)
-    const hours = Math.floor((ms % 86400000) / 3600000)
-    const mins = Math.floor((ms % 3600000) / 60000)
-    const secs = Math.floor((ms % 60000) / 1000)
-
-    if (days > 0) {
-        return `~ ${days}d ${hours}h`
-    }
-    if (hours > 0) {
-        return `${hours}h ${mins}m`
-    }
-    if (mins > 0) {
-        return `${mins}m ${secs}s`
-    }
-    return `${secs}s`
-}
-
-function findUserByEmail(email, all_users) {
-    for (var user of all_users) {
-        if (user.email === email) {
-            return user
-        }
-    }
-    return null
-}
-
 function encodeLoginReturnUrl() {
     return encodeURIComponent(window.location.pathname + window.location.hash)
-}
-
-function startOfWeek(date) {
-    let start = new Date(date)
-    let currentDay = start.getDay()
-
-    let offsetDays = (currentDay + 7 - START_OF_WEEK) % 7
-    start.setDate(start.getDate() - offsetDays)
-    start.setHours(0, 0, 0, 0) // Set to midnight of that day
-    return start
-}
-
-function startOfMonth(date) {
-    let d = new Date()
-    d.setYear(date.getFullYear())
-    d.setMonth(date.getMonth())
-    d.setDate(1)
-    d.setHours(0, 0, 0, 0) // Set to midnight of that day
-    return d
-}
-
-function endOfMonth(date) {
-    let d = new Date()
-    d.setYear(date.getFullYear())
-    d.setMonth(date.getMonth() + 1)
-    d.setDate(0)
-    d.setHours(23, 59, 59, 999) // Set to 1ms before midnight of that day
-    return d
-}
-
-function addDays(date, days) {
-    var result = new Date(date)
-    result.setDate(result.getDate() + days)
-    return result
-}
-
-function isPast(datetime) {
-    return new Date() > new Date(datetime)
-}
-
-// Get a list of all users and pass this to the callback.
-// When the user is not an admin, the list passed is only the current user.
-async function loadAllUsers(callback) {
-    if (isAdmin()) {
-        return httpGetJson("/users/list", callback)
-    } else if (loggedin.value) {
-        return callback([loggedin.value])
-    } else {
-        return callback(null)
-    }
-}
-
-function goBack() {
-    if (typeof page_return_path !== 'undefined' && page_return_path !== null && page_return_path.value != null) {
-        window.location.href = page_return_path.value
-    } else {
-        window.history.back()
-    }
-
-}
-
-function sortByField(arr, field, ascending = true) {
-    return arr.sort((a, b) => {
-        const valA = a[field];
-        const valB = b[field];
-
-        // Handle null or undefined values
-        const aIsNull = valA == null;
-        const bIsNull = valB == null;
-
-        if (aIsNull && bIsNull) return 0;
-        if (aIsNull) return ascending ? -1 : 1;
-        if (bIsNull) return ascending ? 1 : -1;
-
-        // Compare numbers or strings
-        if (typeof valA === "string" && typeof valB === "string") {
-        return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        }
-
-        return ascending ? valA - valB : valB - valA;
-    });
-}
-
-function renderStarRating(rating) {
-    var roundedRating = Math.round(rating * 10) / 10
-    var html = "<span class=\"text-nowrap\" title=\"" + roundedRating + " / 5 stars\">"
-    for (var counter = 0; counter < 5; counter++) {
-        var remaining = rating - counter
-        if (remaining >= 0.8) {
-            html += "<i class=\"bi bi-star-fill\"></i>"
-        } else if (0.2 <= remaining && remaining < 0.8) {
-            html += "<i class=\"bi bi-star-half\"></i>"
-        } else if (remaining < 0.3) {
-            html += "<i class=\"bi bi-star\"></i>"
-        }
-    }
-    html += "</span>"
-    return html
 }
 
 // END library.js

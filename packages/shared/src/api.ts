@@ -47,10 +47,14 @@ export function setOnUnauthorized(handler: () => void) {
   onUnauthorized = handler
 }
 
+export type QueryValue = string | number | boolean | undefined | null
+export type QueryParams = Record<string, QueryValue | QueryValue[]>
+
 export interface RequestOptions {
   method?: string
   body?: unknown
-  query?: Record<string, string | number | boolean | undefined>
+  // undefined/null values are omitted; arrays repeat the key once per value
+  query?: QueryParams
   // Skip the global 401 handler, e.g. for the login call itself
   skipUnauthorizedHandler?: boolean
 }
@@ -58,8 +62,10 @@ export interface RequestOptions {
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const url = new URL(config.baseUrl + path, window.location.origin)
   for (const [key, value] of Object.entries(options.query ?? {})) {
-    if (value !== undefined) {
-      url.searchParams.set(key, String(value))
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (item !== undefined && item !== null) {
+        url.searchParams.append(key, String(item))
+      }
     }
   }
 
@@ -89,7 +95,12 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     return undefined as T
   }
   const text = await response.text()
-  return (text ? JSON.parse(text) : undefined) as T
+  if (!text) {
+    return undefined as T
+  }
+  // A few endpoints (password reset, registration) answer with plain text
+  const contentType = response.headers.get('Content-Type') ?? ''
+  return (contentType.includes('json') ? JSON.parse(text) : text) as T
 }
 
 async function toApiError(response: Response): Promise<ApiError> {

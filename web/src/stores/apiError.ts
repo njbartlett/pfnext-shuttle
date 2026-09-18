@@ -17,3 +17,15 @@ export function reportApiError(error: unknown) {
 export function clearApiError() {
   apiError.value = null
 }
+
+// Runs an API call, clearing the banner first and showing any failure in
+// it. Resolves to undefined on failure so callers can `if (result)`.
+export async function tryApi<T>(call: () => Promise<T>): Promise<T | undefined> {
+  clearApiError()
+  try {
+    return await call()
+  } catch (error) {
+    reportApiError(error)
+    return undefined
+  }
+}

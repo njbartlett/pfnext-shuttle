@@ -63,7 +63,7 @@
             <li><a href="/bookings.html" class="dropdown-item">Bookings</a></li>
             <li><a href="/profile.html" class="dropdown-item">My Profile</a></li>
             <li><hr class="dropdown-divider"></li>
-            <li><button type="button" id="logout" class="dropdown-item text-danger" @click="logout"><i class="bi bi-box-arrow-right"></i> Logout</button></li>
+            <li><button type="button" id="logout" class="dropdown-item text-danger" @click="logout()"><i class="bi bi-box-arrow-right"></i> Logout</button></li>
           </ul>
         </div>
 

@@ -28,8 +28,8 @@ export function cancelBooking(sessionId: number): Promise<void> {
   return shared.cancelBooking(myId(), sessionId)
 }
 
-export function joinWaitlist(sessionId: number): Promise<void> {
-  return shared.joinWaitlist(myId(), sessionId)
+export async function joinWaitlist(sessionId: number): Promise<void> {
+  await shared.joinWaitlist(myId(), sessionId)
 }
 
 export function leaveWaitlist(sessionId: number): Promise<void> {

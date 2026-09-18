@@ -16,8 +16,10 @@ mobile app through `packages/shared` (`@pfnext/shared`).
    `mountPage(SomeView)`, which mounts `PageShell` (navbar + API error banner
    + the view) on `#app`.
 
-Pages not marked `module` are untouched and keep using `static/js/library.js`
-and their per-page global scripts.
+Every page in `pages.toml` is now a module page. The only legacy (Tera plus
+global script) pages left are the blog index, blog post and blog editor under
+`/blog`, which `src/blog.rs` renders with its own context; they still use the
+trimmed `static/js/library.js`.
 
 ## Building
 
@@ -39,12 +41,26 @@ projects hard-code `mobile/node_modules/...` paths, so it links
 
 ## Layout
 
-- `src/pages/` — one entry per module page; nothing but `mountPage(View)`
+- `src/pages/` — one entry per module page; nothing but `mountPage(View, options)`.
+  Options: `navbar: false` for the focused editor/auth pages, `stayOnLogout`
+  for pages that work logged out.
 - `src/views/` — page components
-- `src/components/` — `PageShell`, `AppNavbar`, `ApiErrorAlert`, and reusable UI
+- `src/components/` — `PageShell`, `AppNavbar`, `ApiErrorAlert`, `RequireLogin`
+  (member-only gate), and reusable UI: `PagerBar`, `MemberPicker`,
+  `BsModal`/`ConfirmModal`, `SessionControls`, `SessionRatings`, `StarRating`,
+  `ChallengeProgressBars`, `BibIcon`, `AdminPanel`, `SortButtons`
+- `src/composables/` — `usePagedWindow` (week/month paging), `useNow` (1 s
+  clock), `useHashState`/`urlQuery` (URL state; becomes route queries in the
+  SPA step), `useReturnPath` (`?return=`), `useDirtyTracking`,
+  `loadSelectableMembers`, `rankByScore`, date-input helpers
 - `src/stores/` — `auth` (logged-in user, mirrored in localStorage under the
-  same key as `library.js`), `apiError`
+  same key as `library.js`; `login`, `logout`, role flags), `apiError`
+  (`tryApi()` runs a call and shows any failure in the banner)
 - `src/app/` — `mountPage`, page context reader, API client configuration
+
+API calls never happen in views directly: they go through the typed service
+modules in `packages/shared/src` (`users`, `sessions`, `bookingService`,
+`polls`, `activities`, `admin`).
 
 ## Current constraints
 
