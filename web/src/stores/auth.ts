@@ -1,7 +1,7 @@
 // Logged-in user state for the website. The session itself is a cookie set
 // by POST /api/login; the user's details are mirrored in localStorage under
-// the same key as static/js/library.js so that module pages and legacy pages
-// agree on who is logged in during the migration.
+// the same key as static/js/library.js so that the Tera blog pages agree
+// with the app on who is logged in.
 import { computed, ref } from 'vue'
 import { login as loginRequest, logout as logoutRequest, setOnUnauthorized, type LoggedInUser } from '@pfnext/shared'
 
@@ -43,11 +43,6 @@ export function setUser(newUser: LoggedInUser | null) {
 // The server rejected the session cookie (expired or revoked)
 setOnUnauthorized(() => setUser(null))
 
-// Returns the URL-encoded current location, for login.html?return=...
-export function loginReturnUrl(): string {
-  return encodeURIComponent(window.location.pathname + window.location.hash)
-}
-
 export async function login(email: string, password: string): Promise<LoggedInUser> {
   setUser(null)
   const loggedIn = await loginRequest(email, password)
@@ -55,28 +50,14 @@ export async function login(email: string, password: string): Promise<LoggedInUs
   return loggedIn
 }
 
-export interface LogoutOptions {
-  // Stay on the current page instead of returning to the home page
-  stay?: boolean
-}
-
-// Pages that remain useful when logged out (sessions, blog) opt in to
-// staying put after the navbar's Logout; replaces the afterLogout global
-let stayOnLogoutByDefault = false
-
-export function configureLogout(options: LogoutOptions) {
-  stayOnLogoutByDefault = options.stay ?? false
-}
-
-export async function logout(options: LogoutOptions = {}): Promise<void> {
+// Clears the login state; where the user ends up is the router's business
+// (see AppNavbar and the isLoggedIn watch in router/index.ts)
+export async function logout(): Promise<void> {
   setUser(null)
   try {
     await logoutRequest()
   } catch (e) {
     // Best effort: the local state is cleared regardless
     console.warn('Logout request failed', e)
-  }
-  if (!(options.stay ?? stayOnLogoutByDefault)) {
-    window.location.href = '/'
   }
 }

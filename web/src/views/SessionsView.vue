@@ -4,17 +4,17 @@
 
     <!-- Prompt to provide emergency contact info -->
     <div v-if="userRecord && (!userRecord.emergency_name || !userRecord.emergency_phone)" class="alert alert-warning" role="alert">
-      <i class="bi bi-exclamation-triangle-fill"></i>&nbsp;Please <a href="/profile.html" class="alert-link">provide an emergency contact</a>.
+      <i class="bi bi-exclamation-triangle-fill"></i>&nbsp;Please <RouterLink to="/profile.html" class="alert-link">provide an emergency contact</RouterLink>.
     </div>
 
     <!-- Open polls -->
     <div v-for="entry in unvotedPolls" :key="entry.poll.id" class="alert alert-info" role="alert">
-      <i class="bi bi-info-circle"></i>&nbsp;There is an open poll: <a :href="'/polls.html#poll-' + entry.poll.id" class="alert-link">{{ entry.poll.question }}</a>
+      <i class="bi bi-info-circle"></i>&nbsp;There is an open poll: <RouterLink :to="{ path: '/polls.html', hash: '#poll-' + entry.poll.id }" class="alert-link">{{ entry.poll.question }}</RouterLink>
     </div>
 
     <div v-if="!user" class="alert alert-light" role="alert">
       You are not logged in.
-      <a :href="'/login.html?return=' + loginReturnUrl()" role="button" class="btn btn-success rounded-pill mx-2">Login to Book</a>
+      <RouterLink :to="loginRoute(route.fullPath)" role="button" class="btn btn-success rounded-pill mx-2">Login to Book</RouterLink>
     </div>
 
     <!-- Weekly pagination -->
@@ -200,6 +200,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   addDays, bookSession, cancelBooking, deleteSession, displayDateRange, displayFullDate, displayVenueTime,
   getUserRecord, isPast, joinWaitlist, leaveWaitlist, listPolls, listSessions, saveFeedback, startOfWeek,
@@ -214,8 +215,9 @@ import SessionControls from '@/components/SessionControls.vue'
 import SessionRatings from '@/components/SessionRatings.vue'
 import { useNow } from '@/composables/useNow'
 import { usePagedWindow } from '@/composables/usePagedWindow'
-import { useHashState } from '@/composables/useUrlState'
-import { loginReturnUrl, user } from '@/stores/auth'
+import { useQueryState } from '@/composables/useQueryState'
+import { loginRoute } from '@/router'
+import { user } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
 
 const MILLIS_IN_WEEK = 7 * 24 * 60 * 60 * 1000
@@ -224,9 +226,10 @@ const HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '
 
 type ViewMode = 'list' | 'cal'
 
+const route = useRoute()
 const now = useNow()
 const pager = usePagedWindow()
-const hash = useHashState()
+const query = useQueryState()
 
 const sessions = ref<Session[]>([])
 const userRecord = ref<UserRecord | null>(null)
@@ -436,11 +439,11 @@ async function saveSessionFeedback() {
   }
 }
 
-// Keep the selected week in the URL fragment so it can be bookmarked
+// Keep the selected week in the URL so it can be bookmarked
 watch(
   () => pager.offset.value,
   (offset) => {
-    hash.set('week', offset === 0 ? null : weekStart.value.toLocaleDateString('sv'))
+    query.set('week', offset === 0 ? null : weekStart.value.toLocaleDateString('sv'))
     void loadSessions()
   }
 )
@@ -458,7 +461,7 @@ watch(user, () => {
   void loadPolls()
 })
 
-const weekParam = hash.get('week')
+const weekParam = query.get('week')
 if (weekParam) {
   const targetWeek = startOfWeek(new Date(weekParam))
   pager.jumpTo(Math.floor((targetWeek.getTime() - currentWeekStart.getTime()) / MILLIS_IN_WEEK))

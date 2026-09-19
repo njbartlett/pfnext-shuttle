@@ -1,167 +1,165 @@
 <template>
-  <RequireLogin>
-    <div class="container">
-      <PageTitle />
+  <div class="container">
+    <PageTitle />
 
-      <AdminPanel>
-        <form @submit.prevent>
-          <div class="row">
-            <div class="col">
-              <label for="selectMemberDataList" class="form-label">View and Log as Member:</label>
-              <MemberPicker v-model="selectedMember" input-id="selectMemberDataList" :members="members" />
-            </div>
-            <div class="col">
-              <label for="selectCurrentDate" class="form-label">Set Current Date:</label>
-              <input id="selectCurrentDate" v-model="currentDate" type="date" class="form-control">
-            </div>
+    <AdminPanel>
+      <form @submit.prevent>
+        <div class="row">
+          <div class="col">
+            <label for="selectMemberDataList" class="form-label">View and Log as Member:</label>
+            <MemberPicker v-model="selectedMember" input-id="selectMemberDataList" :members="members" />
           </div>
-        </form>
-      </AdminPanel>
-
-      <!-- Tabs -->
-      <ul id="challengeTabs" class="nav nav-tabs" role="tablist">
-        <li v-for="tab in TABS" :key="tab.id" class="nav-item" role="presentation">
-          <button
-            :id="tab.id"
-            class="nav-link fs-5"
-            :class="{ active: tab.id === activeTab }"
-            data-bs-toggle="tab"
-            :data-bs-target="'#' + tab.id + '-pane'"
-            type="button"
-            role="tab"
-            :aria-controls="tab.id + '-pane'"
-            :aria-selected="tab.id === activeTab"
-            @click="hash.set('tab', tab.id)"
-          >{{ tab.label }}</button>
-        </li>
-      </ul>
-
-      <div class="tab-content">
-        <!-- Current -->
-        <div id="current-challenges-tab-pane" class="tab-pane fade" :class="{ 'show active': activeTab === 'current-challenges-tab' }" role="tabpanel" aria-labelledby="current-challenges-tab" tabindex="0">
-          <div v-if="currentChallenges.length === 0" class="alert alert-warning my-2 fs-5">
-            There are no active challenges at the moment, but you can still <a href="/activities.html">record activities</a>!
+          <div class="col">
+            <label for="selectCurrentDate" class="form-label">Set Current Date:</label>
+            <input id="selectCurrentDate" v-model="currentDate" type="date" class="form-control">
           </div>
+        </div>
+      </form>
+    </AdminPanel>
 
-          <div class="row my-0 gx-2 gy-2">
-            <div v-for="challenge in currentChallenges" :key="challenge.id" class="col">
-              <div class="card my-2 rounded-3 shadow-sm border-primary">
-                <div class="card-header text-bg-primary">
-                  <span class="fs-4">{{ challenge.name }}</span>
-                  <br>
-                  <span>{{ displayShortDate(challenge.start) }} to {{ displayShortDate(challenge.finish) }}</span>
-                </div>
-                <ul class="list-group list-group-flush">
-                  <li v-if="challenge.description" class="list-group-item">
-                    <div v-html="challenge.description"></div>
-                  </li>
+    <!-- Tabs -->
+    <ul id="challengeTabs" class="nav nav-tabs" role="tablist">
+      <li v-for="tab in TABS" :key="tab.id" class="nav-item" role="presentation">
+        <button
+          :id="tab.id"
+          class="nav-link fs-5"
+          :class="{ active: tab.id === activeTab }"
+          data-bs-toggle="tab"
+          :data-bs-target="'#' + tab.id + '-pane'"
+          type="button"
+          role="tab"
+          :aria-controls="tab.id + '-pane'"
+          :aria-selected="tab.id === activeTab"
+          @click="query.set('tab', tab.id)"
+        >{{ tab.label }}</button>
+      </li>
+    </ul>
 
-                  <li v-if="challenge.goal || challenge.individual_goal || challenge.daily_goal" class="list-group-item">
-                    <ChallengeProgressBars :challenge="challenge" :member-name="selectedMember?.name ?? ''" />
-                  </li>
+    <div class="tab-content">
+      <!-- Current -->
+      <div id="current-challenges-tab-pane" class="tab-pane fade" :class="{ 'show active': activeTab === 'current-challenges-tab' }" role="tabpanel" aria-labelledby="current-challenges-tab" tabindex="0">
+        <div v-if="currentChallenges.length === 0" class="alert alert-warning my-2 fs-5">
+          There are no active challenges at the moment, but you can still <RouterLink to="/activities.html">record activities</RouterLink>!
+        </div>
 
-                  <!-- Log activity -->
-                  <li v-if="entries[challenge.id]" class="list-group-item">
-                    <form @submit.prevent="submitActivity(challenge)">
-                      <div class="d-flex flex-wrap align-items-center">
-                        <div class="fs-5 text-nowrap me-1">Log Activity:</div>
-                        <div class="flex-grow-1 d-flex align-items-center gy-2">
-                          <input v-model="entries[challenge.id].date" type="date" class="form-control" :class="{ 'is-invalid': entryErrors(challenge).date }" required>
-                          <div class="input-group ms-1 flex-nowrap">
-                            <input
-                              v-model.number="entries[challenge.id].amount"
-                              type="number"
-                              min="0"
-                              :step="challenge.activity_type.step_size"
-                              class="form-control"
-                              :class="{ 'is-invalid': entryErrors(challenge).amount }"
-                              style="max-width: 160px;"
-                              placeholder="Quantity"
-                              required
-                            >
-                            <span class="input-group-text">{{ challenge.activity_type.units }}</span>
-                          </div>
-                          <div class="ms-auto">
-                            <button type="submit" class="btn btn-outline-primary ms-1" :disabled="!entryErrors(challenge).ready">Add</button>
-                          </div>
+        <div class="row my-0 gx-2 gy-2">
+          <div v-for="challenge in currentChallenges" :key="challenge.id" class="col">
+            <div class="card my-2 rounded-3 shadow-sm border-primary">
+              <div class="card-header text-bg-primary">
+                <span class="fs-4">{{ challenge.name }}</span>
+                <br>
+                <span>{{ displayShortDate(challenge.start) }} to {{ displayShortDate(challenge.finish) }}</span>
+              </div>
+              <ul class="list-group list-group-flush">
+                <li v-if="challenge.description" class="list-group-item">
+                  <div v-html="challenge.description"></div>
+                </li>
+
+                <li v-if="challenge.goal || challenge.individual_goal || challenge.daily_goal" class="list-group-item">
+                  <ChallengeProgressBars :challenge="challenge" :member-name="selectedMember?.name ?? ''" />
+                </li>
+
+                <!-- Log activity -->
+                <li v-if="entries[challenge.id]" class="list-group-item">
+                  <form @submit.prevent="submitActivity(challenge)">
+                    <div class="d-flex flex-wrap align-items-center">
+                      <div class="fs-5 text-nowrap me-1">Log Activity:</div>
+                      <div class="flex-grow-1 d-flex align-items-center gy-2">
+                        <input v-model="entries[challenge.id].date" type="date" class="form-control" :class="{ 'is-invalid': entryErrors(challenge).date }" required>
+                        <div class="input-group ms-1 flex-nowrap">
+                          <input
+                            v-model.number="entries[challenge.id].amount"
+                            type="number"
+                            min="0"
+                            :step="challenge.activity_type.step_size"
+                            class="form-control"
+                            :class="{ 'is-invalid': entryErrors(challenge).amount }"
+                            style="max-width: 160px;"
+                            placeholder="Quantity"
+                            required
+                          >
+                          <span class="input-group-text">{{ challenge.activity_type.units }}</span>
+                        </div>
+                        <div class="ms-auto">
+                          <button type="submit" class="btn btn-outline-primary ms-1" :disabled="!entryErrors(challenge).ready">Add</button>
                         </div>
                       </div>
-                      <div v-if="entryErrors(challenge).message" class="text-danger"><i class="bi bi-exclamation-circle"></i>&nbsp;{{ entryErrors(challenge).message }}</div>
-                    </form>
-                  </li>
-                </ul>
+                    </div>
+                    <div v-if="entryErrors(challenge).message" class="text-danger"><i class="bi bi-exclamation-circle"></i>&nbsp;{{ entryErrors(challenge).message }}</div>
+                  </form>
+                </li>
+              </ul>
 
-                <!-- Leaderboard -->
-                <div class="card-footer">
-                  <span class="fs-5 mt-2">Leaderboard</span>
-                  <table class="table table-borderless table-transparent mt-2 align-middle">
-                    <tbody v-if="leaderboard(challenge).length === 0">
-                      <tr><td class="ps-0 fs-5" colspan="3">No activities recorded yet!</td></tr>
-                    </tbody>
-                    <tbody v-for="ranking in leaderboard(challenge)" :key="ranking.rank" class="border-bottom">
-                      <tr>
-                        <td :rowspan="ranking.others.length + 1" class="ps-0 fs-2">
-                          <span v-if="ranking.rank === 1" title="Gold Medal">🥇</span>
-                          <span v-else-if="ranking.rank === 2" title="Silver Medal">🥈</span>
-                          <span v-else-if="ranking.rank === 3" title="Bronze Medal">🥉</span>
-                          <span v-else>{{ ranking.rank }}</span>
-                        </td>
-                        <td class="fs-6 text-nowrap">
-                          <span v-if="ranking.first.name" :class="{ 'text-success': isSelected(ranking.first.id) }">{{ ranking.first.name }}</span>
-                          <span v-else>&laquo; others &raquo;</span>
-                        </td>
-                        <td width="100%">
-                          <div class="progress" role="progressbar" style="height: 25px">
-                            <div class="progress-bar" :class="isSelected(ranking.first.id) ? 'bg-success' : 'bg-primary'" :style="{ width: barWidth(challenge, ranking.score) }">
-                              {{ displayNumber(ranking.score) }}&nbsp;{{ ranking.score === 1 ? ranking.first.singular_units : ranking.first.plural_units }}
-                            </div>
+              <!-- Leaderboard -->
+              <div class="card-footer">
+                <span class="fs-5 mt-2">Leaderboard</span>
+                <table class="table table-borderless table-transparent mt-2 align-middle">
+                  <tbody v-if="leaderboard(challenge).length === 0">
+                    <tr><td class="ps-0 fs-5" colspan="3">No activities recorded yet!</td></tr>
+                  </tbody>
+                  <tbody v-for="ranking in leaderboard(challenge)" :key="ranking.rank" class="border-bottom">
+                    <tr>
+                      <td :rowspan="ranking.others.length + 1" class="ps-0 fs-2">
+                        <span v-if="ranking.rank === 1" title="Gold Medal">🥇</span>
+                        <span v-else-if="ranking.rank === 2" title="Silver Medal">🥈</span>
+                        <span v-else-if="ranking.rank === 3" title="Bronze Medal">🥉</span>
+                        <span v-else>{{ ranking.rank }}</span>
+                      </td>
+                      <td class="fs-6 text-nowrap">
+                        <span v-if="ranking.first.name" :class="{ 'text-success': isSelected(ranking.first.id) }">{{ ranking.first.name }}</span>
+                        <span v-else>&laquo; others &raquo;</span>
+                      </td>
+                      <td width="100%">
+                        <div class="progress" role="progressbar" style="height: 25px">
+                          <div class="progress-bar" :class="isSelected(ranking.first.id) ? 'bg-success' : 'bg-primary'" :style="{ width: barWidth(challenge, ranking.score) }">
+                            {{ displayNumber(ranking.score) }}&nbsp;{{ ranking.score === 1 ? ranking.first.singular_units : ranking.first.plural_units }}
                           </div>
-                        </td>
-                      </tr>
-                      <tr v-for="entry in ranking.others" :key="entry.id ?? entry.name ?? ''">
-                        <td class="fs-6 text-nowrap" :class="{ 'text-success': isSelected(entry.id) }">{{ entry.name }}</td>
-                        <td width="100%">
-                          <div class="progress" role="progressbar" style="height: 25px">
-                            <div class="progress-bar" :class="isSelected(entry.id) ? 'bg-success' : 'bg-primary'" :style="{ width: barWidth(challenge, ranking.score) }">
-                              {{ displayNumber(ranking.score) }}&nbsp;{{ ranking.score === 1 ? entry.singular_units : entry.plural_units }}
-                            </div>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr v-for="entry in ranking.others" :key="entry.id ?? entry.name ?? ''">
+                      <td class="fs-6 text-nowrap" :class="{ 'text-success': isSelected(entry.id) }">{{ entry.name }}</td>
+                      <td width="100%">
+                        <div class="progress" role="progressbar" style="height: 25px">
+                          <div class="progress-bar" :class="isSelected(entry.id) ? 'bg-success' : 'bg-primary'" :style="{ width: barWidth(challenge, ranking.score) }">
+                            {{ displayNumber(ranking.score) }}&nbsp;{{ ranking.score === 1 ? entry.singular_units : entry.plural_units }}
                           </div>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- Future -->
-        <div id="future-challenges-tab-pane" class="tab-pane fade" :class="{ 'show active': activeTab === 'future-challenges-tab' }" role="tabpanel" aria-labelledby="future-challenges-tab" tabindex="0">
-          <div v-if="futureChallenges.length === 0" class="fs-5 my-2">There are no upcoming challenges planned yet. Check back later!</div>
-          <div v-for="challenge in futureChallenges" :key="challenge.id" class="card rounded-3 shadow-sm my-2">
-            <div class="card-header">
-              <h5>{{ challenge.name }}</h5>
-              {{ displayFullDate(challenge.start) }} to {{ displayFullDate(challenge.finish) }}
-            </div>
+      <!-- Future -->
+      <div id="future-challenges-tab-pane" class="tab-pane fade" :class="{ 'show active': activeTab === 'future-challenges-tab' }" role="tabpanel" aria-labelledby="future-challenges-tab" tabindex="0">
+        <div v-if="futureChallenges.length === 0" class="fs-5 my-2">There are no upcoming challenges planned yet. Check back later!</div>
+        <div v-for="challenge in futureChallenges" :key="challenge.id" class="card rounded-3 shadow-sm my-2">
+          <div class="card-header">
+            <h5>{{ challenge.name }}</h5>
+            {{ displayFullDate(challenge.start) }} to {{ displayFullDate(challenge.finish) }}
           </div>
         </div>
+      </div>
 
-        <!-- Past -->
-        <div id="past-challenges-tab-pane" class="tab-pane fade" :class="{ 'show active': activeTab === 'past-challenges-tab' }" role="tabpanel" aria-labelledby="past-challenges-tab" tabindex="0">
-          <div v-for="challenge in pastChallenges" :key="challenge.id" class="card rounded-3 shadow-sm my-2">
-            <div class="card-header">
-              <h5>{{ challenge.name }}</h5>
-              {{ displayFullDate(challenge.start) }} to {{ displayFullDate(challenge.finish) }}
-            </div>
-            <div class="card-body">
-              <ChallengeProgressBars :challenge="challenge" :member-name="selectedMember?.name ?? ''" />
-            </div>
+      <!-- Past -->
+      <div id="past-challenges-tab-pane" class="tab-pane fade" :class="{ 'show active': activeTab === 'past-challenges-tab' }" role="tabpanel" aria-labelledby="past-challenges-tab" tabindex="0">
+        <div v-for="challenge in pastChallenges" :key="challenge.id" class="card rounded-3 shadow-sm my-2">
+          <div class="card-header">
+            <h5>{{ challenge.name }}</h5>
+            {{ displayFullDate(challenge.start) }} to {{ displayFullDate(challenge.finish) }}
+          </div>
+          <div class="card-body">
+            <ChallengeProgressBars :challenge="challenge" :member-name="selectedMember?.name ?? ''" />
           </div>
         </div>
       </div>
     </div>
-  </RequireLogin>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -174,11 +172,10 @@ import AdminPanel from '@/components/AdminPanel.vue'
 import ChallengeProgressBars from '@/components/ChallengeProgressBars.vue'
 import MemberPicker from '@/components/MemberPicker.vue'
 import PageTitle from '@/components/PageTitle.vue'
-import RequireLogin from '@/components/RequireLogin.vue'
 import { toDateInputValue } from '@/composables/useDates'
+import { useQueryState } from '@/composables/useQueryState'
 import { rankByScore } from '@/composables/useRanking'
 import { loadSelectableMembers } from '@/composables/useSelectableMembers'
-import { useHashState } from '@/composables/useUrlState'
 import { user } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
 
@@ -197,9 +194,9 @@ interface ActivityEntry {
   amount: number | null
 }
 
-const hash = useHashState()
+const query = useQueryState()
 const activeTab = computed(() => {
-  const requested = hash.get('tab')
+  const requested = query.get('tab')
   return TABS.some((tab) => tab.id === requested) ? requested! : TABS[0].id
 })
 

@@ -44,16 +44,17 @@ import { ref } from 'vue'
 import { displayFullDate, displayVenueTime, getSession, listFeedback, type Feedback, type Session } from '@pfnext/shared'
 import SessionRatings from '@/components/SessionRatings.vue'
 import StarRating from '@/components/StarRating.vue'
+import { useQueryState } from '@/composables/useQueryState'
 import { useReturnPath } from '@/composables/useReturnPath'
-import { urlQuery } from '@/composables/useUrlState'
 import { reportApiError, tryApi } from '@/stores/apiError'
 
 const { goBack } = useReturnPath('/sessions.html')
+const query = useQueryState()
 
 const session = ref<Session | null>(null)
 const feedback = ref<Feedback[]>([])
 
-const sessionId = Number(urlQuery().get('id'))
+const sessionId = Number(query.get('id'))
 if (sessionId) {
   void tryApi(() => getSession(sessionId)).then((result) => {
     session.value = result ?? null

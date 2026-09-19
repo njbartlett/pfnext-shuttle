@@ -2,6 +2,6 @@ target
 node_modules
 **/node_modules
 mobile
-static/js/pages
+web/dist
 .env
 .git

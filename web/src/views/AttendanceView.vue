@@ -102,12 +102,13 @@ import {
 import BibIcon from '@/components/BibIcon.vue'
 import MemberPicker from '@/components/MemberPicker.vue'
 import SortButtons from '@/components/SortButtons.vue'
+import { useQueryState } from '@/composables/useQueryState'
 import { useReturnPath } from '@/composables/useReturnPath'
 import { loadSelectableMembers } from '@/composables/useSelectableMembers'
-import { urlQuery } from '@/composables/useUrlState'
 import { reportApiError, tryApi } from '@/stores/apiError'
 
 const { goBack } = useReturnPath('/sessions.html')
+const query = useQueryState()
 
 const session = ref<Session | null>(null)
 const bookings = ref<Booking[]>([])
@@ -117,7 +118,7 @@ const addingMember = ref<UserSummary | null>(null)
 const picker = ref<InstanceType<typeof MemberPicker> | null>(null)
 const sort = reactive<{ field: keyof Booking; ascending: boolean }>({ field: 'person_name', ascending: true })
 
-const sessionId = Number(urlQuery().get('id'))
+const sessionId = Number(query.get('id'))
 
 function sortBookings() {
   sortByField(bookings.value, sort.field, sort.ascending)

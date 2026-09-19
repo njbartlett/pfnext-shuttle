@@ -7,4 +7,4 @@
 
 # npm workspace (web/, packages/shared) and Vite build output
 node_modules/
-/static/js/pages/
+/web/dist/

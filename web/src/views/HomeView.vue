@@ -4,10 +4,10 @@
     <img src="/img/banner.svg" class="img-fluid" alt="Another Level Banner">
     <div class="text-center">
       <div v-if="!isLoggedIn" class="btn-group m-1 flex-nowrap">
-        <a href="/register.html" class="btn btn-success rounded-pill-left" style="font-size: x-large;">Start&nbsp;Free&nbsp;Trial</a>
-        <a href="/login.html?return=index.html" class="btn btn-outline-success rounded-pill-right" style="font-size: x-large;">Login</a>
+        <RouterLink to="/register.html" class="btn btn-success rounded-pill-left" style="font-size: x-large;">Start&nbsp;Free&nbsp;Trial</RouterLink>
+        <RouterLink :to="{ name: 'login', query: { return: '/index.html' } }" class="btn btn-outline-success rounded-pill-right" style="font-size: x-large;">Login</RouterLink>
       </div>
-      <a href="/sessions.html" class="btn btn-outline-primary m-1" style="font-size: x-large;">Browse&nbsp;Sessions</a>
+      <RouterLink to="/sessions.html" class="btn btn-outline-primary m-1" style="font-size: x-large;">Browse&nbsp;Sessions</RouterLink>
     </div>
 
     <!-- Slogan -->
@@ -29,10 +29,10 @@
 
     <div class="text-center my-5">
       <p class="fs-3 text-body-secondary">
-        Ready to get started? Just <a href="/register.html">register a new account</a>, then book your first session for free!
+        Ready to get started? Just <RouterLink to="/register.html">register a new account</RouterLink>, then book your first session for free!
       </p>
       <p class="fs-3 text-body-secondary">
-        Read more <a href="/about.html">About Us</a> or view our <a href="/pricing.html">pricing plans</a>.
+        Read more <RouterLink to="/about.html">About Us</RouterLink> or view our <RouterLink to="/pricing.html">pricing plans</RouterLink>.
       </p>
     </div>
   </div>
@@ -48,6 +48,9 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+// The only eagerly loaded view (the router imports it directly), so it does
+// not import from '@/router' itself
+import { Carousel } from 'bootstrap'
 import { isLoggedIn } from '@/stores/auth'
 
 const CAROUSEL_IMAGES = [
@@ -65,9 +68,9 @@ const carouselElement = ref<HTMLElement | null>(null)
 
 onMounted(() => {
   if (carouselElement.value) {
-    // Created here (before window load) so Bootstrap's data-api picks up this
-    // instance and its 3s interval instead of creating a default 5s one
-    new bootstrap.Carousel(carouselElement.value, { interval: 3000, pause: false })
+    // Created here so Bootstrap's data-api picks up this instance and its 3s
+    // interval instead of creating a default 5s one
+    new Carousel(carouselElement.value, { interval: 3000, pause: false })
   }
 })
 </script>

@@ -1,39 +1,46 @@
 # Another Level — website front-end
 
-Vite + Vue 3 + TypeScript build for the website pages, migrating them one at
-a time away from the Tera-rendered, global-script pages under `templates/`
-and `static/js/`. Shares its API client, types and booking service with the
-mobile app through `packages/shared` (`@pfnext/shared`).
+Vite + Vue 3 + TypeScript single-page app for the website. Shares its API
+client, types and services with the mobile app through `packages/shared`
+(`@pfnext/shared`).
 
-## How a page is served
+## How the site is served
 
-1. `templates/pages.toml` marks a page `module = true`.
-2. `src/templates.rs` then renders `templates/module_page.html.tera` for it
-   instead of a page-specific template. That layout embeds the Tera `common`
-   and `page` context as JSON and loads `/js/pages/<template_name>.js` as an
-   ES module.
-3. `web/src/pages/<template_name>.ts` is the matching Vite entry. It calls
-   `mountPage(SomeView)`, which mounts `PageShell` (navbar + API error banner
-   + the view) on `#app`.
+- `npm run build` writes the app to `web/dist/` (Vite-owned `index.html` plus
+  hashed assets, with the files in `public/` copied as-is).
+- Rocket (`src/templates.rs`) serves files from `web/dist/` first, then from
+  `static/`, and returns `web/dist/index.html` for any page path with no file
+  (an SPA fallback). Paths under `/api` and `/blog`, and missing assets, 404
+  instead.
+- `src/router/index.ts` owns the page URLs. They keep their historical
+  `.html` form (`/sessions.html`) so bookmarks and emailed links still work,
+  and the old fragment state (`sessions.html#week=...`) is redirected to
+  query parameters.
 
-Every page in `pages.toml` is now a module page. The only legacy (Tera plus
-global script) pages left are the blog index, blog post and blog editor under
-`/blog`, which `src/blog.rs` renders with its own context; they still use the
-trimmed `static/js/library.js`.
+The blog (`/blog/...`) is still rendered by Rocket from Tera templates with
+the legacy global scripts in `static/js/`; see the migration plan for the
+options.
 
-## Building
+## Building and developing
 
 From the repo root:
 
 ```sh
 npm install            # installs web/ and packages/shared (npm workspaces)
-npm run build          # type-checks, then writes static/js/pages/
-npm run watch          # rebuild on change while running the Rocket server
+npm run build          # type-checks, then writes web/dist/
+npm run dev            # Vite dev server with hot reload on :5173
+npm run watch          # rebuild web/dist/ on change instead
 ```
 
-`static/js/pages/` is build output and is git-ignored; the Dockerfile builds
-it in a Node stage. Run `npm run build` before `cargo run` locally or module
-pages will 404 their script.
+`web/dist/` is build output and is git-ignored; the Dockerfile builds it in a
+Node stage. Run `npm run build` before `cargo run` locally or Rocket has no
+pages to serve.
+
+The dev server proxies `/api`, `/blog`, `/js` and `/styles` to Rocket on
+`localhost:8000`, so `cargo run` must be running alongside it. The browser
+only talks to the dev server, so the session cookie is same-site; with
+`COOKIE_SECURE=true` it still works because browsers treat `localhost` as a
+secure context.
 
 The mobile app is deliberately not part of the workspace: Capacitor's native
 projects hard-code `mobile/node_modules/...` paths, so it links
@@ -41,32 +48,40 @@ projects hard-code `mobile/node_modules/...` paths, so it links
 
 ## Layout
 
-- `src/pages/` — one entry per module page; nothing but `mountPage(View, options)`.
-  Options: `navbar: false` for the focused editor/auth pages, `stayOnLogout`
-  for pages that work logged out.
-- `src/views/` — page components
-- `src/components/` — `PageShell`, `AppNavbar`, `ApiErrorAlert`, `RequireLogin`
-  (member-only gate), and reusable UI: `PagerBar`, `MemberPicker`,
-  `BsModal`/`ConfirmModal`, `SessionControls`, `SessionRatings`, `StarRating`,
-  `ChallengeProgressBars`, `BibIcon`, `AdminPanel`, `SortButtons`
-- `src/composables/` — `usePagedWindow` (week/month paging), `useNow` (1 s
-  clock), `useHashState`/`urlQuery` (URL state; becomes route queries in the
-  SPA step), `useReturnPath` (`?return=`), `useDirtyTracking`,
-  `loadSelectableMembers`, `rankByScore`, date-input helpers
+- `index.html` — the SPA shell; applies the saved colour theme before first
+  paint
+- `public/` — images, icons and the web manifest, copied to `dist/` unchanged
+- `src/main.ts` — creates the app with the router; imports Bootstrap's CSS,
+  icon font and JavaScript from npm
+- `src/App.vue` — navbar, API error banner, `<RouterView>`, footer
+- `src/router/` — one route per page with `meta` (`title`, `nav`, `navbar`,
+  `requiresLogin`, `stayOnLogout`); the login guard; the legacy fragment
+  redirect; `loginRoute()` and `passwordResetUrl()` helpers
+- `src/views/` — page components, lazy-loaded by the router
+- `src/components/` — `AppNavbar`, `ThemeToggle`, `ApiErrorAlert`, and
+  reusable UI: `PagerBar`, `MemberPicker`, `BsModal`/`ConfirmModal`,
+  `SessionControls`, `SessionRatings`, `StarRating`, `ChallengeProgressBars`,
+  `BibIcon`, `AdminPanel`, `AuthCard`, `PageTitle`, `SortButtons`
+- `src/composables/` — `useQueryState` (page state in the route query),
+  `useReturnPath` (`?return=`), `useTheme`, `usePagedWindow` (week/month
+  paging), `useNow` (1 s clock), `useDirtyTracking`, `loadSelectableMembers`,
+  `rankByScore`, date-input helpers
 - `src/stores/` — `auth` (logged-in user, mirrored in localStorage under the
-  same key as `library.js`; `login`, `logout`, role flags), `apiError`
-  (`tryApi()` runs a call and shows any failure in the banner)
-- `src/app/` — `mountPage`, page context reader, API client configuration
+  same key as `static/js/library.js`; `login`, `logout`, role flags),
+  `apiError` (`tryApi()` runs a call and shows any failure in the banner)
+- `src/app/site.ts` — site name and blog URLs
 
 API calls never happen in views directly: they go through the typed service
 modules in `packages/shared/src` (`users`, `sessions`, `bookingService`,
 `polls`, `activities`, `admin`).
 
-## Current constraints
+Bootstrap components are imported from `bootstrap` where a view needs one
+(`Modal`, `Carousel`, `Collapse`); the data-api for dropdowns and collapses
+is enabled by the `import 'bootstrap'` in `main.ts`.
 
-- Bootstrap, Popper and `theme.js` are still loaded as classic scripts by
-  `base_layout.html.tera`, so components use the `bootstrap` global
-  (`src/globals.d.ts`) rather than importing it.
-- SFC `<style>` blocks are emitted as separate CSS files that the Tera layout
-  does not link. Use Bootstrap utility classes or inline styles until the
-  single-entry SPA step, when Vite owns the HTML.
+## Still shared with the blog
+
+`static/styles/al.css` is linked by `index.html` rather than imported, because
+the Tera blog pages load the same file. The colour theme is stored under the
+same localStorage key that `static/js/theme.js` reads. Both move into `src/`
+once the blog leaves Tera.

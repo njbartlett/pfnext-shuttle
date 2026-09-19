@@ -12,16 +12,17 @@
 // Bootstrap modal owned by Vue: the slot holds the modal-header/body/footer,
 // and the parent calls show()/hide() through a template ref.
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { Modal } from 'bootstrap'
 
 defineProps<{ dialogClass?: string }>()
 const emit = defineEmits<{ hidden: [] }>()
 
 const element = ref<HTMLElement | null>(null)
-let modal: InstanceType<typeof bootstrap.Modal> | null = null
+let modal: Modal | null = null
 
 onMounted(() => {
   if (element.value) {
-    modal = new bootstrap.Modal(element.value, { focus: true, keyboard: true })
+    modal = new Modal(element.value, { focus: true, keyboard: true })
     element.value.addEventListener('hidden.bs.modal', () => emit('hidden'))
   }
 })

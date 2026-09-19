@@ -1,13 +1,13 @@
 <template>
   <div class="mt-2 mx-auto text-center">
-    <h1 class="display-4 fw-normal text-body-emphasis">{{ title ?? page.title }}</h1>
+    <h1 class="display-4 fw-normal text-body-emphasis">{{ title ?? route.meta.title }}</h1>
   </div>
 </template>
 
 <script setup lang="ts">
-// The page heading; defaults to the title from templates/pages.toml
-import { usePageContext } from '@/app/pageContext'
+// The page heading; defaults to the route's title
+import { useRoute } from 'vue-router'
 
 defineProps<{ title?: string }>()
-const { page } = usePageContext()
+const route = useRoute()
 </script>

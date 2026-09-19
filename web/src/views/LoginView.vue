@@ -2,8 +2,8 @@
   <!-- Already logged in -->
   <div v-if="user" class="alert alert-success my-5 text-center" role="alert">
     <i class="bi bi-info-circle"></i>&nbsp;You are logged in as {{ user.name }}. Open the
-    <a href="/sessions.html" class="alert-link">sessions page</a> or
-    <a href="#" class="alert-link" @click.prevent="logout({ stay: true })">login as a different user</a>.
+    <RouterLink to="/sessions.html" class="alert-link">sessions page</RouterLink> or
+    <a href="#" class="alert-link" @click.prevent="logout()">login as a different user</a>.
   </div>
 
   <template v-else>
@@ -34,24 +34,28 @@
     </AuthCard>
 
     <div class="text-center my-3">
-      <p class="fs-5">No account yet? <a href="/register.html">Sign Up!</a></p>
+      <p class="fs-5">No account yet? <RouterLink to="/register.html">Sign Up!</RouterLink></p>
     </div>
   </template>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { EMAIL_FORMAT_MESSAGE, isValidEmail, requestPasswordReset } from '@pfnext/shared'
 import AuthCard from '@/components/AuthCard.vue'
+import { useQueryState } from '@/composables/useQueryState'
 import { useReturnPath } from '@/composables/useReturnPath'
-import { passwordResetUrl, urlQuery } from '@/composables/useUrlState'
+import { passwordResetUrl } from '@/router'
 import { login, logout, user } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
 
+const router = useRouter()
+const query = useQueryState()
 const { returnPath } = useReturnPath('/index.html')
 
 const form = reactive({
-  email: urlQuery().get('email') ?? '',
+  email: query.get('email') ?? '',
   password: ''
 })
 const showForgotten = ref(false)
@@ -63,7 +67,7 @@ const ready = computed(() => emailError.value === null)
 async function onLogin() {
   const loggedIn = await tryApi(() => login(form.email, form.password))
   if (loggedIn) {
-    window.location.href = returnPath ?? '/index.html'
+    void router.push(returnPath ?? '/index.html')
   }
 }
 
@@ -74,7 +78,7 @@ async function onResetPassword() {
   )
   if (message !== undefined) {
     resetResult.value = { message, isError: false }
-    window.location.href = '/passwordreset.html?email=' + encodeURIComponent(form.email)
+    void router.push({ name: 'passwordreset', query: { email: form.email } })
   } else {
     resetResult.value = null
   }

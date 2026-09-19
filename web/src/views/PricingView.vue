@@ -56,7 +56,7 @@
     <p class="fs-5 text-center text-body-secondary">No joining fees! Monthly membership fees paid by standing order on the first of each month. First month membership may be discounted if joining mid-month.</p>
 
     <h2 class="display-6 text-center">
-      <a role="button" href="/register.html" class="btn btn-success rounded-pill px-4" style="font-size: x-large;">Claim Free Trial</a>
+      <RouterLink role="button" to="/register.html" class="btn btn-success rounded-pill px-4" style="font-size: x-large;">Claim Free Trial</RouterLink>
     </h2>
   </div>
 </template>

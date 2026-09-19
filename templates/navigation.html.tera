@@ -17,14 +17,18 @@
         <!-- Navbar collapsible list -->
         <div id="navbarContent" class="collapse navbar-collapse">
             <ul class="navbar-nav me-auto">
-                <!-- General Pages -->
-                {% for item in common.navigation %}
-                    <li class="nav-item">
-                        <a class="nav-link" {% if common.url == item.url %} active aria-current="page" {% else %} href="{{item.url}}" {% endif %}>{{item.title}}</a>
-                    </li>
-                {% endfor %}
+                {# General pages: all part of the single-page app, so full
+                   page loads from here. Keep in step with the routes marked
+                   `nav: true` in web/src/router/index.ts. #}
+                <li class="nav-item"><a class="nav-link" href="/index.html">Home</a></li>
+                <li class="nav-item"><a class="nav-link" href="/about.html">About</a></li>
+                <li class="nav-item"><a class="nav-link" href="/pricing.html">Pricing</a></li>
+                <li class="nav-item"><a class="nav-link" href="/sessions.html">Sessions</a></li>
+                <li class="nav-item"><a class="nav-link" href="/challenges.html">Challenges</a></li>
+                <li class="nav-item"><a class="nav-link" href="/activities.html">Activities</a></li>
+                <li class="nav-item"><a class="nav-link" href="/polls.html">Polls</a></li>
 
-                {# Blog posts are handled a bit differently #}
+                {# Blog posts, the only pages rendered by this navbar #}
                 <li class="nav-item">
                     <a class="nav-link" {% if common.url == '/blog/index.html' %} active aria-current="page" {% else %} href="/blog/index.html" {% endif %}>Posts</a>
                 </li>

@@ -1,36 +1,26 @@
+//! Serving of the website: the Vite-built single-page app in web/dist, the
+//! legacy assets in static/ that the Tera-rendered blog pages still load,
+//! and the Tera page context those blog pages are rendered with.
 use std::path::{Path, PathBuf};
 
-use indexmap::IndexMap;
-use rocket::{fs::NamedFile, http::Status, request::{FromRequest, Outcome}, response::Redirect, Catcher, Request, Route, State};
-use rocket_dyn_templates::Template;
+use rocket::{fs::NamedFile, http::Status, request::{FromRequest, Outcome}, Request, Route, State};
 use serde::Serialize;
 
 use crate::config::Config;
 
-#[derive(Debug)]
-enum ContentResponse {
-    Template(Template),
-    Static(NamedFile)
-}
+/// Output of `npm run build` (see web/README.md)
+const WEB_DIST_DIR: &str = "web/dist";
+/// Bootstrap, Vue, library.js, TinyMCE and styles used by the Tera blog pages
+const STATIC_DIR: &str = "static";
+/// The SPA shell, returned for every page URL the client-side router owns
+const SPA_INDEX: &str = "web/dist/index.html";
+/// Mount points whose unmatched paths must 404 rather than fall back to the SPA
+const NON_SPA_PREFIXES: [&str; 2] = ["api", "blog"];
 
-impl<'r> rocket::response::Responder<'r, 'static> for ContentResponse {
-    fn respond_to(self, req: &'r Request<'_>) -> rocket::response::Result<'static> {
-        match self {
-            ContentResponse::Template(template) => template.respond_to(req),
-            ContentResponse::Static(file) => file.respond_to(req),
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub struct NavBarPage<'a> {
-    pub title: &'a str,
-    pub url: &'a str
-}
+/// Tera context shared by the remaining server-rendered (blog) pages
 #[derive(Debug, Serialize)]
 pub struct CommonPageContext<'a> {
     branding: &'a str,
-    navigation: Vec<NavBarPage<'a>>,
     prod: bool,
     url: &'a str,
 }
@@ -45,15 +35,8 @@ impl<'r> FromRequest<'r> for CommonPageContext<'r> {
         }
         let config = config.unwrap();
 
-        let templates = request.rocket().state::<Templates>();
-        if templates.is_none() {
-            return Outcome::Error((Status::InternalServerError, "missing Templates in request state".to_string()));
-        }
-        let templates = templates.unwrap();
-
         Outcome::Success(Self {
             branding: &config.branding,
-            navigation: templates.get_navbar(),
             prod: cfg!(not(debug_assertions)),
             url: request.uri().path().as_str()
         })
@@ -62,141 +45,77 @@ impl<'r> FromRequest<'r> for CommonPageContext<'r> {
 #[derive(Debug, Serialize)]
 pub struct PageContext<'a> {
     pub title: &'a str,
-    pub scripted: bool,
-    /// Rendered by the Vite-built ES module web/src/pages/<template_name>.ts
-    /// (via the generic "module_page" template) rather than a page template
-    /// plus a static/js/<template_name>.js global script
-    pub module: bool,
+    /// Names the Tera template and its static/js/<template_name>.js script
     pub template_name: &'a str,
 }
 
-#[derive(Serialize)]
-struct NavigablePageContext<'a> {
-    common: CommonPageContext<'a>,
-    page: PageContext<'a>
-}
-
-#[derive(Serialize, Debug)]
-pub struct TemplatePage {
-    title: String,
-    url: String,
-    navigable: bool,
-    scripted: bool,
-    module: bool
-}
-
-const MODULE_PAGE_TEMPLATE: &str = "module_page";
-
-#[derive(Serialize)]
-pub struct Templates {
-    page_map: IndexMap<String, TemplatePage>
-}
-
-impl Templates {
-    fn get_page(&self, path: &str) -> Option<&TemplatePage> {
-        self.page_map.get(path)
+/// True for paths the client-side router should handle when no file matches:
+/// page URLs (with or without a ".html" suffix) but not missing assets
+fn is_page_path(path: &Path) -> bool {
+    if NON_SPA_PREFIXES.iter().any(|prefix| path.starts_with(prefix)) {
+        return false;
     }
-    pub fn get_navbar<'a>(&'a self) -> Vec<NavBarPage<'a>> {
-        self.page_map.iter()
-            .filter(|(_, page)| page.navigable)
-            .map(|(url, page)| NavBarPage { url: url, title: &page.title }).collect()
-    }
-    pub fn load(path: &str) -> Result<Self, String> {
-        let input_str = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to load {}: {}", path, e))?;
-
-        let navigation_toml: toml::Table = toml::from_str(&input_str)
-            .map_err(|e| format!("Failed to parse TOML input from {}: {}", path, e))?;
-
-        let mut page_map = IndexMap::new();
-        for (page, table) in navigation_toml {
-            let title = table.get("title").and_then(|v| v.as_str())
-                .ok_or_else(|| format!("'title' field for page {} is missing, or not a string.", page))?
-                .to_string();
-            let url = table.get("url").and_then(|v| v.as_str())
-                .ok_or_else(|| format!("'url' field for page {} is missing, or not a string.", page))?
-                .to_string();
-            let navigable = table.get("nav")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let scripted = table.get("script")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            let module = table.get("module")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            page_map.insert(url.to_string(), TemplatePage { title, url, navigable, scripted, module });
-        }
-        Ok(Templates{page_map})
+    match path.extension() {
+        None => true,
+        Some(extension) => extension == "html"
     }
 }
 
-#[rocket::get("/<path..>")]
-async fn template_files(
-    common_context: CommonPageContext<'_>,
-    templates: &State<Templates>,
-    path: PathBuf
-) -> Result<ContentResponse, Status> {
-    let template_path = format!("/{}", path.display());
-    if let Some(template_page) = templates.get_page(&template_path) {
-        info!("Matched template page {:?}", template_page);
-        let template_name = template_page.url
-            .strip_suffix(".html")
-            .and_then(|s| s.strip_prefix("/"))
-            .unwrap_or(&template_page.url)
-            .to_string();
-        let page_context = PageContext {
-            template_name: &template_name,
-            title: &template_page.title,
-            scripted: template_page.scripted,
-            module: template_page.module,
-        };
-        let template = if template_page.module {
-            MODULE_PAGE_TEMPLATE.to_string()
-        } else {
-            template_name.clone()
-        };
-        Ok(ContentResponse::Template(Template::render(template, NavigablePageContext {
-            common: common_context,
-            page: page_context
-        })))
-    } else {
-        let static_path = Path::new("static").join(&path);
-        info!("No matching template for path {:?}, trying static path: {:?}", path, static_path);
-        match NamedFile::open(static_path).await {
-            Ok(file) => Ok(ContentResponse::Static(file)),
-            Err(_) => Err(Status::NotFound)
-        }
+async fn open_file(path: &Path) -> Option<NamedFile> {
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) if metadata.is_file() => NamedFile::open(path).await.ok(),
+        _ => None
     }
+}
+
+async fn spa_index() -> Option<NamedFile> {
+    open_file(Path::new(SPA_INDEX)).await
 }
 
 #[rocket::get("/")]
-fn index_redirect() -> Redirect {
-    Redirect::to("/index.html")
+async fn root() -> Option<NamedFile> {
+    spa_index().await
 }
 
-#[catch(404)]
-async fn not_found(
-    req: &Request<'_>
-) -> Template {
-    let common_context = CommonPageContext::from_request(req)
-        .await
-        .unwrap();
-    Template::render("404", NavigablePageContext {
-        common: common_context,
-        page: PageContext {
-            template_name: "404",
-            title: "Not Found",
-            scripted: false,
-            module: false,
+/// Static files first (the web build, then the legacy assets), otherwise the
+/// SPA shell for page paths. `PathBuf` as a segments guard rejects `..`.
+#[rocket::get("/<path..>", rank = 10)]
+async fn static_or_spa(path: PathBuf, _config: &State<Config>) -> Option<NamedFile> {
+    for dir in [WEB_DIST_DIR, STATIC_DIR] {
+        if let Some(file) = open_file(&Path::new(dir).join(&path)).await {
+            return Some(file);
         }
-    })
+    }
+    if is_page_path(&path) {
+        info!("No file for {:?}, serving the SPA shell", path);
+        spa_index().await
+    } else {
+        None
+    }
 }
 
 pub(crate) fn routes() -> Vec<Route> {
-    routes![crate::templates::index_redirect, template_files]
+    routes![root, static_or_spa]
 }
 
-pub(crate) fn catchers() -> Vec<Catcher> {
-    catchers![not_found]
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::is_page_path;
+
+    #[test]
+    fn test_page_paths_fall_back_to_spa() {
+        assert!(is_page_path(Path::new("sessions.html")));
+        assert!(is_page_path(Path::new("some/deep/page")));
+        assert!(is_page_path(Path::new("nonexistent.html")));
+    }
+
+    #[test]
+    fn test_assets_and_other_mounts_do_not() {
+        assert!(!is_page_path(Path::new("img/missing.png")));
+        assert!(!is_page_path(Path::new("js/pages/old.js")));
+        assert!(!is_page_path(Path::new("api/unknown")));
+        assert!(!is_page_path(Path::new("blog/unknown.html")));
+    }
 }

@@ -48,14 +48,14 @@
     <div v-if="isAdmin" class="btn-group dropup">
       <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-gear-fill"></i></button>
       <ul class="dropdown-menu">
-        <li><a class="dropdown-item" :href="'/attendance.html?id=' + session.id + '&return=' + loginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a></li>
-        <li><a class="dropdown-item" :href="'/feedback.html?id=' + session.id + '&return=' + loginReturnUrl()"><i class="bi bi-chat-text"></i> Feedback</a></li>
-        <li><a class="dropdown-item" :href="'/edit_session.html?return=' + loginReturnUrl() + '#edit=' + session.id"><i class="bi bi-pencil"></i> Edit</a></li>
-        <li><a class="dropdown-item" :href="'/edit_session.html?return=' + loginReturnUrl() + '#copy=' + session.id"><i class="bi bi-copy"></i> Copy</a></li>
+        <li><RouterLink class="dropdown-item" :to="toolRoute('attendance', { id: session.id })"><i class="bi bi-list-check"></i> Attendance</RouterLink></li>
+        <li><RouterLink class="dropdown-item" :to="toolRoute('feedback', { id: session.id })"><i class="bi bi-chat-text"></i> Feedback</RouterLink></li>
+        <li><RouterLink class="dropdown-item" :to="toolRoute('edit_session', { edit: session.id })"><i class="bi bi-pencil"></i> Edit</RouterLink></li>
+        <li><RouterLink class="dropdown-item" :to="toolRoute('edit_session', { copy: session.id })"><i class="bi bi-copy"></i> Copy</RouterLink></li>
         <li><button type="button" class="dropdown-item text-danger" @click="emit('delete', session)"><i class="bi bi-trash"></i> Delete</button></li>
       </ul>
     </div>
-    <a v-else-if="isSessionTrainer" class="btn btn-outline-primary btn-sm" :href="'/attendance.html?id=' + session.id + '&return=' + loginReturnUrl()"><i class="bi bi-list-check"></i> Attendance</a>
+    <RouterLink v-else-if="isSessionTrainer" class="btn btn-outline-primary btn-sm" :to="toolRoute('attendance', { id: session.id })"><i class="bi bi-list-check"></i> Attendance</RouterLink>
   </div>
 </template>
 
@@ -64,13 +64,20 @@
 // admin menu. Replaces the session_controls Tera include. The parent owns
 // the API calls and confirmation dialogs; this component only emits.
 import { computed } from 'vue'
+import { useRoute, type RouteLocationRaw } from 'vue-router'
 import { formatDuration, isFull, type Session } from '@pfnext/shared'
 import { isPastAt, isSoon } from '@/composables/useNow'
-import { isAdmin, isTrainer, loginReturnUrl, user } from '@/stores/auth'
+import { isAdmin, isTrainer, user } from '@/stores/auth'
 
 const DEADLINE_WARNING_MINUTES = 180
 
 const props = defineProps<{ session: Session; now: Date }>()
+const route = useRoute()
+
+// The trainer/admin tools return to this page (and its week) when closed
+function toolRoute(name: string, query: Record<string, number>): RouteLocationRaw {
+  return { name, query: { ...query, return: route.fullPath } }
+}
 const emit = defineEmits<{
   book: [session: Session]
   cancel: [session: Session]

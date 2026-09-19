@@ -4,7 +4,7 @@ COPY Cargo.toml /app/
 COPY src /app/src/
 RUN cargo build --release
 
-# Vite build of the module pages (web/), emitted into static/js/pages/
+# Vite build of the single-page web app (web/), emitted into web/dist/
 FROM node:22-alpine AS web-builder
 WORKDIR /app
 COPY package.json package-lock.json /app/
@@ -16,9 +16,10 @@ RUN npm run build
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 COPY --from=rust-builder /app/target/release/pfnext /app/pfnext
+# Tera templates and legacy assets are still needed for the blog pages
 COPY templates /app/templates
 COPY static /app/static
-COPY --from=web-builder /app/static/js/pages /app/static/js/pages
+COPY --from=web-builder /app/web/dist /app/web/dist
 COPY schema.sql /app/schema.sql
 COPY Config.toml /app/Config.toml
 COPY user_agents.yaml /app/user_agents.yaml

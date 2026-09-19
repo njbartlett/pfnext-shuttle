@@ -119,14 +119,14 @@ import {
   createSession, getSession, listLocations, listSessionTypes, listUsers, updateSession,
   type NewSession, type Session, type SessionLocation, type SessionType, type UserSummary
 } from '@pfnext/shared'
+import { useQueryState } from '@/composables/useQueryState'
 import { useReturnPath } from '@/composables/useReturnPath'
-import { useHashState } from '@/composables/useUrlState'
 import { tryApi } from '@/stores/apiError'
 
 const SUGGESTED_TIMES = ['08:00', '08:30', '09:00', '09:30', '18:00', '18:30', '19:00', '19:30']
 
 const { goBack } = useReturnPath('/sessions.html')
-const hash = useHashState()
+const query = useQueryState()
 
 const form = reactive({
   id: null as number | null,
@@ -213,17 +213,27 @@ function fillFrom(session: Session, keepId: boolean) {
   form.booking_deadline_mins = session.booking_deadline_duration_mins % 60
 }
 
-async function loadFromHash() {
-  const editId = hash.get('edit')
-  const copyId = hash.get('copy')
-  const sourceId = Number(editId ?? copyId)
-  if (!sourceId) {
-    return
-  }
+// Fills the form from session `sourceId`, to edit it or as the template for a copy
+async function loadSession(sourceId: number, edit: boolean) {
   const session = await tryApi(() => getSession(sourceId))
   if (session) {
-    fillFrom(session, editId !== null)
+    fillFrom(session, edit)
   }
+}
+
+// ?edit=<id> opens a session for editing, ?copy=<id> pre-fills a new one
+async function loadFromQuery() {
+  const editId = query.get('edit')
+  const copyId = query.get('copy')
+  const sourceId = Number(editId ?? copyId)
+  if (sourceId) {
+    await loadSession(sourceId, editId !== null)
+  }
+}
+
+// Keeps the URL in step with what the form holds, so it can be reloaded
+function showInQuery(sourceId: number, edit: boolean) {
+  query.update({ edit: edit ? String(sourceId) : null, copy: edit ? null : String(sourceId) })
 }
 
 function toRequest(): NewSession {
@@ -252,9 +262,8 @@ async function save(createAnother: boolean) {
       return
     }
     if (createAnother) {
-      hash.set('edit', null)
-      hash.set('copy', String(form.id))
-      await loadFromHash()
+      showInQuery(form.id, false)
+      await loadSession(form.id, false)
     } else {
       outcome.value = { message: 'Saved!', isError: false }
     }
@@ -264,10 +273,8 @@ async function save(createAnother: boolean) {
       return
     }
     // Reload the new session, in edit mode or as the template for the next one
-    hash.set('copy', null)
-    hash.set('edit', null)
-    hash.set(createAnother ? 'copy' : 'edit', String(newId))
-    await loadFromHash()
+    showInQuery(newId, !createAnother)
+    await loadSession(newId, !createAnother)
   }
 }
 
@@ -286,5 +293,5 @@ watch(form, () => {
   outcome.value = null
 })
 
-void loadReferenceData().then(loadFromHash)
+void loadReferenceData().then(loadFromQuery)
 </script>

@@ -2623,7 +2623,6 @@ dependencies = [
  "env_logger",
  "futures",
  "hex",
- "indexmap",
  "jsonwebtoken",
  "lazy_static",
  "log",
@@ -2648,7 +2647,6 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
- "toml",
  "unicode-segmentation",
  "urlencoding",
  "user-agent-parser",
@@ -4327,7 +4325,6 @@ version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
 dependencies = [
- "indexmap",
  "serde",
  "serde_spanned",
  "toml_datetime",

@@ -1,123 +1,121 @@
 <template>
-  <RequireLogin>
-    <div class="container">
-      <PageTitle />
+  <div class="container">
+    <PageTitle />
 
-      <div v-if="!isAdmin" class="alert alert-danger my-3" role="alert">
-        <i class="bi bi-exclamation-triangle-fill"></i>&nbsp;This page is only available to administrators.
-      </div>
-
-      <div v-else class="my-3 row g-3">
-        <!-- Poll list -->
-        <div class="col-lg-7">
-          <div class="card">
-            <h5 class="card-header d-flex align-items-center">
-              <span>All Polls</span>
-              <button type="button" class="btn btn-primary btn-sm ms-auto" @click="startNew"><i class="bi bi-plus-circle"></i>&nbsp;New Poll</button>
-            </h5>
-            <div class="card-body">
-              <div v-if="polls.length === 0" class="alert alert-secondary mb-0" role="alert">
-                <em>No polls have been created yet.</em>
-              </div>
-              <div v-else class="table-responsive">
-                <table class="table table-hover table-sm align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th scope="col">Question</th>
-                      <th scope="col">Status</th>
-                      <th scope="col" class="text-end">Votes</th>
-                      <th scope="col" class="text-end" title="Maximum votes per member">Limit</th>
-                      <th scope="col"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="entry in polls" :id="'poll-' + entry.poll.id" :key="entry.poll.id" :class="{ 'table-active': form.id === entry.poll.id }">
-                      <td>
-                        <a href="#" @click.prevent="edit(entry.poll)">{{ entry.poll.question }}</a>
-                        <div v-if="entry.poll.description" class="small text-secondary text-truncate" style="max-width: 24rem;">{{ entry.poll.description }}</div>
-                      </td>
-                      <td>
-                        <span class="badge rounded-pill" :class="entry.poll.open ? 'text-bg-primary' : 'text-bg-secondary'">{{ entry.poll.open ? 'Open' : 'Closed' }}</span>
-                      </td>
-                      <td class="text-end">{{ entry.votes.length }}</td>
-                      <td class="text-end">{{ entry.poll.limit_per_person }}</td>
-                      <td class="text-end text-nowrap">
-                        <div class="btn-group btn-group-sm" role="group">
-                          <button type="button" class="btn btn-outline-primary" title="Edit poll" @click="edit(entry.poll)"><i class="bi bi-pencil"></i></button>
-                          <button v-if="entry.poll.open" type="button" class="btn btn-outline-secondary" title="Close poll" @click="setOpen(entry.poll, false)"><i class="bi bi-lock-fill"></i></button>
-                          <button v-else type="button" class="btn btn-outline-success" title="Reopen poll" @click="setOpen(entry.poll, true)"><i class="bi bi-unlock-fill"></i></button>
-                          <button type="button" class="btn btn-outline-danger" title="Delete poll" @click="askDelete(entry)"><i class="bi bi-trash-fill"></i></button>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div class="card-footer text-secondary small">
-              Members can only vote on open polls. Closed polls remain visible with their results. Deleting a poll also deletes all of its votes.
-            </div>
-          </div>
-        </div>
-
-        <!-- Create / edit form -->
-        <div class="col-lg-5">
-          <div class="card">
-            <h5 class="card-header">{{ form.id ? 'Edit Poll' : 'Create New Poll' }}</h5>
-            <div class="card-body">
-              <form @submit.prevent="save">
-                <div class="mb-3">
-                  <label for="editPollQuestion" class="form-label">Question</label>
-                  <input id="editPollQuestion" v-model="form.question" type="text" class="form-control" :class="{ 'is-invalid': errors.question }" placeholder="e.g. Which day suits you best for the next social?" required>
-                  <div class="invalid-feedback">{{ errors.question }}</div>
-                </div>
-                <div class="mb-3">
-                  <label for="editPollDescription" class="form-label">Description <span class="text-secondary">(optional)</span></label>
-                  <textarea id="editPollDescription" v-model="form.description" class="form-control" rows="4" placeholder="Extra detail or instructions shown under the question"></textarea>
-                </div>
-                <div class="mb-3 row">
-                  <div class="col-6">
-                    <label for="editPollLimit" class="form-label">Votes per Member</label>
-                    <input id="editPollLimit" v-model.number="form.limit_per_person" type="number" min="1" step="1" class="form-control" :class="{ 'is-invalid': errors.limit_per_person }" required>
-                    <div class="invalid-feedback">{{ errors.limit_per_person }}</div>
-                  </div>
-                  <div class="col-6 d-flex align-items-end">
-                    <div class="form-check form-switch mb-2">
-                      <input id="editPollOpen" v-model="form.open" class="form-check-input" type="checkbox" role="switch">
-                      <label for="editPollOpen" class="form-check-label">Open for voting</label>
-                    </div>
-                  </div>
-                </div>
-              </form>
-            </div>
-            <div class="d-flex card-footer align-items-center">
-              <div class="me-auto p-2">
-                <span v-if="outcome" :class="outcome.isError ? 'text-danger' : 'text-success'">{{ outcome.message }}</span>
-              </div>
-              <div v-if="form.id" class="p-2">
-                <button type="button" class="btn btn-outline-secondary" @click="startNew">Cancel</button>
-              </div>
-              <div class="p-2">
-                <button id="editPollSubmit" type="button" class="btn btn-primary" :disabled="!ready" @click="save">{{ form.id ? 'Save' : 'Create' }}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <ConfirmModal ref="deleteModal" title="Delete Poll" icon="bi-exclamation-triangle-fill" header-class="text-bg-danger" confirm-label="Delete" confirm-icon="bi-trash" confirm-class="btn-danger" @confirm="confirmDelete">
-        <template v-if="deleting">
-          <p>Are you sure you want to delete the following poll?</p>
-          <ul>
-            <li><strong>{{ deleting.poll.question }}</strong></li>
-            <li>{{ deleting.poll.open ? 'Open' : 'Closed' }}</li>
-            <li>{{ deleting.votes.length }} vote(s) submitted</li>
-          </ul>
-          <p>This cannot be undone. All votes on this poll will be deleted.</p>
-        </template>
-      </ConfirmModal>
+    <div v-if="!isAdmin" class="alert alert-danger my-3" role="alert">
+      <i class="bi bi-exclamation-triangle-fill"></i>&nbsp;This page is only available to administrators.
     </div>
-  </RequireLogin>
+
+    <div v-else class="my-3 row g-3">
+      <!-- Poll list -->
+      <div class="col-lg-7">
+        <div class="card">
+          <h5 class="card-header d-flex align-items-center">
+            <span>All Polls</span>
+            <button type="button" class="btn btn-primary btn-sm ms-auto" @click="startNew"><i class="bi bi-plus-circle"></i>&nbsp;New Poll</button>
+          </h5>
+          <div class="card-body">
+            <div v-if="polls.length === 0" class="alert alert-secondary mb-0" role="alert">
+              <em>No polls have been created yet.</em>
+            </div>
+            <div v-else class="table-responsive">
+              <table class="table table-hover table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th scope="col">Question</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" class="text-end">Votes</th>
+                    <th scope="col" class="text-end" title="Maximum votes per member">Limit</th>
+                    <th scope="col"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in polls" :id="'poll-' + entry.poll.id" :key="entry.poll.id" :class="{ 'table-active': form.id === entry.poll.id }">
+                    <td>
+                      <a href="#" @click.prevent="edit(entry.poll)">{{ entry.poll.question }}</a>
+                      <div v-if="entry.poll.description" class="small text-secondary text-truncate" style="max-width: 24rem;">{{ entry.poll.description }}</div>
+                    </td>
+                    <td>
+                      <span class="badge rounded-pill" :class="entry.poll.open ? 'text-bg-primary' : 'text-bg-secondary'">{{ entry.poll.open ? 'Open' : 'Closed' }}</span>
+                    </td>
+                    <td class="text-end">{{ entry.votes.length }}</td>
+                    <td class="text-end">{{ entry.poll.limit_per_person }}</td>
+                    <td class="text-end text-nowrap">
+                      <div class="btn-group btn-group-sm" role="group">
+                        <button type="button" class="btn btn-outline-primary" title="Edit poll" @click="edit(entry.poll)"><i class="bi bi-pencil"></i></button>
+                        <button v-if="entry.poll.open" type="button" class="btn btn-outline-secondary" title="Close poll" @click="setOpen(entry.poll, false)"><i class="bi bi-lock-fill"></i></button>
+                        <button v-else type="button" class="btn btn-outline-success" title="Reopen poll" @click="setOpen(entry.poll, true)"><i class="bi bi-unlock-fill"></i></button>
+                        <button type="button" class="btn btn-outline-danger" title="Delete poll" @click="askDelete(entry)"><i class="bi bi-trash-fill"></i></button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card-footer text-secondary small">
+            Members can only vote on open polls. Closed polls remain visible with their results. Deleting a poll also deletes all of its votes.
+          </div>
+        </div>
+      </div>
+
+      <!-- Create / edit form -->
+      <div class="col-lg-5">
+        <div class="card">
+          <h5 class="card-header">{{ form.id ? 'Edit Poll' : 'Create New Poll' }}</h5>
+          <div class="card-body">
+            <form @submit.prevent="save">
+              <div class="mb-3">
+                <label for="editPollQuestion" class="form-label">Question</label>
+                <input id="editPollQuestion" v-model="form.question" type="text" class="form-control" :class="{ 'is-invalid': errors.question }" placeholder="e.g. Which day suits you best for the next social?" required>
+                <div class="invalid-feedback">{{ errors.question }}</div>
+              </div>
+              <div class="mb-3">
+                <label for="editPollDescription" class="form-label">Description <span class="text-secondary">(optional)</span></label>
+                <textarea id="editPollDescription" v-model="form.description" class="form-control" rows="4" placeholder="Extra detail or instructions shown under the question"></textarea>
+              </div>
+              <div class="mb-3 row">
+                <div class="col-6">
+                  <label for="editPollLimit" class="form-label">Votes per Member</label>
+                  <input id="editPollLimit" v-model.number="form.limit_per_person" type="number" min="1" step="1" class="form-control" :class="{ 'is-invalid': errors.limit_per_person }" required>
+                  <div class="invalid-feedback">{{ errors.limit_per_person }}</div>
+                </div>
+                <div class="col-6 d-flex align-items-end">
+                  <div class="form-check form-switch mb-2">
+                    <input id="editPollOpen" v-model="form.open" class="form-check-input" type="checkbox" role="switch">
+                    <label for="editPollOpen" class="form-check-label">Open for voting</label>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="d-flex card-footer align-items-center">
+            <div class="me-auto p-2">
+              <span v-if="outcome" :class="outcome.isError ? 'text-danger' : 'text-success'">{{ outcome.message }}</span>
+            </div>
+            <div v-if="form.id" class="p-2">
+              <button type="button" class="btn btn-outline-secondary" @click="startNew">Cancel</button>
+            </div>
+            <div class="p-2">
+              <button id="editPollSubmit" type="button" class="btn btn-primary" :disabled="!ready" @click="save">{{ form.id ? 'Save' : 'Create' }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <ConfirmModal ref="deleteModal" title="Delete Poll" icon="bi-exclamation-triangle-fill" header-class="text-bg-danger" confirm-label="Delete" confirm-icon="bi-trash" confirm-class="btn-danger" @confirm="confirmDelete">
+      <template v-if="deleting">
+        <p>Are you sure you want to delete the following poll?</p>
+        <ul>
+          <li><strong>{{ deleting.poll.question }}</strong></li>
+          <li>{{ deleting.poll.open ? 'Open' : 'Closed' }}</li>
+          <li>{{ deleting.votes.length }} vote(s) submitted</li>
+        </ul>
+        <p>This cannot be undone. All votes on this poll will be deleted.</p>
+      </template>
+    </ConfirmModal>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -125,7 +123,6 @@ import { computed, reactive, ref, watch } from 'vue'
 import { createPoll, deletePoll, listPolls, updatePoll, type NewPoll, type Poll, type PollWithVotes } from '@pfnext/shared'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import PageTitle from '@/components/PageTitle.vue'
-import RequireLogin from '@/components/RequireLogin.vue'
 import { isAdmin } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
 

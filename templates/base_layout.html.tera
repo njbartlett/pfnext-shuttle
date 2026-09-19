@@ -27,39 +27,17 @@
 
 </body>
 
-{% if page.module %}
-{# Page ported to the Vite/Vue build in web/: Vue and the shared code are
-   bundled into the module, and the page context is passed as JSON. #}
-<script id="page-context" type="application/json">{"common": {{ common | json_encode() | safe }}, "page": {{ page | json_encode() | safe }}}</script>
-<script type="module" src="/js/pages/{{page.template_name}}.js"></script>
-{% else %}
-
-{% if prod %}
+{# Layout for the server-rendered blog pages (src/blog.rs). Every other page
+   is part of the Vite-built single-page app in web/, which Rocket serves
+   from web/dist with its own index.html. #}
+{% if common.prod %}
 <script src="/js/vue.global.prod.js"></script>
 {% else %}
 <script src="/js/vue.global.js"></script>
 {% endif %}
 
 <script src="/js/library.js"></script>
-
-
-{% if page.scripted %}
 <script src="/js/{{page.template_name}}.js"></script>
-{% else %}
-{# Simple static page setup #}
-<script>
-    let app = createApp({
-        setup() {
-            return {
-                loggedin, onLogout, isAdmin, http_err
-            }
-        }
-    })
-    app.config.compilerOptions.delimiters = ['${', '}']
-    app.mount('#app')
-</script>
-{% endif %}
-{% endif %}
 {% block extra_script %}{% endblock%}
 
 </html>

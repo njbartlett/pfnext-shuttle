@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "build": "npm run build -w web",
+    "dev": "npm run dev -w web",
     "watch": "npm run watch -w web",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

@@ -28,16 +28,18 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { resetPassword } from '@pfnext/shared'
 import AuthCard from '@/components/AuthCard.vue'
-import { urlQuery } from '@/composables/useUrlState'
+import { useQueryState } from '@/composables/useQueryState'
 import { setUser } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
 
 const REDIRECT_TIMEOUT_MILLIS = 1000
 const MIN_PASSWORD_LENGTH = 8
 
-const query = urlQuery()
+const router = useRouter()
+const query = useQueryState()
 const form = reactive({
   email: query.get('email') ?? '',
   tempPassword: query.get('temp_pwd') ?? '',
@@ -71,7 +73,7 @@ async function onSubmit() {
     setUser(null)
     result.value = { message: 'Password successfully updated! Redirecting back to login...', isError: false }
     setTimeout(() => {
-      window.location.href = '/login.html?email=' + encodeURIComponent(form.email)
+      void router.push({ name: 'login', query: { email: form.email } })
     }, REDIRECT_TIMEOUT_MILLIS)
   } else {
     result.value = null

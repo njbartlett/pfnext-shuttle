@@ -12,7 +12,7 @@
     <div class="card-body">
       <p class="text-secondary mb-3">
         Each row becomes one session. Duration is 60 minutes and the credit cost comes from the
-        session type; use the <a href="/edit_session.html">single-session editor</a> for anything
+        session type; use the <RouterLink to="/edit_session.html">single-session editor</RouterLink> for anything
         that needs different values.
       </p>
 
@@ -102,8 +102,7 @@
 <script setup lang="ts">
 // Bulk session entry: every row becomes one session. Duration is fixed at 60
 // minutes and cost is defaulted from the session type; anything needing other
-// values goes through edit_session.html instead. Grid styles live in
-// static/styles/al.css (.bulk-grid-row and friends).
+// values goes through edit_session.html instead.
 import { computed, ref } from 'vue'
 import {
   createSessionsBatch, listLocations, listSessionTypes, listUsers,
@@ -210,3 +209,60 @@ void Promise.all([
   locations.value = locationList ?? []
 })
 </script>
+
+<style>
+/* One shared column template for the label row and every session row */
+.bulk-grid-row {
+    display: grid;
+    grid-template-columns: 10.5rem 7rem 1.2fr 1fr 1fr 3.5rem 2.5rem;
+    gap: 8px;
+    align-items: start;
+    margin-bottom: 8px;
+}
+.bulk-grid-labels {
+    margin-bottom: 4px;
+    color: var(--bs-secondary-color);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.bulk-cost-cell {
+    align-self: center;
+    text-align: right;
+    padding-right: 4px;
+    color: var(--bs-secondary-color);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.bulk-row-feedback {
+    grid-column: 1 / -1;
+    margin: -2px 0 2px;
+    color: var(--bs-form-invalid-color);
+    font-size: 0.85rem;
+}
+/* Phone width: each session becomes its own bordered block, fields wrap two-up */
+@media (max-width: 760px) {
+    .bulk-grid-labels { display: none; }
+    .bulk-grid-row {
+        grid-template-columns: 1fr 1fr;
+        border: 1px solid var(--bs-border-color);
+        border-radius: var(--bs-border-radius);
+        padding: 10px;
+        position: relative;
+    }
+    .bulk-grid-row > .bulk-cost-cell { text-align: left; align-self: center; }
+    .bulk-grid-row > .bulk-btn-remove { position: absolute; top: 6px; right: 6px; }
+    .bulk-field-type, .bulk-field-trainer, .bulk-field-location { grid-column: 1 / -1; }
+    .bulk-field-label::before {
+        content: attr(data-label);
+        display: block;
+        color: var(--bs-secondary-color);
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 3px;
+    }
+}
+</style>

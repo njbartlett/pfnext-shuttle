@@ -225,8 +225,6 @@ async fn get_index(
         common: common_context,
         page: PageContext {
             title: "Posts",
-            scripted: true,
-            module: false,
             template_name: INDEX_TEMPLATE,
         },
         posts,
@@ -257,8 +255,6 @@ async fn get_post(
             post_last_edited_at: &Some(post.last_edited_at),
             common: common_context,
             page: PageContext {
-                scripted: true,
-                module: false,
                 title: &post.title,
                 template_name: POST_TEMPLATE
             }
@@ -411,8 +407,6 @@ async fn get_post_editor(
             post_published: &None,
             common: common_context,
             page: PageContext {
-                scripted: true,
-                module: false,
                 title: "Create Post",
                 template_name: EDIT_POST_TEMPLATE
             }
@@ -434,8 +428,6 @@ async fn get_post_editor(
             post_published: &post.published_at,
             common: common_context,
             page: PageContext {
-                scripted: true,
-                module: false,
                 title: &format!("Edit Post – {}", post.title),
                 template_name: EDIT_POST_TEMPLATE
             }

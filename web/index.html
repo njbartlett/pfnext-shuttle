@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>Another Level</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <meta name="msapplication-TileColor" content="#da532c">
+    <meta name="theme-color" content="#333333">
+
+    <!-- Apply the saved colour theme before first paint to avoid a flash; the
+         storage key is shared with src/composables/useTheme.ts and, for the
+         Tera blog pages, static/js/theme.js -->
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('theme')
+          if (theme !== 'dark' && theme !== 'light') {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          }
+          document.documentElement.setAttribute('data-bs-theme', theme)
+        } catch (e) {
+          // Storage unavailable: keep the default theme from the html element
+        }
+      })()
+    </script>
+
+    <!-- Site styles, served by Rocket from static/styles/ because the Tera
+         blog pages share them; moves into src/styles/ once the blog converts -->
+    <link href="/styles/al.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

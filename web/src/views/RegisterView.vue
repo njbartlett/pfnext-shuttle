@@ -53,7 +53,7 @@
       <div v-if="result">
         <div v-if="result.isExistingUser" class="text-danger">
           An account already exists with this email address. Please
-          <a :href="'/login.html?email=' + encodeURIComponent(form.email)">login</a> instead.
+          <RouterLink :to="{ name: 'login', query: { email: form.email } }">login</RouterLink> instead.
         </div>
         <div v-else :class="{ 'text-danger': result.isError }">{{ result.message }}</div>
       </div>
@@ -66,10 +66,13 @@ import { computed, reactive, ref } from 'vue'
 import {
   ApiError, EMAIL_FORMAT_MESSAGE, PHONE_FORMAT_MESSAGE, isValidEmail, isValidPhone, registerUser
 } from '@pfnext/shared'
+import { useRouter } from 'vue-router'
 import AuthCard from '@/components/AuthCard.vue'
-import { passwordResetUrl } from '@/composables/useUrlState'
+import { passwordResetUrl } from '@/router'
 
 const HTTP_CONFLICT = 409
+
+const router = useRouter()
 
 const TERMS =
   'By attending classes and using the park or venue or facilities and equipment, you hereby acknowledge and agree on behalf of yourself that you have voluntarily chosen to participate in intense physical exercise. We rely on you carrying out your own health self-assessment prior to taking part in any class. You agree to assume full responsibility for any and all injuries or damage to your person or property, which are sustained or aggravated by you in relation to the use of equipment and/or park or venue facilities.'
@@ -111,7 +114,7 @@ async function onSubmit() {
       reset_url: passwordResetUrl()
     })
     result.value = { message: 'Registration email sent!', isError: false, isExistingUser: false }
-    window.location.href = '/passwordreset.html?email=' + encodeURIComponent(form.email)
+    void router.push({ name: 'passwordreset', query: { email: form.email } })
   } catch (error) {
     result.value = {
       message: error instanceof Error ? error.message : String(error),

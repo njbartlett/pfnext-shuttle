@@ -22,7 +22,6 @@ use user_agent_parser::{self, UserAgentParser};
 use crate::apierror::ApiError;
 use crate::config::{AppEnv, Config};
 use crate::loginsession::AuthenticationError;
-use crate::templates::Templates;
 
 mod activities;
 mod apierror;
@@ -105,8 +104,7 @@ async fn launch() -> Rocket<Build> {
         .unwrap();
     info!("Imported schema into database.");
 
-    // Load navigation data and templates customization
-    let templates = Templates::load("templates/pages.toml").unwrap();
+    // Tera templates, now only used by the blog pages (src/blog.rs)
     let templates_fairing = Template::custom(|engines| {
         engines.tera.autoescape_on(vec![".html", ".xml", ".js"]);
     });
@@ -133,11 +131,11 @@ async fn launch() -> Rocket<Build> {
         .manage(app_env)
         .manage(pool)
         .manage(user_agent_parser)
-        .manage(templates)
         .attach(templates_fairing)
         .attach(cors)
+        // The single-page app (web/dist) and the legacy static assets; page
+        // paths with no file fall back to the SPA shell
         .mount("/", crate::templates::routes())
-        .register("/", crate::templates::catchers())
         .mount("/blog", blog::routes())
         // The "/api" catchers also cover the longer "/api/v1" prefix
         .register("/api", catchers![api_unauthorized, api_notfound])
