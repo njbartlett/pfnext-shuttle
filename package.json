@@ -9,6 +9,8 @@
     "build": "npm run build -w web",
     "dev": "npm run dev -w web",
     "watch": "npm run watch -w web",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w web"
   }
 }

@@ -439,6 +439,14 @@ async function saveSessionFeedback() {
   }
 }
 
+// A bookmarked or emailed ?week= opens on that week. Done before the offset
+// watcher is registered so the initial load below is the only one.
+const weekParam = query.get('week')
+if (weekParam) {
+  const targetWeek = startOfWeek(new Date(weekParam))
+  pager.jumpTo(Math.floor((targetWeek.getTime() - currentWeekStart.getTime()) / MILLIS_IN_WEEK))
+}
+
 // Keep the selected week in the URL so it can be bookmarked
 watch(
   () => pager.offset.value,
@@ -460,12 +468,6 @@ watch(user, () => {
   void loadUser()
   void loadPolls()
 })
-
-const weekParam = query.get('week')
-if (weekParam) {
-  const targetWeek = startOfWeek(new Date(weekParam))
-  pager.jumpTo(Math.floor((targetWeek.getTime() - currentWeekStart.getTime()) / MILLIS_IN_WEEK))
-}
 
 void loadSessions()
 void loadUser()

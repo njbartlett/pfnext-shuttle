@@ -8,3 +8,8 @@
 # npm workspace (web/, packages/shared) and Vite build output
 node_modules/
 /web/dist/
+
+# Test output
+/web/e2e/.auth/
+/web/test-results/
+/web/playwright-report/

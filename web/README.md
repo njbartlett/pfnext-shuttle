@@ -79,6 +79,39 @@ Bootstrap components are imported from `bootstrap` where a view needs one
 (`Modal`, `Carousel`, `Collapse`); the data-api for dropdowns and collapses
 is enabled by the `import 'bootstrap'` in `main.ts`.
 
+## Testing
+
+```sh
+npm test               # Vitest unit tests in packages/shared and web
+npm run test:e2e       # Playwright end-to-end tests against the real stack
+```
+
+**Unit tests** (`*.test.ts` next to the code, run with `TZ=UTC` under jsdom)
+cover the pure logic: the API client, the booking credits handshake, date
+formatting and calendar arithmetic in `packages/shared`, and the composables
+in `web/src/composables`. Add tests beside the module they exercise.
+
+**End-to-end tests** live in `web/e2e/` and are configured by
+`web/playwright.config.ts`. Playwright starts Rocket itself on port 8010 with
+`web/dist` freshly built, pointed at a dedicated `pfnext_test` database on the
+Postgres server named by `DATABASE_URL` in the repo's `.env` (override with
+`E2E_DATABASE_URL`). `e2e/reset-db.mjs` recreates that database from
+`schema.sql` and `src/fixtures/users.sql` before every run and refuses to touch
+a database whose name does not end in `_test`. The fixture accounts
+(`admin@example.com`, `trainer@example.com`, `user1@example.com`, password
+`password`) are the ones the Rust tests use.
+
+Specs import `test` and `expect` from `e2e/fixtures.ts`, whose `page` aborts
+every request to a host other than localhost: the Instagram embed and the
+carousel images would otherwise make page loads depend on the network.
+`auth.setup.ts` logs in as a member through the real login page and saves the
+browser state to `e2e/.auth/`, so specs start authenticated. `logged-out.spec.ts`
+sweeps every page URL, the login redirects, the legacy fragment links and
+Rocket's SPA fallback. `booking.spec.ts` creates a session through the API as
+the admin, then books and cancels it as the member. Run
+`npx playwright show-trace web/test-results/<test>/trace.zip` to inspect a
+failure.
+
 ## Still shared with the blog
 
 `static/styles/al.css` is linked by `index.html` rather than imported, because

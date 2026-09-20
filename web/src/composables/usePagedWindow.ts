@@ -24,11 +24,11 @@ export function usePagedWindow(pageCount = 4, firstIndex = -1) {
   }
 
   // Slides the block so that `target` is visible, keeping blocks aligned to
-  // multiples of pageCount
+  // multiples of pageCount: the block holding `target` starts at
+  // block + firstIndex, so it is the multiple just below target - firstIndex
   function jumpTo(target: number) {
     offset.value = target
-    const sign = target >= 0 ? 1 : -1
-    block.value = sign * Math.floor(Math.abs(target) / pageCount) * pageCount
+    block.value = Math.floor((target - firstIndex) / pageCount) * pageCount
   }
 
   return { block, offset, indices, home, back, forward, reset, jumpTo }
