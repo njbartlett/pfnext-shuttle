@@ -6,7 +6,14 @@ import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
-const FIXTURES = ['src/fixtures/users.sql']
+// In the order the Rust tests apply them: sessions need users, activities
+// need users and challenges
+const FIXTURES = [
+  'src/fixtures/users.sql',
+  'src/fixtures/sessions.sql',
+  'src/fixtures/challenges.sql',
+  'src/fixtures/activities.sql'
+]
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) {

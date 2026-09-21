@@ -2,7 +2,11 @@
 // own port) serving web/dist, with a dedicated Postgres database recreated
 // from schema.sql and the Rust test fixtures on every run.
 import { defineConfig, devices } from '@playwright/test'
-import { BASE_URL, E2E_PORT, REPO_ROOT, testDatabaseUrl } from './e2e/env'
+import { BASE_URL, REPO_ROOT, rocketEnv } from './e2e/env'
+
+// The web app is built as part of starting the server unless it has been
+// built already (CI builds it once, for the unit tests and for this)
+const buildStep = process.env.E2E_SKIP_WEB_BUILD ? '' : 'npm run build && '
 
 export default defineConfig({
   testDir: 'e2e',
@@ -10,10 +14,14 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: [['list']],
+  forbidOnly: !!process.env.CI,
+  reporter: process.env.CI ? [['list'], ['github']] : [['list']],
   use: {
     baseURL: BASE_URL,
-    trace: 'retain-on-failure'
+    trace: 'retain-on-failure',
+    // The club's time zone and locale, whatever machine the tests run on
+    timezoneId: 'Europe/London',
+    locale: 'en-GB'
   },
   projects: [
     { name: 'setup', testMatch: /.*\.setup\.ts/ },
@@ -23,22 +31,18 @@ export default defineConfig({
       dependencies: ['setup']
     }
   ],
-  webServer: {
-    command: 'node web/e2e/reset-db.mjs && npm run build && cargo run',
-    cwd: REPO_ROOT,
-    url: `${BASE_URL}/index.html`,
-    // A cold cargo build can take minutes
-    timeout: 600_000,
-    reuseExistingServer: false,
-    stdout: 'ignore',
-    stderr: 'pipe',
-    env: {
-      ...process.env,
-      DATABASE_URL: testDatabaseUrl(),
-      ROCKET_PORT: String(E2E_PORT),
-      COOKIE_SECURE: 'false',
-      // Keep the Rocket log readable when the server fails to start
-      RUST_LOG: process.env.RUST_LOG ?? 'warn'
-    }
-  }
+  // With E2E_BASE_URL the stack under test is already running
+  webServer: process.env.E2E_BASE_URL
+    ? undefined
+    : {
+        command: `node web/e2e/reset-db.mjs && ${buildStep}cargo run`,
+        cwd: REPO_ROOT,
+        url: `${BASE_URL}/index.html`,
+        // A cold cargo build can take minutes
+        timeout: 600_000,
+        reuseExistingServer: false,
+        stdout: 'ignore',
+        stderr: 'pipe',
+        env: rocketEnv()
+      }
 })

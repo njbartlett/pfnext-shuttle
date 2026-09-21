@@ -122,25 +122,59 @@ the legacy fragment links. Components that open Bootstrap modals need
 dismissing a modal because Bootstrap ignores `hide()` mid-transition.
 
 **End-to-end tests** live in `web/e2e/` and are configured by
-`web/playwright.config.ts`. Playwright starts Rocket itself on port 8010 with
-`web/dist` freshly built, pointed at a dedicated `pfnext_test` database on the
-Postgres server named by `DATABASE_URL` in the repo's `.env` (override with
-`E2E_DATABASE_URL`). `e2e/reset-db.mjs` recreates that database from
-`schema.sql` and `src/fixtures/users.sql` before every run and refuses to touch
-a database whose name does not end in `_test`. The fixture accounts
-(`admin@example.com`, `trainer@example.com`, `user1@example.com`, password
-`password`) are the ones the Rust tests use.
+`web/playwright.config.ts`. They cover what the mocked layers cannot: the
+API contract between the pages and Rocket. Playwright starts Rocket itself on
+port 8010 with `web/dist` freshly built, pointed at a dedicated `pfnext_test`
+database on the Postgres server named by `DATABASE_URL` in the repo's `.env`
+(override with `E2E_DATABASE_URL`). `e2e/reset-db.mjs` recreates that database
+from `schema.sql` and the SQL files in `src/fixtures/` before every run, and
+refuses to touch a database whose name does not end in `_test`. The fixture
+accounts (`admin@example.com`, `trainer@example.com`, `user1@example.com`,
+password `password`) are the ones the Rust tests use. Rocket's other required
+settings come from `.env`, or from test-only defaults in `e2e/env.ts` where
+there is no `.env` (CI). The browser runs as `Europe/London`, `en-GB`.
 
 Specs import `test` and `expect` from `e2e/fixtures.ts`, whose `page` aborts
 every request to a host other than localhost: the Instagram embed and the
 carousel images would otherwise make page loads depend on the network.
-`auth.setup.ts` logs in as a member through the real login page and saves the
-browser state to `e2e/.auth/`, so specs start authenticated. `logged-out.spec.ts`
-sweeps every page URL, the login redirects, the legacy fragment links and
-Rocket's SPA fallback. `booking.spec.ts` creates a session through the API as
-the admin, then books and cancels it as the member. Run
-`npx playwright show-trace web/test-results/<test>/trace.zip` to inspect a
-failure.
+`e2e/api.ts` logs in to the API directly to arrange data (creating the session
+a spec books) and to check the server afterwards. `auth.setup.ts` logs in once
+per role through the real login page and saves each browser state to
+`e2e/.auth/`, so specs start authenticated as the member, trainer or admin.
+
+- `logged-out.spec.ts` sweeps every page URL, the login redirects, the legacy
+  fragment links from emails and bookmarks, and Rocket's SPA fallback.
+- `booking.spec.ts` books and cancels a session as the member, on the sessions
+  page and again from the bookings page.
+- `attendance.spec.ts` opens the attendance tool from a session as its trainer,
+  marks the booked member present, clears and re-marks everyone, and returns to
+  the week it came from.
+- `admin-sessions.spec.ts` creates a session in the editor as the admin, copies
+  it from the sessions page and deletes both.
+
+Run `npx playwright show-trace web/test-results/<test>/trace.zip` to inspect a
+failure. For faster iteration, run Rocket yourself against the test database
+and the Vite dev server (`npm run dev`), then point Playwright at it:
+
+```sh
+DATABASE_URL=postgres://.../pfnext_test node web/e2e/reset-db.mjs
+DATABASE_URL=postgres://.../pfnext_test COOKIE_SECURE=false cargo run   # one terminal
+npm run dev                                                             # another
+E2E_BASE_URL=http://localhost:5173 npm run test:e2e
+```
+
+With `E2E_BASE_URL` set Playwright starts and resets nothing. Set
+`E2E_SKIP_WEB_BUILD=1` to have Playwright start Rocket without rebuilding
+`web/dist` when it is already built, for instance by extracting it from the
+Dockerfile's `web-builder` stage
+(`docker build --target web-builder --output type=local,dest=out .`, then
+`out/web/dist`).
+
+**Continuous integration** (`.github/workflows/ci.yml`) runs `cargo test` and
+the Vitest suites on every push, each with a Postgres service where needed,
+and the Playwright suite on pull requests, building `web/dist` and the Rocket
+binary once before Playwright starts the server. Traces of failed specs are
+uploaded as a workflow artifact.
 
 ## Still shared with the blog
 
