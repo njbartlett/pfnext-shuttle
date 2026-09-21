@@ -53,10 +53,12 @@ projects hard-code `mobile/node_modules/...` paths, so it links
 - `public/` — images, icons and the web manifest, copied to `dist/` unchanged
 - `src/main.ts` — creates the app with the router; imports Bootstrap's CSS,
   icon font and JavaScript from npm
-- `src/App.vue` — navbar, API error banner, `<RouterView>`, footer
+- `src/App.vue` — navbar, API error banner, `<RouterView>`, footer; sends a
+  member page back to the login page when the login expires
 - `src/router/` — one route per page with `meta` (`title`, `nav`, `navbar`,
-  `requiresLogin`, `stayOnLogout`); the login guard; the legacy fragment
-  redirect; `loginRoute()` and `passwordResetUrl()` helpers
+  `requiresLogin`, `stayOnLogout`); `createAppRouter()` attaches the login
+  guard and the legacy fragment redirect; `loginRoute()` and
+  `passwordResetUrl()` helpers
 - `src/views/` — page components, lazy-loaded by the router
 - `src/components/` — `AppNavbar`, `ThemeToggle`, `ApiErrorAlert`, and
   reusable UI: `PagerBar`, `MemberPicker`, `BsModal`/`ConfirmModal`,
@@ -70,6 +72,7 @@ projects hard-code `mobile/node_modules/...` paths, so it links
   same key as `static/js/library.js`; `login`, `logout`, role flags),
   `apiError` (`tryApi()` runs a call and shows any failure in the banner)
 - `src/app/site.ts` — site name and blog URLs
+- `src/testing/` — component test support (see Testing)
 
 API calls never happen in views directly: they go through the typed service
 modules in `packages/shared/src` (`users`, `sessions`, `bookingService`,
@@ -90,6 +93,33 @@ npm run test:e2e       # Playwright end-to-end tests against the real stack
 cover the pure logic: the API client, the booking credits handshake, date
 formatting and calendar arithmetic in `packages/shared`, and the composables
 in `web/src/composables`. Add tests beside the module they exercise.
+
+**Component tests** (also `*.test.ts`, with Vue Test Utils) mount views and
+components with the logged-in state that the end-to-end sweep cannot reach
+cheaply, and never talk to Rocket. The pieces, all in `src/testing/`:
+
+- `setup.ts` runs before every web test file: it fills jsdom's gaps
+  (`matchMedia`, `scrollTo`) and replaces `fetch` with a function that
+  rejects, so an unmocked call fails loudly.
+- `sharedMock.ts` is the mocked `@pfnext/shared`. A test file opts in with
+  `vi.mock('@pfnext/shared', () => import('@/testing/sharedMock').then((m) => m.mockedShared()))`;
+  every async export (all the API calls) becomes a `vi.fn()` that rejects until
+  the test gives it a value with `vi.mocked(listSessions).mockResolvedValue(...)`,
+  while the pure helpers and `ApiError` stay real.
+- `mount.ts` provides `mountAt(component, path)`, which mounts on a fresh copy
+  of the app's router (guards included) over an in-memory history, and
+  `waitFor()` for Bootstrap transitions and lazy-loaded routes.
+- `fixtures.ts` holds the users, a session and a pinned clock (`NOW`, a
+  Wednesday in June 2025, applied with `vi.setSystemTime`).
+
+Logged-in state is just `setUser(MEMBER)` on the auth store. The current
+tests cover `SessionControls` per role and deadline, the sessions page's
+booking flow including the credits confirmation, the editor filling its form
+from `?edit=` and `?copy=`, and, through the real `App` shell, the login guard
+and its return link, a login that expires on a member page, logging out and
+the legacy fragment links. Components that open Bootstrap modals need
+`attachTo: document.body`, and a test must wait for `shown.bs.modal` before
+dismissing a modal because Bootstrap ignores `hide()` mid-transition.
 
 **End-to-end tests** live in `web/e2e/` and are configured by
 `web/playwright.config.ts`. Playwright starts Rocket itself on port 8010 with

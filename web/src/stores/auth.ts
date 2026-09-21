@@ -51,7 +51,7 @@ export async function login(email: string, password: string): Promise<LoggedInUs
 }
 
 // Clears the login state; where the user ends up is the router's business
-// (see AppNavbar and the isLoggedIn watch in router/index.ts)
+// (see AppNavbar and the isLoggedIn watch in App.vue)
 export async function logout(): Promise<void> {
   setUser(null)
   try {

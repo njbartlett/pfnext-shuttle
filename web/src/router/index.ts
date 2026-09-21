@@ -1,9 +1,9 @@
 // One route per page. Paths keep their historical ".html" form so that
 // bookmarks, emails and the mobile app's links continue to resolve; Rocket
 // serves web/dist/index.html for every page path (src/templates.rs).
-import { watch } from 'vue'
 import {
-  createRouter, createWebHistory, type RouteLocationNormalized, type RouteLocationRaw, type RouteRecordRaw
+  createRouter, createWebHistory, type Router, type RouteLocationNormalized, type RouteLocationRaw, type RouteRecordRaw,
+  type RouterHistory
 } from 'vue-router'
 import { SITE_NAME } from '@/app/site'
 import HomeView from '@/views/HomeView.vue'
@@ -106,19 +106,42 @@ export const routes: RouteRecordRaw[] = [
 // Navbar entries, in definition order
 export const navigationRoutes = routes.filter((route) => route.meta?.nav)
 
-export const router = createRouter({
-  history: createWebHistory(),
-  routes,
-  scrollBehavior(to, _from, savedPosition) {
-    if (savedPosition) {
-      return savedPosition
+// The app's router with its guards attached. Tests pass a memory history;
+// the app itself uses `router` below.
+export function createAppRouter(history: RouterHistory = createWebHistory()): Router {
+  const router = createRouter({
+    history,
+    routes,
+    scrollBehavior(to, _from, savedPosition) {
+      if (savedPosition) {
+        return savedPosition
+      }
+      if (to.hash) {
+        return { el: to.hash }
+      }
+      return { top: 0 }
     }
-    if (to.hash) {
-      return { el: to.hash }
+  })
+
+  router.beforeEach((to) => {
+    const redirect = legacyFragmentRedirect(to)
+    if (redirect) {
+      return redirect
     }
-    return { top: 0 }
-  }
-})
+    if (to.meta.requiresLogin && !isLoggedIn.value) {
+      return loginRoute(to.fullPath)
+    }
+    return true
+  })
+
+  router.afterEach((to) => {
+    document.title = `${to.meta.title} – ${SITE_NAME}`
+  })
+
+  return router
+}
+
+export const router = createAppRouter()
 
 // The login page, returning to `returnPath` afterwards
 export function loginRoute(returnPath: string): RouteLocationRaw {
@@ -147,27 +170,3 @@ function legacyFragmentRedirect(to: RouteLocationNormalized): RouteLocationRaw |
   })
   return { path: to.path, query, hash: '' }
 }
-
-router.beforeEach((to) => {
-  const redirect = legacyFragmentRedirect(to)
-  if (redirect) {
-    return redirect
-  }
-  if (to.meta.requiresLogin && !isLoggedIn.value) {
-    return loginRoute(to.fullPath)
-  }
-  return true
-})
-
-router.afterEach((to) => {
-  document.title = `${to.meta.title} – ${SITE_NAME}`
-})
-
-// A login that expires or is revoked while on a member page (the API answered
-// 401 and the auth store cleared the user) sends the user to log in again
-watch(isLoggedIn, (loggedIn) => {
-  const current = router.currentRoute.value
-  if (!loggedIn && current.meta.requiresLogin) {
-    void router.replace(loginRoute(current.fullPath))
-  }
-})
