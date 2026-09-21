@@ -7,19 +7,25 @@ client, types and services with the mobile app through `packages/shared`
 ## How the site is served
 
 - `npm run build` writes the app to `web/dist/` (Vite-owned `index.html` plus
-  hashed assets, with the files in `public/` copied as-is).
-- Rocket (`src/templates.rs`) serves files from `web/dist/` first, then from
-  `static/`, and returns `web/dist/index.html` for any page path with no file
-  (an SPA fallback). Paths under `/api` and `/blog`, and missing assets, 404
-  instead.
+  hashed assets, with the files in `public/` copied as-is and TinyMCE's skins
+  copied to `tinymce/skins/`).
+- Rocket (`src/templates.rs`) serves files from `web/dist/` and returns
+  `web/dist/index.html` for any page path with no file (an SPA fallback).
+  Paths under `/api`, and missing assets, 404 instead.
 - `src/router/index.ts` owns the page URLs. They keep their historical
   `.html` form (`/sessions.html`) so bookmarks and emailed links still work,
   and the old fragment state (`sessions.html#week=...`) is redirected to
   query parameters.
 
-The blog (`/blog/...`) is still rendered by Rocket from Tera templates with
-the legacy global scripts in `static/js/`; see the migration plan for the
-options.
+The blog is part of the app: `/blog/index.html`, `/blog/posts/<title>.html`
+and `/blog/edit/<title>.html` are routes backed by the posts API
+(`src/blog.rs`), and images embedded in posts keep their `/blog/blobs/<id>`
+URLs. For post pages Rocket serves the shell with the post's Open Graph tags
+added (`src/blog.rs`, `post_page`), so links shared in chat and on social
+media get a title, description and image. The editor is TinyMCE from npm
+(`tinymce`, `@tinymce/tinymce-vue`); `vite.config.ts` copies its skins into
+the build because the editor loads them by URL. Writing posts needs the
+`admin` or `editor` role.
 
 ## Building and developing
 
@@ -36,7 +42,7 @@ npm run watch          # rebuild web/dist/ on change instead
 Node stage. Run `npm run build` before `cargo run` locally or Rocket has no
 pages to serve.
 
-The dev server proxies `/api`, `/blog`, `/js` and `/styles` to Rocket on
+The dev server proxies `/api` and `/blog/blobs` to Rocket on
 `localhost:8000`, so `cargo run` must be running alongside it. The browser
 only talks to the dev server, so the session cookie is same-site; with
 `COOKIE_SECURE=true` it still works because browsers treat `localhost` as a
@@ -52,7 +58,7 @@ projects hard-code `mobile/node_modules/...` paths, so it links
   paint
 - `public/` — images, icons and the web manifest, copied to `dist/` unchanged
 - `src/main.ts` — creates the app with the router; imports Bootstrap's CSS,
-  icon font and JavaScript from npm
+  icon font and JavaScript from npm, and the site styles in `src/styles/`
 - `src/App.vue` — navbar, API error banner, `<RouterView>`, footer; sends a
   member page back to the login page when the login expires
 - `src/router/` — one route per page with `meta` (`title`, `nav`, `navbar`,
@@ -68,15 +74,15 @@ projects hard-code `mobile/node_modules/...` paths, so it links
   `useReturnPath` (`?return=`), `useTheme`, `usePagedWindow` (week/month
   paging), `useNow` (1 s clock), `useDirtyTracking`, `loadSelectableMembers`,
   `rankByScore`, date-input helpers
-- `src/stores/` — `auth` (logged-in user, mirrored in localStorage under the
-  same key as `static/js/library.js`; `login`, `logout`, role flags),
-  `apiError` (`tryApi()` runs a call and shows any failure in the banner)
-- `src/app/site.ts` — site name and blog URLs
+- `src/stores/` — `auth` (logged-in user, mirrored in localStorage; `login`,
+  `logout`, role flags including `isEditor`), `apiError` (`tryApi()` runs a
+  call and shows any failure in the banner)
+- `src/app/site.ts` — site name
 - `src/testing/` — component test support (see Testing)
 
 API calls never happen in views directly: they go through the typed service
 modules in `packages/shared/src` (`users`, `sessions`, `bookingService`,
-`polls`, `activities`, `admin`).
+`polls`, `posts`, `activities`, `admin`).
 
 Bootstrap components are imported from `bootstrap` where a view needs one
 (`Modal`, `Carousel`, `Collapse`); the data-api for dropdowns and collapses
@@ -151,6 +157,8 @@ per role through the real login page and saves each browser state to
   the week it came from.
 - `admin-sessions.spec.ts` creates a session in the editor as the admin, copies
   it from the sessions page and deletes both.
+- `blog.spec.ts` writes and publishes a post in TinyMCE as the admin, reads it
+  back with its Open Graph tags, and deletes it.
 
 Run `npx playwright show-trace web/test-results/<test>/trace.zip` to inspect a
 failure. For faster iteration, run Rocket yourself against the test database
@@ -175,10 +183,3 @@ the Vitest suites on every push, each with a Postgres service where needed,
 and the Playwright suite on pull requests, building `web/dist` and the Rocket
 binary once before Playwright starts the server. Traces of failed specs are
 uploaded as a workflow artifact.
-
-## Still shared with the blog
-
-`static/styles/al.css` is linked by `index.html` rather than imported, because
-the Tera blog pages load the same file. The colour theme is stored under the
-same localStorage key that `static/js/theme.js` reads. Both move into `src/`
-once the blog leaves Tera.

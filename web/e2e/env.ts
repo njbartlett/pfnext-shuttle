@@ -57,8 +57,7 @@ const ROCKET_DEFAULTS: Record<string, string> = {
   SMTP_USERNAME: 'e2e',
   SMTP_PASSWORD: 'e2e',
   CORS_ALLOWED: 'http://localhost',
-  ROCKET_SECRET_KEY: 'epRqI/D+MDJlaxu/tdN/p5pJPo9s9F5LAHljKkDsgxc=',
-  STATIC_PATH: 'static'
+  ROCKET_SECRET_KEY: 'epRqI/D+MDJlaxu/tdN/p5pJPo9s9F5LAHljKkDsgxc='
 }
 
 // The environment Rocket is started with for the tests

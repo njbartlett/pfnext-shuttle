@@ -22,11 +22,6 @@
             <RouterLink class="nav-link" active-class="active" :to="item.path">{{ item.meta?.title }}</RouterLink>
           </li>
 
-          <!-- Blog posts are still server-rendered -->
-          <li class="nav-item">
-            <a class="nav-link" :href="BLOG_URL">Posts</a>
-          </li>
-
           <!-- Admin only links -->
           <li v-if="isAdmin" class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-gear-fill"></i></a>
@@ -39,7 +34,7 @@
               <li><RouterLink class="dropdown-item" to="/sessions_report.html"><i class="bi bi-file-earmark-text"></i>&nbsp;Sessions Report</RouterLink></li>
               <li><RouterLink class="dropdown-item" to="/stats.html"><i class="bi bi-bar-chart-fill"></i>&nbsp;Attendance Stats</RouterLink></li>
               <li><RouterLink class="dropdown-item" to="/logs.html"><i class="bi bi-journal-text"></i>&nbsp;Logs</RouterLink></li>
-              <li><a class="dropdown-item" :href="NEW_BLOG_POST_URL"><i class="bi bi-feather"></i>&nbsp;Create Blog Post</a></li>
+              <li><RouterLink class="dropdown-item" :to="{ name: 'edit_post', params: { location: 'new' } }"><i class="bi bi-feather"></i>&nbsp;Create Blog Post</RouterLink></li>
             </ul>
           </li>
           <li class="nav-item"><a class="nav-link" href="https://chat.whatsapp.com/CPjp84Qz6uM5t9Oq88Qb4Q" target="_blank" title="WhatsApp Help Channel"><i class="bi bi-question-circle"></i>&nbsp;Help</a></li>
@@ -81,7 +76,7 @@
 import { ref, watch } from 'vue'
 import { Collapse } from 'bootstrap'
 import { useRoute, useRouter } from 'vue-router'
-import { BLOG_URL, NEW_BLOG_POST_URL, SITE_NAME } from '@/app/site'
+import { SITE_NAME } from '@/app/site'
 import ThemeToggle from './ThemeToggle.vue'
 import { loginRoute, navigationRoutes } from '@/router'
 import { isAdmin, logout, user } from '@/stores/auth'

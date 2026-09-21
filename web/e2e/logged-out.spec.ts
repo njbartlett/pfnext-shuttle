@@ -9,6 +9,7 @@ const PUBLIC_PAGES = [
   { path: '/about.html', title: 'About', text: 'Session Types' },
   { path: '/pricing.html', title: 'Pricing', text: 'Claim Free Trial' },
   { path: '/sessions.html', title: 'Sessions', text: 'Showing week commencing' },
+  { path: '/blog/index.html', title: 'Posts', text: 'There are no posts currently available.' },
   { path: '/login.html', title: 'Login', text: 'Forgotten' },
   { path: '/register.html', title: 'Register', text: 'Register User' },
   { path: '/passwordreset.html?email=a@b.c', title: 'Password Reset', text: 'Update Password' }
@@ -24,6 +25,7 @@ const MEMBER_PAGES = [
   '/feedback.html?id=1',
   '/edit_session.html',
   '/bulk_sessions.html',
+  '/blog/edit/new',
   '/polls_admin.html',
   '/members.html',
   '/logs.html',
@@ -58,6 +60,13 @@ test.describe('public pages', () => {
     await expect(page).toHaveTitle(`Not Found – ${SITE_NAME}`)
     await expect(page.getByText('could not be found')).toBeVisible()
   })
+
+  // The posts API answers 404 (which the browser logs), and the page says so
+  test('an unknown post shows a not-found message', async ({ page }) => {
+    await page.goto('/blog/posts/No%20Such%20Post.html')
+    await expect(page).toHaveTitle(`Post – ${SITE_NAME}`)
+    await expect(page.getByText('There is no post called “No Such Post”.')).toBeVisible()
+  })
 })
 
 test.describe('member pages logged out', () => {
@@ -88,14 +97,23 @@ test.describe('legacy links', () => {
 test.describe('server routing', () => {
   test('serves static files and the SPA shell only for pages', async ({ request }) => {
     expect((await request.get('/img/banner.svg')).status()).toBe(200)
-    expect((await request.get('/styles/al.css')).status()).toBe(200)
+    expect((await request.get('/tinymce/skins/ui/oxide/skin.min.css')).status()).toBe(200)
     expect((await request.get('/some/deep/page')).status()).toBe(200)
+    expect((await request.get('/blog/nonexistent.html')).status()).toBe(200)
 
     expect((await request.get('/img/missing.png')).status()).toBe(404)
-    expect((await request.get('/blog/nonexistent.html')).status()).toBe(404)
+
+    const blob = await request.get('/blog/blobs/nonexistent')
+    expect(blob.status()).toBe(404)
+    expect(await blob.json()).toMatchObject({ message: 'blob with id nonexistent not found' })
 
     const api = await request.get('/api/nonexistent')
     expect(api.status()).toBe(404)
     expect(await api.json()).toMatchObject({ message: 'not found' })
+  })
+
+  test('the API refuses drafts to anyone but editors', async ({ request }) => {
+    expect((await request.get('/api/posts')).status()).toBe(200)
+    expect((await request.get('/api/posts?all=true')).status()).toBe(401)
   })
 })

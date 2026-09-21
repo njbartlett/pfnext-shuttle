@@ -16,9 +16,6 @@ RUN npm run build
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 COPY --from=rust-builder /app/target/release/pfnext /app/pfnext
-# Tera templates and legacy assets are still needed for the blog pages
-COPY templates /app/templates
-COPY static /app/static
 COPY --from=web-builder /app/web/dist /app/web/dist
 COPY schema.sql /app/schema.sql
 COPY Config.toml /app/Config.toml

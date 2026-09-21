@@ -53,6 +53,16 @@ export function displayVenueTime(datetime: string | Date): string {
   })
 }
 
+// "6 January 2025" in the venue's time zone
+export function displayDayMonthYear(datetime: string | Date): string {
+  return new Date(datetime).toLocaleDateString('en-GB', {
+    timeZone: TIMEZONE,
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  })
+}
+
 // "6 Jan 2025 18:30:00" in the venue's time zone
 export function displayDateTime(datetime: string | Date | null): string | null {
   if (datetime === null) {

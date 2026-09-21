@@ -48,6 +48,24 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: 'Activities', nav: true, requiresLogin: true }
   },
   { path: '/polls.html', name: 'polls', component: () => import('@/views/PollsView.vue'), meta: { title: 'Polls', nav: true, requiresLogin: true } },
+
+  // The blog. Post pages are addressed by title, as the links shared over
+  // the years are; the `location` param is "<title>.html"
+  { path: '/blog', redirect: '/blog/index.html' },
+  { path: '/blog/index.html', name: 'blog', component: () => import('@/views/BlogIndexView.vue'), meta: { title: 'Posts', nav: true, stayOnLogout: true } },
+  {
+    path: '/blog/posts/:location',
+    name: 'blog_post',
+    component: () => import('@/views/BlogPostView.vue'),
+    meta: { title: 'Post', stayOnLogout: true }
+  },
+  {
+    path: '/blog/edit/:location',
+    name: 'edit_post',
+    component: () => import('@/views/EditPostView.vue'),
+    meta: { title: 'Edit Post', requiresLogin: true }
+  },
+
   { path: '/bookings.html', name: 'bookings', component: () => import('@/views/BookingsView.vue'), meta: { title: 'Bookings', requiresLogin: true } },
   { path: '/profile.html', name: 'profile', component: () => import('@/views/ProfileView.vue'), meta: { title: 'Profile', requiresLogin: true } },
 

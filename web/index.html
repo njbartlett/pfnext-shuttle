@@ -12,8 +12,7 @@
     <meta name="theme-color" content="#333333">
 
     <!-- Apply the saved colour theme before first paint to avoid a flash; the
-         storage key is shared with src/composables/useTheme.ts and, for the
-         Tera blog pages, static/js/theme.js -->
+         storage key is shared with src/composables/useTheme.ts -->
     <script>
       (function () {
         try {
@@ -27,10 +26,6 @@
         }
       })()
     </script>
-
-    <!-- Site styles, served by Rocket from static/styles/ because the Tera
-         blog pages share them; moves into src/styles/ once the blog converts -->
-    <link href="/styles/al.css" rel="stylesheet">
 </head>
 <body>
     <div id="app"></div>

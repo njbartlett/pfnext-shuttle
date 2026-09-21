@@ -3,6 +3,7 @@
 // components that need a Bootstrap class import it from 'bootstrap' directly.
 import 'bootstrap/dist/css/bootstrap.min.css'
 import 'bootstrap-icons/font/bootstrap-icons.css'
+import './styles/al.css'
 import 'bootstrap'
 import { createApp } from 'vue'
 import { configureApi } from '@pfnext/shared'

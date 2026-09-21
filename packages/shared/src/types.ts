@@ -262,6 +262,32 @@ export interface Activity {
   amount: number
 }
 
+export interface PostSummary {
+  id: number
+  title: string
+  author_id: number
+  author_name: string
+  author_email: string
+  created_at: string
+  last_editor_id: number
+  last_editor_name: string
+  last_editor_email: string
+  last_edited_at: string
+  // null for an unpublished draft
+  published_at: string | null
+}
+
+export interface Post extends PostSummary {
+  // HTML, written by editors with TinyMCE
+  content: string
+}
+
+export interface SavePost {
+  title: string
+  content: string
+  published: string | null
+}
+
 export interface LogRow {
   id: number
   datetime: string

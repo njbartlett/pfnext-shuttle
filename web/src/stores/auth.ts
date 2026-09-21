@@ -1,7 +1,6 @@
 // Logged-in user state for the website. The session itself is a cookie set
-// by POST /api/login; the user's details are mirrored in localStorage under
-// the same key as static/js/library.js so that the Tera blog pages agree
-// with the app on who is logged in.
+// by POST /api/login; the user's details are mirrored in localStorage so a
+// reload starts logged in without a round trip.
 import { computed, ref } from 'vue'
 import { login as loginRequest, logout as logoutRequest, setOnUnauthorized, type LoggedInUser } from '@pfnext/shared'
 
@@ -13,6 +12,8 @@ export const user = computed(() => currentUser.value)
 export const isLoggedIn = computed(() => currentUser.value !== null)
 export const isAdmin = computed(() => hasRole('admin'))
 export const isTrainer = computed(() => hasRole('trainer'))
+// May write blog posts
+export const isEditor = computed(() => isAdmin.value || hasRole('editor'))
 
 function hasRole(role: string): boolean {
   return currentUser.value?.roles?.includes(role) ?? false

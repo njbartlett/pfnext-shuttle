@@ -12,7 +12,6 @@ use log::info;
 use rocket::http::{Method, Status};
 use rocket::{Build, Request, Rocket, Route};
 use rocket_cors::{AllowedHeaders, AllowedOrigins, CorsOptions};
-use rocket_dyn_templates::Template;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Executor;
@@ -104,11 +103,6 @@ async fn launch() -> Rocket<Build> {
         .unwrap();
     info!("Imported schema into database.");
 
-    // Tera templates, now only used by the blog pages (src/blog.rs)
-    let templates_fairing = Template::custom(|engines| {
-        engines.tera.autoescape_on(vec![".html", ".xml", ".js"]);
-    });
-
     // Configure CORS for non-same-origin clients (e.g. the mobile app's
     // capacitor://localhost and http://localhost origins), from the
     // comma-separated CORS_ALLOWED environment variable
@@ -123,6 +117,7 @@ async fn launch() -> Rocket<Build> {
         transaction_log::routes(),
         backup::routes(),
         polls::routes(),
+        blog::api_routes(),
     ].into_iter().flatten().collect::<Vec<Route>>();
 
     // Configure Rocket
@@ -131,12 +126,13 @@ async fn launch() -> Rocket<Build> {
         .manage(app_env)
         .manage(pool)
         .manage(user_agent_parser)
-        .attach(templates_fairing)
         .attach(cors)
-        // The single-page app (web/dist) and the legacy static assets; page
-        // paths with no file fall back to the SPA shell
+        // The single-page app (web/dist); page paths with no file fall back
+        // to the SPA shell, and blog post pages get their Open Graph tags
         .mount("/", crate::templates::routes())
-        .mount("/blog", blog::routes())
+        .mount("/", blog::page_routes())
+        // Images embedded in posts keep their historical URLs
+        .mount("/blog", blog::blob_routes())
         // The "/api" catchers also cover the longer "/api/v1" prefix
         .register("/api", catchers![api_unauthorized, api_notfound])
         // Unversioned mount consumed by the website; "/api/v1" is the frozen

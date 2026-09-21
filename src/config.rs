@@ -67,7 +67,6 @@ pub(crate) struct AppEnv {
     pub(crate) cookie_secure: bool,
     pub(crate) cors_allowed: String,
     pub(crate) _rocket_secret_key: String,
-    pub(crate) _static_path: String,
 }
 
 impl Drop for AppEnv {
@@ -90,14 +89,13 @@ impl AppEnv {
             cookie_secure: env::var("COOKIE_SECURE").map(|v| v != "false").unwrap_or(true),
             cors_allowed: field_from_env("CORS_ALLOWED")?,
             _rocket_secret_key: field_from_env("ROCKET_SECRET_KEY")?,
-            _static_path: field_from_env("STATIC_PATH")?,
         })
     }
 }
 #[cfg(test)]
 impl Default for AppEnv {
     fn default() -> Self {
-        Self { database_url: Default::default(), access_token_key: Default::default(), refresh_token_key: Default::default(), smtp_username: Default::default(), smtp_password: Default::default(), cookie_secure: true, cors_allowed: Default::default(), _rocket_secret_key: Default::default(), _static_path: Default::default() }
+        Self { database_url: Default::default(), access_token_key: Default::default(), refresh_token_key: Default::default(), smtp_username: Default::default(), smtp_password: Default::default(), cookie_secure: true, cors_allowed: Default::default(), _rocket_secret_key: Default::default() }
     }
 }
 

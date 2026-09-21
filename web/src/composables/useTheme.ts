@@ -1,6 +1,5 @@
 // Bootstrap colour mode. The choice is stored under the same key that the
-// inline script in index.html reads before first paint, and that
-// static/js/theme.js uses for the Tera blog pages.
+// inline script in index.html reads before first paint.
 import { readonly, ref } from 'vue'
 
 export type Theme = 'dark' | 'light'
