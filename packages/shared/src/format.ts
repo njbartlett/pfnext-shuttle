@@ -44,6 +44,19 @@ export function displayFullDate(datetime: string | Date): string {
   })
 }
 
+// "Mon 6 Jan" in the venue's time zone: the abbreviated companion to
+// displayFullDate for narrow screens, where the year is left out
+export function displayVenueDate(datetime: string | Date): string {
+  return new Date(datetime)
+    .toLocaleDateString('en-GB', {
+      timeZone: TIMEZONE,
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short'
+    })
+    .replace(',', '')
+}
+
 // "18:30" in the venue's time zone
 export function displayVenueTime(datetime: string | Date): string {
   return new Date(datetime).toLocaleTimeString('en-GB', {

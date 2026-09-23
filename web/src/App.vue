@@ -12,7 +12,7 @@
   </div>
 
   <div class="sticky-bottom bg-body mt-5 mx-2 text-secondary d-print-none z-n1">
-    <p>&copy; 2024 &ndash; 2025 Neil Bartlett all rights reserved.</p>
+    <p>&copy; 2024 &ndash; 2026 Neil Bartlett all rights reserved.</p>
   </div>
 </template>
 

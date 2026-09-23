@@ -44,7 +44,12 @@
       </thead>
       <tbody v-for="session in sessions" :key="session.id">
         <tr class="border-top" :class="{ 'session-past': isPast(session.datetime), 'session-booked': isBookedUpcoming(session), 'border-bottom': !session.notes }">
-          <td :rowspan="session.notes ? 2 : 1">{{ displayFullDate(session.datetime) }} {{ displayVenueTime(session.datetime) }}</td>
+          <td :rowspan="session.notes ? 2 : 1">
+            <!-- Full date on wide screens, abbreviated below the md breakpoint -->
+            <span class="d-none d-md-inline">{{ displayFullDate(session.datetime) }}</span>
+            <span class="d-md-none">{{ displayVenueDate(session.datetime) }}</span>
+            {{ displayVenueTime(session.datetime) }}
+          </td>
           <td :rowspan="session.notes ? 2 : 1">
             <div v-if="session.trainer">
               <a v-if="session.trainer.url" :href="session.trainer.url" :class="{ 'link-secondary': isPast(session.datetime) }"><i class="bi bi-person-arms-up"></i>&nbsp;{{ session.trainer.name }}</a>
@@ -202,7 +207,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  addDays, bookSession, cancelBooking, deleteSession, displayDateRange, displayFullDate, displayVenueTime,
+  addDays, bookSession, cancelBooking, deleteSession, displayDateRange, displayFullDate, displayVenueDate, displayVenueTime,
   getUserRecord, isPast, joinWaitlist, leaveWaitlist, listPolls, listSessions, saveFeedback, startOfWeek,
   type PollWithVotes, type Session, type UserRecord
 } from '@pfnext/shared'

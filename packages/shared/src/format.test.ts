@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addMonths, displayDateRange, displayDateTime, displayFullDate, displayTime, displayVenueTime, endOfMonth,
+  addMonths, displayDateRange, displayDateTime, displayFullDate, displayTime, displayVenueDate, displayVenueTime, endOfMonth,
   formatDuration, groupByDay, sortByField, startOfMonth, startOfWeek
 } from './format'
 
@@ -25,6 +25,11 @@ describe('venue-zone display', () => {
 
   it('rolls a late evening over to the next venue day in summer', () => {
     expect(displayFullDate('2025-07-01T23:30:00Z')).toBe('Wed, 2 July 2025')
+    expect(displayVenueDate('2025-07-01T23:30:00Z')).toBe('Wed 2 Jul')
+  })
+
+  it('abbreviates the venue date without the year', () => {
+    expect(displayVenueDate('2025-01-06T18:30:00Z')).toBe('Mon 6 Jan')
   })
 })
 
