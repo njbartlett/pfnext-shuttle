@@ -57,6 +57,32 @@ export function displayVenueDate(datetime: string | Date): string {
     .replace(',', '')
 }
 
+// Days since the epoch of the venue-zone calendar date, so that two moments
+// can be compared as venue days regardless of the browser's zone or DST
+function venueDayNumber(datetime: string | Date): number {
+  const [year, month, day] = new Date(datetime)
+    .toLocaleDateString('en-CA', { timeZone: TIMEZONE })
+    .split('-')
+    .map(Number)
+  return Date.UTC(year, month - 1, day) / 86400000
+}
+
+// "Yesterday", "Today" or "Tomorrow" when datetime falls on one of those
+// venue days relative to `now`; null for any other day, so callers can fall
+// back to a date
+export function displayRelativeDay(datetime: string | Date, now: Date = new Date()): string | null {
+  switch (venueDayNumber(datetime) - venueDayNumber(now)) {
+    case -1:
+      return 'Yesterday'
+    case 0:
+      return 'Today'
+    case 1:
+      return 'Tomorrow'
+    default:
+      return null
+  }
+}
+
 // "18:30" in the venue's time zone
 export function displayVenueTime(datetime: string | Date): string {
   return new Date(datetime).toLocaleTimeString('en-GB', {

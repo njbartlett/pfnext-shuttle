@@ -45,9 +45,13 @@
       <tbody v-for="session in sessions" :key="session.id">
         <tr class="border-top" :class="{ 'session-past': isPast(session.datetime), 'session-booked': isBookedUpcoming(session), 'border-bottom': !session.notes }">
           <td :rowspan="session.notes ? 2 : 1">
-            <!-- Full date on wide screens, abbreviated below the md breakpoint -->
-            <span class="d-none d-md-inline">{{ displayFullDate(session.datetime) }}</span>
-            <span class="d-md-none">{{ displayVenueDate(session.datetime) }}</span>
+            <!-- Yesterday/Today/Tomorrow where they apply; otherwise the full
+                 date on wide screens, abbreviated below the md breakpoint -->
+            <template v-if="displayRelativeDay(session.datetime, now)">{{ displayRelativeDay(session.datetime, now) }}</template>
+            <template v-else>
+              <span class="d-none d-md-inline">{{ displayFullDate(session.datetime) }}</span>
+              <span class="d-md-none">{{ displayVenueDate(session.datetime) }}</span>
+            </template>
             {{ displayVenueTime(session.datetime) }}
           </td>
           <td :rowspan="session.notes ? 2 : 1">
@@ -207,7 +211,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  addDays, bookSession, cancelBooking, deleteSession, displayDateRange, displayFullDate, displayVenueDate, displayVenueTime,
+  addDays, bookSession, cancelBooking, deleteSession, displayDateRange, displayFullDate, displayRelativeDay, displayVenueDate, displayVenueTime,
   getUserRecord, isPast, joinWaitlist, leaveWaitlist, listPolls, listSessions, saveFeedback, startOfWeek,
   type PollWithVotes, type Session, type UserRecord
 } from '@pfnext/shared'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addMonths, displayDateRange, displayDateTime, displayFullDate, displayTime, displayVenueDate, displayVenueTime, endOfMonth,
+  addMonths, displayDateRange, displayDateTime, displayFullDate, displayRelativeDay, displayTime, displayVenueDate, displayVenueTime, endOfMonth,
   formatDuration, groupByDay, sortByField, startOfMonth, startOfWeek
 } from './format'
 
@@ -30,6 +30,23 @@ describe('venue-zone display', () => {
 
   it('abbreviates the venue date without the year', () => {
     expect(displayVenueDate('2025-01-06T18:30:00Z')).toBe('Mon 6 Jan')
+  })
+
+  it('names yesterday, today and tomorrow as venue days', () => {
+    const now = new Date('2025-01-06T12:00:00Z')
+    expect(displayRelativeDay('2025-01-05T18:30:00Z', now)).toBe('Yesterday')
+    expect(displayRelativeDay('2025-01-06T18:30:00Z', now)).toBe('Today')
+    expect(displayRelativeDay('2025-01-07T18:30:00Z', now)).toBe('Tomorrow')
+    expect(displayRelativeDay('2025-01-08T18:30:00Z', now)).toBeNull()
+    expect(displayRelativeDay('2025-01-04T18:30:00Z', now)).toBeNull()
+  })
+
+  it('judges the day boundary in the venue zone, not UTC', () => {
+    // 23:30 UTC on 1 July is 00:30 BST on 2 July: tomorrow relative to a
+    // 1 July afternoon, not today
+    const now = new Date('2025-07-01T12:00:00Z')
+    expect(displayRelativeDay('2025-07-01T23:30:00Z', now)).toBe('Tomorrow')
+    expect(displayRelativeDay('2025-07-01T22:30:00Z', now)).toBe('Today')
   })
 })
 
