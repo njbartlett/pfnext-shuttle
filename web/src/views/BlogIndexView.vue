@@ -3,8 +3,8 @@
     <PageTitle />
 
     <!-- Editor tools -->
-    <div v-if="isEditor" class="alert alert-warning my-3 position-relative">
-      <div class="position-absolute top-0 end-0"><i class="bi bi-lightning-fill" title="Admin/Editor Only"></i></div>
+    <div v-if="isEditor" class="admin-panel my-3">
+      <div class="admin-panel-icon"><i class="bi bi-lightning-fill" title="Admin/Editor Only"></i></div>
       <div class="d-flex">
         <RouterLink class="btn btn-primary btn-sm mx-1" :to="{ name: 'edit_post', params: { location: 'new' } }"><i class="bi bi-feather"></i>&nbsp;New Post</RouterLink>
         <RouterLink v-if="showAll" class="btn btn-outline-primary btn-sm mx-1" :to="{ name: 'blog' }">Show Only Published</RouterLink>

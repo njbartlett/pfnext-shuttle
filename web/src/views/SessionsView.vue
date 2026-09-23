@@ -43,7 +43,7 @@
         </tr>
       </thead>
       <tbody v-for="session in sessions" :key="session.id">
-        <tr class="border-top" :class="{ 'session-past': isPast(session.datetime), 'border-bottom': !session.notes }">
+        <tr class="border-top" :class="{ 'session-past': isPast(session.datetime), 'session-booked': isBookedUpcoming(session), 'border-bottom': !session.notes }">
           <td :rowspan="session.notes ? 2 : 1">{{ displayFullDate(session.datetime) }} {{ displayVenueTime(session.datetime) }}</td>
           <td :rowspan="session.notes ? 2 : 1">
             <div v-if="session.trainer">
@@ -65,7 +65,7 @@
             <SessionControls :session="session" :now="now" v-bind="controlHandlers" />
           </td>
         </tr>
-        <tr v-if="session.notes" class="border-bottom" :class="{ 'session-past': isPast(session.datetime) }">
+        <tr v-if="session.notes" class="border-bottom" :class="{ 'session-past': isPast(session.datetime), 'session-booked': isBookedUpcoming(session) }">
           <td colspan="4" v-html="session.notes"></td>
         </tr>
       </tbody>
@@ -89,7 +89,7 @@
               v-for="session in day.sessions"
               :key="session.id"
               class="border rounded p-1 hover-expand"
-              :class="isPast(session.datetime) ? 'bg-secondary-subtle text-secondary' : 'border-primary bg-primary-subtle'"
+              :class="isPast(session.datetime) ? 'bg-secondary-subtle text-secondary' : isBookedUpcoming(session) ? 'session-booked' : 'border-primary bg-primary-subtle'"
             >
               <div class="d-flex align-items-center mb-1">
                 <strong>{{ displayVenueTime(session.datetime) }} {{ session.session_type.name }}</strong>
@@ -225,6 +225,12 @@ const VIEW_MODE_STORAGE_KEY = 'view_mode'
 const HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0') + ':00')
 
 type ViewMode = 'list' | 'cal'
+
+// Upcoming sessions the member has booked are highlighted in brass (see
+// .session-booked in styles/al.css); past ones fall back to the muted style
+function isBookedUpcoming(session: Session): boolean {
+  return Boolean(session.booked) && !isPast(session.datetime)
+}
 
 const route = useRoute()
 const now = useNow()

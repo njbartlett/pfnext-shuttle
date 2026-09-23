@@ -16,8 +16,8 @@
       </div>
 
       <!-- Editor tools -->
-      <div v-if="isEditor" class="alert alert-warning my-3 position-relative">
-        <div class="position-absolute top-0 end-0"><i class="bi bi-lightning-fill" title="Admin/Editor Only"></i></div>
+      <div v-if="isEditor" class="admin-panel my-3">
+        <div class="admin-panel-icon"><i class="bi bi-lightning-fill" title="Admin/Editor Only"></i></div>
         <div class="d-flex">
           <RouterLink class="btn btn-primary btn-sm ms-auto" :to="{ name: 'edit_post', params: { location } }"><i class="bi bi-feather"></i>&nbsp;Edit Post</RouterLink>
           <button type="button" class="btn btn-danger btn-sm ms-1" @click="deleteModal?.show()"><i class="bi bi-trash"></i> Delete</button>

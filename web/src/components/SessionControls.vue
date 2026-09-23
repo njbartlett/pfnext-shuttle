@@ -11,9 +11,10 @@
         </span>
         <span v-else class="text-danger"><i class="bi bi-x-circle"></i>&nbsp;Didn't Attend</span>
       </span>
-      <!-- Future session: booked, may cancel -->
+      <!-- Future session: booked, may cancel. Brass (warning) is the booked
+           colour throughout the sessions page, see .session-booked in al.css -->
       <div v-else class="btn-group">
-        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-check2-circle"></i>&nbsp;Booked!</button>
+        <button type="button" class="btn btn-warning btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-check2-circle"></i>&nbsp;Booked!</button>
         <ul class="dropdown-menu">
           <li><a class="dropdown-item link-danger" href="#" @click.prevent="emit('cancel', session)"><i class="bi bi-x-circle"></i>&nbsp;Cancel</a></li>
         </ul>
@@ -27,14 +28,14 @@
         <!-- Full: waitlist -->
         <span v-if="isFull(session)">
           <div v-if="session.waitlist_rank" class="btn-group">
-            <button type="button" class="btn btn-outline-warning btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+            <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
               <i class="bi bi-hourglass-split"></i>&nbsp;On Waitlist&nbsp;({{ session.waitlist_rank }})
             </button>
             <ul class="dropdown-menu">
               <li><a class="dropdown-item link-danger" href="#" @click.prevent="emit('leave-waitlist', session)"><i class="bi bi-x-circle"></i>&nbsp;Leave Waitlist</a></li>
             </ul>
           </div>
-          <button v-else type="button" class="btn btn-warning btn-sm" @click="emit('join-waitlist', session)">Join Waitlist</button>
+          <button v-else type="button" class="btn btn-outline-primary btn-sm" @click="emit('join-waitlist', session)">Join Waitlist</button>
         </span>
         <button v-else type="button" class="btn btn-primary btn-sm" @click="emit('book', session)">
           <span>Book</span><span v-if="isSoon(session.booking_deadline, DEADLINE_WARNING_MINUTES, now)">&nbsp;within {{ timeLeft }}</span>
