@@ -270,11 +270,11 @@ const polls = ref<PollWithVotes[]>([])
 const viewMode = ref<ViewMode>(readViewMode())
 
 // The period shown is a week, or a single day for the calendar on a narrow
-// screen. Each has its own pager (offset 0 is this week or today); the daily
-// one shows exactly Yesterday, Today and Tomorrow at home.
+// screen. Each has its own pager whose home block starts at offset 0, this
+// week or today; earlier periods are a step back.
 const daily = computed(() => viewMode.value === 'cal' && narrowScreen.value)
-const weekPager = usePagedWindow(4, -1)
-const dayPager = usePagedWindow(3, -1)
+const weekPager = usePagedWindow(4, 0)
+const dayPager = usePagedWindow(3, 0)
 const pager = computed(() => (daily.value ? dayPager : weekPager))
 
 const deletingSession = ref<Session | null>(null)

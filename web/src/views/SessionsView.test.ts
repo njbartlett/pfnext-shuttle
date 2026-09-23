@@ -297,14 +297,14 @@ describe('SessionsView week selection', () => {
 
 // NOW is Wednesday 4 June 2025; the fixture session is on Thursday the 5th
 describe('SessionsView calendar on a narrow screen', () => {
-  it('shows one day at a time, paged as Yesterday, Today and Tomorrow', async () => {
+  it('shows one day at a time, starting from Today', async () => {
     stubScreen(true)
     vi.mocked(listSessions).mockResolvedValue([makeSession()])
     await mountSessions()
 
     expect(listSessions).toHaveBeenCalledTimes(1)
     expect(listSessions).toHaveBeenCalledWith(new Date('2025-06-04T00:00:00Z'), new Date('2025-06-05T00:00:00Z'))
-    expect(pagerLabels()).toEqual(['Yesterday', 'Today', 'Tomorrow'])
+    expect(pagerLabels()).toEqual(['Today', 'Tomorrow', 'Fri 6 Jun'])
     expect(buttonIn(wrapper, 'Today').classes()).toContain('btn-primary')
     expect(wrapper.findAll('thead th')).toHaveLength(1)
     expect(wrapper.find('thead th').text()).toBe('Wednesday, 4 June 2025')
@@ -324,14 +324,15 @@ describe('SessionsView calendar on a narrow screen', () => {
     await mountSessions()
 
     await buttonIn(wrapper, '»').trigger('click')
-    expect(pagerLabels()).toEqual(['Fri 6 Jun', 'Sat 7 Jun', 'Sun 8 Jun'])
+    expect(pagerLabels()).toEqual(['Sat 7 Jun', 'Sun 8 Jun', 'Mon 9 Jun'])
 
+    // Yesterday is a step back, in the block before today's
     await buttonIn(wrapper, '«').trigger('click')
     await buttonIn(wrapper, '«').trigger('click')
-    expect(pagerLabels()).toEqual(['Sat 31 May', 'Sun 1 Jun', 'Mon 2 Jun'])
+    expect(pagerLabels()).toEqual(['Sun 1 Jun', 'Mon 2 Jun', 'Yesterday'])
 
     await buttonIn(wrapper, 'Now').trigger('click')
-    expect(pagerLabels()).toEqual(['Yesterday', 'Today', 'Tomorrow'])
+    expect(pagerLabels()).toEqual(['Today', 'Tomorrow', 'Fri 6 Jun'])
   })
 
   it('opens a ?week= link on the Monday of that week, or today for this week', async () => {
@@ -361,7 +362,7 @@ describe('SessionsView calendar on a narrow screen', () => {
     await resizeScreen(true)
     expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-16T00:00:00Z'), new Date('2025-06-17T00:00:00Z'))
     expect(router.currentRoute.value.query).toEqual({ day: '2025-06-16' })
-    expect(pagerLabels()).toEqual(['Sun 15 Jun', 'Mon 16 Jun', 'Tue 17 Jun'])
+    expect(pagerLabels()).toEqual(['Mon 16 Jun', 'Tue 17 Jun', 'Wed 18 Jun'])
 
     // Another day of the same week goes back to that week
     await buttonIn(wrapper, 'Tue 17 Jun').trigger('click')
@@ -392,7 +393,7 @@ describe('SessionsView calendar on a narrow screen', () => {
       await flushPromises()
     }
     expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-02T00:00:00Z'), new Date('2025-06-03T00:00:00Z'))
-    expect(pagerLabels()).toEqual(['Sat 31 May', 'Sun 1 Jun', 'Mon 2 Jun'])
+    expect(pagerLabels()).toEqual(['Sun 1 Jun', 'Mon 2 Jun', 'Yesterday'])
     expect(buttonIn(wrapper, 'Mon 2 Jun').classes()).toContain('btn-primary')
     expect(wrapper.find('transition-stub').attributes('name')).toBe('slide-back')
 
@@ -419,12 +420,12 @@ describe('SessionsView calendar on a narrow screen', () => {
     await mountSessions()
 
     expect(listSessions).toHaveBeenCalledWith(new Date('2025-06-02T00:00:00Z'), new Date('2025-06-09T00:00:00Z'))
-    expect(pagerLabels()).toEqual(['Last Week', 'This Week', 'Next Week', '16 – 22 Jun 2025'])
+    expect(pagerLabels()).toEqual(['This Week', 'Next Week', '16 – 22 Jun 2025', '23 – 29 Jun 2025'])
 
     // Switching to the calendar goes daily, on today
     await wrapper.find('button[title="Switch to Calendar View"]').trigger('click')
     await flushPromises()
     expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-04T00:00:00Z'), new Date('2025-06-05T00:00:00Z'))
-    expect(pagerLabels()).toEqual(['Yesterday', 'Today', 'Tomorrow'])
+    expect(pagerLabels()).toEqual(['Today', 'Tomorrow', 'Fri 6 Jun'])
   })
 })
