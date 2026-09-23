@@ -32,8 +32,12 @@
       <button v-else type="button" class="btn btn-outline-primary ms-1" title="Switch to List View" @click="viewMode = 'list'"><i class="bi bi-list-ul"></i></button>
     </PagerBar>
 
+    <!-- The period's sessions slide in from the side they were paged from
+         once loaded (see .slide-* in styles/al.css); a swipe pages too -->
+    <div ref="slideFrame" class="slide-frame">
+    <Transition :name="slideDirection ? 'slide-' + slideDirection : 'none'">
     <!-- List view -->
-    <table v-if="viewMode === 'list'" class="table table-borderless table-sm align-middle">
+    <table v-if="viewMode === 'list'" :key="'list/' + loadedPeriodKey" class="table table-borderless table-sm align-middle">
       <thead>
         <tr>
           <th scope="col">When</th>
@@ -82,7 +86,7 @@
 
     <!-- Calendar view: a column per day of the week, or a single day on a
          narrow screen where the pager already names the day -->
-    <table v-else class="table table-sm table-borderless">
+    <table v-else :key="'cal/' + loadedPeriodKey" class="table table-sm table-borderless">
       <thead>
         <tr class="border-top">
           <th v-for="day in days" :key="day.index" scope="col" class="border-end bg-light-subtle" :class="{ 'bg-opacity-50': !day.isToday, 'border-start': day.index === 0 }">
@@ -124,6 +128,8 @@
         <tr class="border-bottom"></tr>
       </tbody>
     </table>
+    </Transition>
+    </div>
 
     <p class="text-center text-secondary">
       <template v-if="daily">Showing {{ displayFullDate(periodStart) }}. Found {{ sessions.length }} session(s) for selected day.</template>
@@ -231,6 +237,7 @@ import { useMediaQuery } from '@/composables/useMediaQuery'
 import { useNow } from '@/composables/useNow'
 import { usePagedWindow } from '@/composables/usePagedWindow'
 import { useQueryState } from '@/composables/useQueryState'
+import { useSwipe } from '@/composables/useSwipe'
 import { loginRoute } from '@/router'
 import { user } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
@@ -244,6 +251,7 @@ const VIEW_MODE_STORAGE_KEY = 'view_mode'
 const HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0') + ':00')
 
 type ViewMode = 'list' | 'cal'
+type SlideDirection = 'forward' | 'back'
 
 // Upcoming sessions the member has booked are highlighted in brass (see
 // .session-booked in styles/al.css); past ones fall back to the muted style
@@ -289,6 +297,15 @@ const currentWeekStart = startOfWeek(today)
 const periodDays = computed(() => (daily.value ? 1 : 7))
 const periodStart = computed(() => addDays(daily.value ? today : currentWeekStart, periodDays.value * pager.value.offset.value))
 const periodEnd = computed(() => addDays(periodStart.value, periodDays.value))
+const periodKey = computed(() => periodStart.value.getTime() + '/' + periodDays.value)
+
+// The sessions table is keyed by the period its rows belong to, so it is
+// swapped (with a slide) only once the new period has loaded, and the
+// direction is that of the paging that asked for it
+const loadedPeriodKey = ref<string | null>(null)
+const slideDirection = ref<SlideDirection | null>(null)
+const slideFrame = ref<HTMLElement | null>(null)
+useSwipe(slideFrame, { onSwipeLeft: () => page(1), onSwipeRight: () => page(-1) })
 
 const unvotedPolls = computed(() => polls.value.filter((entry) => entry.poll.open && entry.votes.length === 0))
 
@@ -378,9 +395,12 @@ function displayCalendarDate(date: Date, length: 's' | 'l'): string {
 }
 
 async function loadSessions() {
+  const key = periodKey.value
   const result = await tryApi(() => listSessions(periodStart.value, periodEnd.value))
-  if (result) {
+  // A reply overtaken by further paging is dropped: its period is gone
+  if (result && key === periodKey.value) {
     sessions.value = result
+    loadedPeriodKey.value = key
   }
 }
 
@@ -398,6 +418,11 @@ async function loadPolls() {
 
 function selectPeriod(offset: number) {
   pager.value.offset.value = offset
+}
+
+// One period on (or back), sliding the pager's block along if needed
+function page(step: number) {
+  pager.value.jumpTo(pager.value.offset.value + step)
 }
 
 // Booking actions, passed to every SessionControls as listeners
@@ -516,14 +541,18 @@ watch(daily, (isDaily) => {
   showDate(isDaily ? addDays(currentWeekStart, 7 * weekPager.offset.value) : addDays(today, dayPager.offset.value), isDaily)
 })
 
-// Keep the selected period in the URL so it can be bookmarked, and load it
-watch([() => periodStart.value.getTime(), periodDays], () => {
+// Keep the selected period in the URL so it can be bookmarked, and load it.
+// Moving to a later period slides forward, to an earlier one back; a change
+// of period length (week to day or back) is not a paging, so no slide.
+watch([() => periodStart.value.getTime(), periodDays], ([start, length], [previousStart, previousLength]) => {
+  slideDirection.value = length !== previousLength ? null : start > previousStart ? 'forward' : 'back'
   const date = pager.value.offset.value === 0 ? null : periodStart.value.toLocaleDateString('sv')
   query.update(daily.value ? { week: null, day: date } : { day: null, week: date })
   void loadSessions()
 })
 
 watch(viewMode, (mode) => {
+  slideDirection.value = null
   try {
     localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode)
   } catch {

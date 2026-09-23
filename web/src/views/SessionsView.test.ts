@@ -87,6 +87,19 @@ async function resizeScreen(narrow: boolean) {
   await flushPromises()
 }
 
+// A one-finger touch moving by (dx, dy). jsdom has no Touch constructor, so
+// the touches are plain objects on plain events.
+function swipe(element: Element, dx: number, dy: number) {
+  const point = (x: number, y: number) => [{ clientX: x, clientY: y }]
+  const start = new Event('touchstart')
+  Object.defineProperty(start, 'touches', { value: point(200, 200) })
+  element.dispatchEvent(start)
+  const end = new Event('touchend')
+  Object.defineProperty(end, 'touches', { value: [] })
+  Object.defineProperty(end, 'changedTouches', { value: point(200 + dx, 200 + dy) })
+  element.dispatchEvent(end)
+}
+
 function pagerLabels(): string[] {
   return wrapper
     .find('.btn-group')
@@ -357,6 +370,47 @@ describe('SessionsView calendar on a narrow screen', () => {
     expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-16T00:00:00Z'), new Date('2025-06-23T00:00:00Z'))
     expect(router.currentRoute.value.query).toEqual({ week: '2025-06-16' })
     expect(listSessions).toHaveBeenCalledTimes(4)
+  })
+
+  it('pages with horizontal swipes, sliding the way it was paged', async () => {
+    stubScreen(true)
+    await mountSessions()
+    const frame = wrapper.find('.slide-frame')
+
+    // Swiping left moves on to tomorrow, and the tables slide forward once
+    // it has loaded (Vue Test Utils stubs the transition, keeping its name)
+    swipe(frame.element, -80, 5)
+    await flushPromises()
+    expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-05T00:00:00Z'), new Date('2025-06-06T00:00:00Z'))
+    expect(buttonIn(wrapper, 'Tomorrow').classes()).toContain('btn-primary')
+    expect(wrapper.find('transition-stub').attributes('name')).toBe('slide-forward')
+
+    // Three swipes right: today, yesterday, then beyond the visible block,
+    // which slides along with it
+    for (let i = 0; i < 3; i++) {
+      swipe(frame.element, 80, 0)
+      await flushPromises()
+    }
+    expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-02T00:00:00Z'), new Date('2025-06-03T00:00:00Z'))
+    expect(pagerLabels()).toEqual(['Sat 31 May', 'Sun 1 Jun', 'Mon 2 Jun'])
+    expect(buttonIn(wrapper, 'Mon 2 Jun').classes()).toContain('btn-primary')
+    expect(wrapper.find('transition-stub').attributes('name')).toBe('slide-back')
+
+    // A mostly vertical drag is a scroll, not a swipe
+    swipe(frame.element, 60, 120)
+    await flushPromises()
+    expect(listSessions).toHaveBeenCalledTimes(5)
+  })
+
+  it('does not slide when the screen is rotated', async () => {
+    stubScreen(false)
+    await mountSessions()
+    await buttonIn(wrapper, 'Next Week').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('transition-stub').attributes('name')).toBe('slide-forward')
+
+    await resizeScreen(true)
+    expect(wrapper.find('transition-stub').attributes('name')).toBe('none')
   })
 
   it('stays weekly in the list view', async () => {

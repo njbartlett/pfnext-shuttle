@@ -73,7 +73,8 @@ projects hard-code `mobile/node_modules/...` paths, so it links
 - `src/composables/` — `useQueryState` (page state in the route query),
   `useReturnPath` (`?return=`), `useTheme`, `usePagedWindow` (day/week/month
   paging), `useMediaQuery` (a reactive `matchMedia`, used by the sessions
-  calendar to show one day at a time below the `md` breakpoint), `useNow`
+  calendar to show one day at a time below the `md` breakpoint), `useSwipe`
+  (horizontal touch swipes, which page the sessions display), `useNow`
   (1 s clock), `useDirtyTracking`, `loadSelectableMembers`, `rankByScore`,
   date-input helpers
 - `src/stores/` — `auth` (logged-in user, mirrored in localStorage; `login`,

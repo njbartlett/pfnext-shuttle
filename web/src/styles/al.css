@@ -102,3 +102,42 @@ button[aria-expanded=true] .text-collapsed {
     /* transform: translateY(-2px); */
     transform: scale(1.02);
 }
+
+/* Paging the sessions display slides the old period out and the new one in
+   from the side it was paged from (<Transition name="slide-forward" or
+   "slide-back"> in SessionsView.vue). The leaving table is lifted out of
+   the flow so both share the frame. The frame clips sideways only, and out
+   to the container's gutters, so hover growth and dropdown menus at the
+   edges are not cut off; browsers without overflow: clip get a scroll
+   container instead, which also clips vertically. */
+.slide-frame {
+    position: relative;
+    margin: 0 calc(var(--bs-gutter-x, 1.5rem) * -0.5);
+    padding: 0 calc(var(--bs-gutter-x, 1.5rem) * 0.5);
+    overflow-x: hidden;
+    overflow-x: clip;
+}
+.slide-forward-enter-active, .slide-forward-leave-active,
+.slide-back-enter-active, .slide-back-leave-active {
+    transition: transform 0.25s ease, opacity 0.25s ease;
+}
+.slide-forward-leave-active, .slide-back-leave-active {
+    position: absolute;
+    top: 0;
+    left: calc(var(--bs-gutter-x, 1.5rem) * 0.5);
+    right: calc(var(--bs-gutter-x, 1.5rem) * 0.5);
+}
+.slide-forward-enter-from, .slide-back-leave-to {
+    transform: translateX(100%);
+    opacity: 0;
+}
+.slide-forward-leave-to, .slide-back-enter-from {
+    transform: translateX(-100%);
+    opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+    .slide-forward-enter-active, .slide-forward-leave-active,
+    .slide-back-enter-active, .slide-back-leave-active {
+        transition: none;
+    }
+}
