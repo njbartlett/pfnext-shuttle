@@ -1,18 +1,22 @@
 <template>
-  <template v-if="showNavbar">
-    <AppNavbar />
-    <ApiErrorAlert />
-    <RouterView />
-  </template>
-  <!-- Focused pages (login, editors) render without the navbar, inside a
-       plain container -->
-  <div v-else class="container">
-    <ApiErrorAlert />
-    <RouterView />
-  </div>
+  <!-- A full-height column so the footer follows the content and, on a page
+       shorter than the window, still sits at the bottom -->
+  <div class="d-flex flex-column min-vh-100">
+    <template v-if="showNavbar">
+      <AppNavbar />
+      <ApiErrorAlert />
+      <RouterView />
+    </template>
+    <!-- Focused pages (login, editors) render without the navbar, inside a
+         plain container -->
+    <div v-else class="container">
+      <ApiErrorAlert />
+      <RouterView />
+    </div>
 
-  <div class="sticky-bottom bg-body mt-5 mx-2 text-secondary d-print-none z-n1">
-    <p>&copy; 2024 &ndash; 2026 Neil Bartlett all rights reserved.</p>
+    <footer class="mt-auto pt-5 mx-2 text-secondary d-print-none">
+      <p>&copy; 2024 &ndash; 2026 Neil Bartlett all rights reserved.</p>
+    </footer>
   </div>
 </template>
 
