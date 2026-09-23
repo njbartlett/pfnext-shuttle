@@ -17,16 +17,16 @@
       <RouterLink :to="loginRoute(route.fullPath)" role="button" class="btn btn-success rounded-pill mx-2">Login to Book</RouterLink>
     </div>
 
-    <!-- Weekly pagination -->
+    <!-- Weekly pagination, or daily for the calendar on a narrow screen -->
     <PagerBar
       :indices="pager.indices.value"
       :offset="pager.offset.value"
       :home="pager.home.value"
-      :label="weekLabel"
-      @select="selectWeek"
+      :label="periodLabel"
+      @select="selectPeriod"
       @back="pager.back()"
       @forward="pager.forward()"
-      @reset="resetWeek"
+      @reset="pager.reset()"
     >
       <button v-if="viewMode === 'list'" type="button" class="btn btn-outline-primary ms-1" title="Switch to Calendar View" @click="viewMode = 'cal'"><i class="bi bi-calendar3"></i></button>
       <button v-else type="button" class="btn btn-outline-primary ms-1" title="Switch to List View" @click="viewMode = 'list'"><i class="bi bi-list-ul"></i></button>
@@ -80,14 +80,17 @@
       </tbody>
     </table>
 
-    <!-- Calendar view -->
+    <!-- Calendar view: a column per day of the week, or a single day on a
+         narrow screen where the pager already names the day -->
     <table v-else class="table table-sm table-borderless">
       <thead>
         <tr class="border-top">
-          <th v-for="day in daysOfWeek" :key="day.index" scope="col" class="border-end bg-light-subtle" :class="{ 'bg-opacity-50': !day.isToday, 'border-start': day.index === 0 }">
-            <span class="d-block d-sm-none">{{ displayCalendarDate(day.date, 'xs') }}</span>
-            <span class="d-none d-sm-block d-lg-none">{{ displayCalendarDate(day.date, 's') }}</span>
-            <span class="d-none d-lg-block">{{ displayCalendarDate(day.date, 'l') }}</span>
+          <th v-for="day in days" :key="day.index" scope="col" class="border-end bg-light-subtle" :class="{ 'bg-opacity-50': !day.isToday, 'border-start': day.index === 0 }">
+            <template v-if="daily">{{ displayLongDate(day.date) }}</template>
+            <template v-else>
+              <span class="d-lg-none">{{ displayCalendarDate(day.date, 's') }}</span>
+              <span class="d-none d-lg-block">{{ displayCalendarDate(day.date, 'l') }}</span>
+            </template>
           </th>
         </tr>
       </thead>
@@ -123,7 +126,9 @@
     </table>
 
     <p class="text-center text-secondary">
-      Showing week commencing {{ displayFullDate(weekStart) }}. Found {{ sessions.length }} session(s) for selected week. Session times shown are local to the venue.
+      <template v-if="daily">Showing {{ displayFullDate(periodStart) }}. Found {{ sessions.length }} session(s) for selected day.</template>
+      <template v-else>Showing week commencing {{ displayFullDate(periodStart) }}. Found {{ sessions.length }} session(s) for selected week.</template>
+      Session times shown are local to the venue.
     </p>
 
     <!-- Delete confirmation -->
@@ -211,9 +216,9 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  addDays, bookSession, cancelBooking, deleteSession, displayDateRange, displayFullDate, displayRelativeDay, displayVenueDate, displayVenueTime,
-  getUserRecord, isPast, joinWaitlist, leaveWaitlist, listPolls, listSessions, saveFeedback, startOfWeek,
-  type PollWithVotes, type Session, type UserRecord
+  addDays, bookSession, cancelBooking, deleteSession, displayDate, displayDateRange, displayFullDate, displayLongDate, displayRelativeDay,
+  displayVenueDate, displayVenueTime, getUserRecord, isPast, isSameDay, joinWaitlist, leaveWaitlist, listPolls, listSessions, saveFeedback,
+  startOfDay, startOfWeek, type PollWithVotes, type Session, type UserRecord
 } from '@pfnext/shared'
 import BookingCountPill from '@/components/BookingCountPill.vue'
 import BsModal from '@/components/BsModal.vue'
@@ -222,6 +227,7 @@ import PagerBar from '@/components/PagerBar.vue'
 import PageTitle from '@/components/PageTitle.vue'
 import SessionControls from '@/components/SessionControls.vue'
 import SessionRatings from '@/components/SessionRatings.vue'
+import { useMediaQuery } from '@/composables/useMediaQuery'
 import { useNow } from '@/composables/useNow'
 import { usePagedWindow } from '@/composables/usePagedWindow'
 import { useQueryState } from '@/composables/useQueryState'
@@ -229,7 +235,11 @@ import { loginRoute } from '@/router'
 import { user } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
 
-const MILLIS_IN_WEEK = 7 * 24 * 60 * 60 * 1000
+const MILLIS_IN_DAY = 24 * 60 * 60 * 1000
+const MILLIS_IN_WEEK = 7 * MILLIS_IN_DAY
+// Below Bootstrap's md breakpoint seven columns of session cards do not fit,
+// so the calendar shows one day at a time
+const NARROW_SCREEN_QUERY = '(max-width: 767.98px)'
 const VIEW_MODE_STORAGE_KEY = 'view_mode'
 const HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0') + ':00')
 
@@ -243,13 +253,21 @@ function isBookedUpcoming(session: Session): boolean {
 
 const route = useRoute()
 const now = useNow()
-const pager = usePagedWindow()
 const query = useQueryState()
+const narrowScreen = useMediaQuery(NARROW_SCREEN_QUERY)
 
 const sessions = ref<Session[]>([])
 const userRecord = ref<UserRecord | null>(null)
 const polls = ref<PollWithVotes[]>([])
 const viewMode = ref<ViewMode>(readViewMode())
+
+// The period shown is a week, or a single day for the calendar on a narrow
+// screen. Each has its own pager (offset 0 is this week or today); the daily
+// one shows exactly Yesterday, Today and Tomorrow at home.
+const daily = computed(() => viewMode.value === 'cal' && narrowScreen.value)
+const weekPager = usePagedWindow(4, -1)
+const dayPager = usePagedWindow(3, -1)
+const pager = computed(() => (daily.value ? dayPager : weekPager))
 
 const deletingSession = ref<Session | null>(null)
 const paymentConfirm = ref<{ session: Session; cost: number } | null>(null)
@@ -266,9 +284,11 @@ const creditsModal = ref<InstanceType<typeof ConfirmModal> | null>(null)
 const waitlistModal = ref<InstanceType<typeof BsModal> | null>(null)
 const feedbackModal = ref<InstanceType<typeof BsModal> | null>(null)
 
-const currentWeekStart = startOfWeek(new Date())
-const weekStart = computed(() => addDays(currentWeekStart, 7 * pager.offset.value))
-const weekEnd = computed(() => addDays(weekStart.value, 7))
+const today = startOfDay(new Date())
+const currentWeekStart = startOfWeek(today)
+const periodDays = computed(() => (daily.value ? 1 : 7))
+const periodStart = computed(() => addDays(daily.value ? today : currentWeekStart, periodDays.value * pager.value.offset.value))
+const periodEnd = computed(() => addDays(periodStart.value, periodDays.value))
 
 const unvotedPolls = computed(() => polls.value.filter((entry) => entry.poll.open && entry.votes.length === 0))
 
@@ -279,32 +299,55 @@ interface CalendarDay {
   sessions: Session[]
 }
 
-const daysOfWeek = computed<CalendarDay[]>(() => {
-  const today = new Date()
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = addDays(weekStart.value, index)
+const days = computed<CalendarDay[]>(() =>
+  Array.from({ length: periodDays.value }, (_, index) => {
+    const date = addDays(periodStart.value, index)
     return { index, date, isToday: isSameDay(date, today), sessions: [] }
   })
-})
+)
 
 // Calendar grid: one row per hour, one cell per day
 const sessionsByHour = computed(() => {
   const rows = HOURS.map((time) => ({
     time,
-    days: daysOfWeek.value.map((day) => ({ ...day, sessions: [] as Session[] }))
+    days: days.value.map((day) => ({ ...day, sessions: [] as Session[] }))
   }))
   for (const session of sessions.value) {
     const datetime = new Date(session.datetime)
     const hour = displayVenueTime(datetime).split(':')[0]
     const row = rows.find((r) => r.time === hour + ':00')
-    const dayIndex = (7 + datetime.getDay() - currentWeekStart.getDay()) % 7
+    const dayIndex = days.value.findIndex((day) => isSameDay(day.date, datetime))
     row?.days[dayIndex]?.sessions.push(session)
   }
   return rows
 })
 
-function isSameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+// Pager offsets of the day and of the week holding `date`. Rounded because
+// a day or week spanning a clock change is an hour short or long.
+function dayOffsetOf(date: Date): number {
+  return Math.round((startOfDay(date).getTime() - today.getTime()) / MILLIS_IN_DAY)
+}
+
+function weekOffsetOf(date: Date): number {
+  return Math.round((startOfWeek(date).getTime() - currentWeekStart.getTime()) / MILLIS_IN_WEEK)
+}
+
+// Moves the current pager to the period holding `date`. A whole week asked
+// for in the daily view opens on its Monday, or on today for this week.
+function showDate(date: Date, wholeWeek: boolean) {
+  if (!daily.value) {
+    weekPager.jumpTo(weekOffsetOf(date))
+  } else if (!wholeWeek) {
+    dayPager.jumpTo(dayOffsetOf(date))
+  } else {
+    dayPager.jumpTo(weekOffsetOf(date) === 0 ? 0 : dayOffsetOf(startOfWeek(date)))
+  }
+}
+
+// A YYYY-MM-DD query value as a local calendar date
+function parseDateParam(value: string | null): Date | null {
+  const match = value && /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null
 }
 
 function readViewMode(): ViewMode {
@@ -315,7 +358,13 @@ function readViewMode(): ViewMode {
   }
 }
 
-function weekLabel(offset: number): string {
+function periodLabel(offset: number): string {
+  if (daily.value) {
+    if (offset === -1) return 'Yesterday'
+    if (offset === 0) return 'Today'
+    if (offset === 1) return 'Tomorrow'
+    return displayDate(addDays(today, offset))
+  }
   if (offset === -1) return 'Last Week'
   if (offset === 0) return 'This Week'
   if (offset === 1) return 'Next Week'
@@ -323,14 +372,13 @@ function weekLabel(offset: number): string {
   return displayDateRange(start, addDays(start, 6))
 }
 
-function displayCalendarDate(date: Date, length: 'xs' | 's' | 'l'): string {
-  const options: Intl.DateTimeFormatOptions =
-    length === 'xs' ? { weekday: 'narrow' } : length === 's' ? { weekday: 'short' } : { weekday: 'short', day: 'numeric', month: 'short' }
+function displayCalendarDate(date: Date, length: 's' | 'l'): string {
+  const options: Intl.DateTimeFormatOptions = length === 's' ? { weekday: 'short' } : { weekday: 'short', day: 'numeric', month: 'short' }
   return date.toLocaleDateString(undefined, options)
 }
 
 async function loadSessions() {
-  const result = await tryApi(() => listSessions(weekStart.value, weekEnd.value))
+  const result = await tryApi(() => listSessions(periodStart.value, periodEnd.value))
   if (result) {
     sessions.value = result
   }
@@ -348,12 +396,8 @@ async function loadPolls() {
   polls.value = (await tryApi(() => listPolls({ personId: user.value!.id }))) ?? []
 }
 
-function selectWeek(offset: number) {
-  pager.offset.value = offset
-}
-
-function resetWeek() {
-  pager.reset()
+function selectPeriod(offset: number) {
+  pager.value.offset.value = offset
 }
 
 // Booking actions, passed to every SessionControls as listeners
@@ -454,22 +498,30 @@ async function saveSessionFeedback() {
   }
 }
 
-// A bookmarked or emailed ?week= opens on that week. Done before the offset
-// watcher is registered so the initial load below is the only one.
-const weekParam = query.get('week')
-if (weekParam) {
-  const targetWeek = startOfWeek(new Date(weekParam))
-  pager.jumpTo(Math.floor((targetWeek.getTime() - currentWeekStart.getTime()) / MILLIS_IN_WEEK))
+// A bookmarked or emailed ?week= or ?day= opens on that period, whichever
+// kind of period is being shown. Done before the period watcher is
+// registered so the initial load below is the only one.
+const dayParam = parseDateParam(query.get('day'))
+const weekParam = parseDateParam(query.get('week'))
+if (dayParam) {
+  showDate(dayParam, false)
+} else if (weekParam) {
+  showDate(weekParam, true)
 }
 
-// Keep the selected week in the URL so it can be bookmarked
-watch(
-  () => pager.offset.value,
-  (offset) => {
-    query.set('week', offset === 0 ? null : weekStart.value.toLocaleDateString('sv'))
-    void loadSessions()
-  }
-)
+// Rotating the phone or switching view swaps the pager: carry the period
+// over, so the selected week's Monday (or today) is shown as a day, and the
+// selected day as part of its week
+watch(daily, (isDaily) => {
+  showDate(isDaily ? addDays(currentWeekStart, 7 * weekPager.offset.value) : addDays(today, dayPager.offset.value), isDaily)
+})
+
+// Keep the selected period in the URL so it can be bookmarked, and load it
+watch([() => periodStart.value.getTime(), periodDays], () => {
+  const date = pager.value.offset.value === 0 ? null : periodStart.value.toLocaleDateString('sv')
+  query.update(daily.value ? { week: null, day: date } : { day: null, week: date })
+  void loadSessions()
+})
 
 watch(viewMode, (mode) => {
   try {

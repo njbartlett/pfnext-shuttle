@@ -71,9 +71,11 @@ projects hard-code `mobile/node_modules/...` paths, so it links
   `SessionControls`, `SessionRatings`, `StarRating`, `ChallengeProgressBars`,
   `BibIcon`, `AdminPanel`, `AuthCard`, `PageTitle`, `SortButtons`
 - `src/composables/` — `useQueryState` (page state in the route query),
-  `useReturnPath` (`?return=`), `useTheme`, `usePagedWindow` (week/month
-  paging), `useNow` (1 s clock), `useDirtyTracking`, `loadSelectableMembers`,
-  `rankByScore`, date-input helpers
+  `useReturnPath` (`?return=`), `useTheme`, `usePagedWindow` (day/week/month
+  paging), `useMediaQuery` (a reactive `matchMedia`, used by the sessions
+  calendar to show one day at a time below the `md` breakpoint), `useNow`
+  (1 s clock), `useDirtyTracking`, `loadSelectableMembers`, `rankByScore`,
+  date-input helpers
 - `src/stores/` — `auth` (logged-in user, mirrored in localStorage; `login`,
   `logout`, role flags including `isEditor`), `apiError` (`tryApi()` runs a
   call and shows any failure in the banner)

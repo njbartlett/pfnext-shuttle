@@ -1,6 +1,7 @@
 // The sessions page with a logged-in member: the alerts, the booking flow
-// (including the credits confirmation), cancelling, the waitlist and the
-// ?week= parameter. API calls are mocked; see testing/sharedMock.ts.
+// (including the credits confirmation), cancelling, the waitlist, the
+// ?week= parameter and the one-day calendar of a narrow screen. API calls
+// are mocked; see testing/sharedMock.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, type BaseWrapper, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import type { Router } from 'vue-router'
@@ -64,6 +65,36 @@ async function dismiss(modal: DOMWrapper<Element>, label: string) {
   await hidden
 }
 
+// The screen width as the view sees it through matchMedia (jsdom's stub in
+// setup.ts never matches, so the default is a wide screen). resizeScreen()
+// fires the change listeners as rotating a phone would.
+const originalMatchMedia = window.matchMedia
+let screenListeners: ((event: MediaQueryListEvent) => void)[] = []
+
+function stubScreen(narrow: boolean) {
+  screenListeners = []
+  window.matchMedia = (query: string) =>
+    ({
+      matches: narrow && query.startsWith('(max-width:'),
+      media: query,
+      addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => screenListeners.push(listener),
+      removeEventListener: () => undefined
+    }) as unknown as MediaQueryList
+}
+
+async function resizeScreen(narrow: boolean) {
+  screenListeners.forEach((listener) => listener({ matches: narrow } as MediaQueryListEvent))
+  await flushPromises()
+}
+
+function pagerLabels(): string[] {
+  return wrapper
+    .find('.btn-group')
+    .findAll('button')
+    .map((b) => b.text())
+    .filter((text) => text !== '«' && text !== '»')
+}
+
 beforeEach(() => {
   vi.setSystemTime(NOW)
   vi.clearAllMocks()
@@ -76,6 +107,7 @@ beforeEach(() => {
 afterEach(() => {
   wrapper?.unmount()
   setUser(null)
+  window.matchMedia = originalMatchMedia
   // Any unmocked or failed API call would have landed in the error banner
   expect(apiError.value).toBeNull()
 })
@@ -247,5 +279,98 @@ describe('SessionsView week selection', () => {
 
     expect(router.currentRoute.value.query.week).toBe('2025-06-09')
     expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-09T00:00:00Z'), new Date('2025-06-16T00:00:00Z'))
+  })
+})
+
+// NOW is Wednesday 4 June 2025; the fixture session is on Thursday the 5th
+describe('SessionsView calendar on a narrow screen', () => {
+  it('shows one day at a time, paged as Yesterday, Today and Tomorrow', async () => {
+    stubScreen(true)
+    vi.mocked(listSessions).mockResolvedValue([makeSession()])
+    await mountSessions()
+
+    expect(listSessions).toHaveBeenCalledTimes(1)
+    expect(listSessions).toHaveBeenCalledWith(new Date('2025-06-04T00:00:00Z'), new Date('2025-06-05T00:00:00Z'))
+    expect(pagerLabels()).toEqual(['Yesterday', 'Today', 'Tomorrow'])
+    expect(buttonIn(wrapper, 'Today').classes()).toContain('btn-primary')
+    expect(wrapper.findAll('thead th')).toHaveLength(1)
+    expect(wrapper.find('thead th').text()).toBe('Wednesday, 4 June 2025')
+    expect(wrapper.text()).toContain('Showing Wed, 4 June 2025. Found 1 session(s) for selected day.')
+
+    await buttonIn(wrapper, 'Tomorrow').trigger('click')
+    await flushPromises()
+
+    expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-05T00:00:00Z'), new Date('2025-06-06T00:00:00Z'))
+    expect(router.currentRoute.value.query).toEqual({ day: '2025-06-05' })
+    expect(wrapper.find('thead th').text()).toBe('Thursday, 5 June 2025')
+    expect(card().text()).toContain('10:00 HIIT')
+  })
+
+  it('labels other days with their date', async () => {
+    stubScreen(true)
+    await mountSessions()
+
+    await buttonIn(wrapper, '»').trigger('click')
+    expect(pagerLabels()).toEqual(['Fri 6 Jun', 'Sat 7 Jun', 'Sun 8 Jun'])
+
+    await buttonIn(wrapper, '«').trigger('click')
+    await buttonIn(wrapper, '«').trigger('click')
+    expect(pagerLabels()).toEqual(['Sat 31 May', 'Sun 1 Jun', 'Mon 2 Jun'])
+
+    await buttonIn(wrapper, 'Now').trigger('click')
+    expect(pagerLabels()).toEqual(['Yesterday', 'Today', 'Tomorrow'])
+  })
+
+  it('opens a ?week= link on the Monday of that week, or today for this week', async () => {
+    stubScreen(true)
+    await mountSessions('/sessions.html?week=2025-06-16')
+    expect(listSessions).toHaveBeenCalledTimes(1)
+    expect(listSessions).toHaveBeenCalledWith(new Date('2025-06-16T00:00:00Z'), new Date('2025-06-17T00:00:00Z'))
+    expect(buttonIn(wrapper, 'Mon 16 Jun').classes()).toContain('btn-primary')
+    wrapper.unmount()
+
+    await mountSessions('/sessions.html?week=2025-06-02')
+    expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-04T00:00:00Z'), new Date('2025-06-05T00:00:00Z'))
+    expect(buttonIn(wrapper, 'Today').classes()).toContain('btn-primary')
+  })
+
+  it('opens a ?day= link on the week of that day on a wide screen', async () => {
+    await mountSessions('/sessions.html?day=2025-06-18')
+    expect(listSessions).toHaveBeenCalledTimes(1)
+    expect(listSessions).toHaveBeenCalledWith(new Date('2025-06-16T00:00:00Z'), new Date('2025-06-23T00:00:00Z'))
+    expect(buttonIn(wrapper, '16 – 22 Jun 2025').classes()).toContain('btn-primary')
+  })
+
+  it('keeps the selected period when the screen is rotated', async () => {
+    stubScreen(false)
+    await mountSessions('/sessions.html?week=2025-06-16')
+
+    await resizeScreen(true)
+    expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-16T00:00:00Z'), new Date('2025-06-17T00:00:00Z'))
+    expect(router.currentRoute.value.query).toEqual({ day: '2025-06-16' })
+    expect(pagerLabels()).toEqual(['Sun 15 Jun', 'Mon 16 Jun', 'Tue 17 Jun'])
+
+    // Another day of the same week goes back to that week
+    await buttonIn(wrapper, 'Tue 17 Jun').trigger('click')
+    await flushPromises()
+    await resizeScreen(false)
+    expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-16T00:00:00Z'), new Date('2025-06-23T00:00:00Z'))
+    expect(router.currentRoute.value.query).toEqual({ week: '2025-06-16' })
+    expect(listSessions).toHaveBeenCalledTimes(4)
+  })
+
+  it('stays weekly in the list view', async () => {
+    stubScreen(true)
+    localStorage.setItem('view_mode', 'list')
+    await mountSessions()
+
+    expect(listSessions).toHaveBeenCalledWith(new Date('2025-06-02T00:00:00Z'), new Date('2025-06-09T00:00:00Z'))
+    expect(pagerLabels()).toEqual(['Last Week', 'This Week', 'Next Week', '16 – 22 Jun 2025'])
+
+    // Switching to the calendar goes daily, on today
+    await wrapper.find('button[title="Switch to Calendar View"]').trigger('click')
+    await flushPromises()
+    expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-04T00:00:00Z'), new Date('2025-06-05T00:00:00Z'))
+    expect(pagerLabels()).toEqual(['Yesterday', 'Today', 'Tomorrow'])
   })
 })

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addMonths, displayDateRange, displayDateTime, displayFullDate, displayRelativeDay, displayTime, displayVenueDate, displayVenueTime, endOfMonth,
-  formatDuration, groupByDay, sortByField, startOfMonth, startOfWeek
+  formatDuration, groupByDay, sortByField, startOfDay, startOfMonth, startOfWeek
 } from './format'
 
 // Tests run with TZ=UTC (vitest.config.ts), so the browser-zone helpers show
@@ -83,6 +83,10 @@ describe('calendar arithmetic', () => {
     expect(startOfWeek(new Date(2025, 0, 8, 15, 45))).toEqual(monday) // Wednesday
     expect(startOfWeek(new Date(2025, 0, 12, 23, 59))).toEqual(monday) // Sunday
     expect(startOfWeek(new Date(2025, 0, 6, 9))).toEqual(monday) // Monday itself
+  })
+
+  it('starts days at local midnight', () => {
+    expect(startOfDay(new Date(2025, 0, 8, 15, 45, 30, 500))).toEqual(new Date(2025, 0, 8))
   })
 
   it('bounds months', () => {

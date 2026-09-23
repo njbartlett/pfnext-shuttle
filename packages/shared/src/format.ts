@@ -176,11 +176,15 @@ export function isPast(datetime: string | Date): boolean {
   return new Date(datetime) < new Date()
 }
 
-export function startOfWeek(date: Date): Date {
+export function startOfDay(date: Date): Date {
   const start = new Date(date)
-  const offsetDays = (start.getDay() + 7 - START_OF_WEEK) % 7
-  start.setDate(start.getDate() - offsetDays)
   start.setHours(0, 0, 0, 0)
+  return start
+}
+
+export function startOfWeek(date: Date): Date {
+  const start = startOfDay(date)
+  start.setDate(start.getDate() - ((start.getDay() + 7 - START_OF_WEEK) % 7))
   return start
 }
 
