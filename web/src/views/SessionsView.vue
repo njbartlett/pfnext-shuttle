@@ -37,7 +37,7 @@
     <div ref="slideFrame" class="slide-frame">
     <Transition :name="slideDirection ? 'slide-' + slideDirection : 'none'">
     <!-- List view -->
-    <table v-if="viewMode === 'list'" :key="'list/' + loadedPeriodKey" class="table table-borderless table-sm align-middle">
+    <table v-if="viewMode === 'list'" :key="'list/' + shownPeriod?.key" class="table table-borderless table-sm align-middle">
       <thead>
         <tr>
           <th scope="col">When</th>
@@ -86,11 +86,11 @@
 
     <!-- Calendar view: a column per day of the week, or a single day on a
          narrow screen where the pager already names the day -->
-    <table v-else :key="'cal/' + loadedPeriodKey" class="table table-sm table-borderless">
+    <table v-else :key="'cal/' + shownPeriod?.key" class="table table-sm table-borderless">
       <thead>
         <tr class="border-top">
           <th v-for="day in days" :key="day.index" scope="col" class="border-end bg-light-subtle" :class="{ 'bg-opacity-50': !day.isToday, 'border-start': day.index === 0 }">
-            <template v-if="daily">{{ displayLongDate(day.date) }}</template>
+            <template v-if="shownDays === 1">{{ displayLongDate(day.date) }}</template>
             <template v-else>
               <span class="d-lg-none">{{ displayCalendarDate(day.date, 's') }}</span>
               <span class="d-none d-lg-block">{{ displayCalendarDate(day.date, 'l') }}</span>
@@ -129,11 +129,17 @@
       </tbody>
     </table>
     </Transition>
+
+    <!-- The previous period stays in place until the new one arrives; a
+         spinner over it shows the wait when that takes a moment -->
+    <div v-if="loading" class="loading-overlay" role="status">
+      <div class="spinner-border text-primary"><span class="visually-hidden">Loading…</span></div>
+    </div>
     </div>
 
     <p class="text-center text-secondary">
-      <template v-if="daily">Showing {{ displayFullDate(periodStart) }}. Found {{ sessions.length }} session(s) for selected day.</template>
-      <template v-else>Showing week commencing {{ displayFullDate(periodStart) }}. Found {{ sessions.length }} session(s) for selected week.</template>
+      <template v-if="shownDays === 1">Showing {{ displayFullDate(shownStart) }}. Found {{ sessions.length }} session(s) for selected day.</template>
+      <template v-else>Showing week commencing {{ displayFullDate(shownStart) }}. Found {{ sessions.length }} session(s) for selected week.</template>
       Session times shown are local to the venue.
     </p>
 
@@ -296,13 +302,17 @@ const today = startOfDay(new Date())
 const currentWeekStart = startOfWeek(today)
 const periodDays = computed(() => (daily.value ? 1 : 7))
 const periodStart = computed(() => addDays(daily.value ? today : currentWeekStart, periodDays.value * pager.value.offset.value))
-const periodEnd = computed(() => addDays(periodStart.value, periodDays.value))
 const periodKey = computed(() => periodStart.value.getTime() + '/' + periodDays.value)
 
-// The sessions table is keyed by the period its rows belong to, so it is
-// swapped (with a slide) only once the new period has loaded, and the
-// direction is that of the paging that asked for it
-const loadedPeriodKey = ref<string | null>(null)
+// The period on display lags the selected one: the sessions table is keyed
+// by the period its rows belong to, so it is swapped (with a slide) only
+// once the new period has loaded, and until then the calendar's days and
+// the footer are still the old period's, under a spinner. The slide's
+// direction is that of the paging that asked for it.
+const shownPeriod = ref<{ key: string; start: Date; days: number } | null>(null)
+const shownStart = computed(() => shownPeriod.value?.start ?? periodStart.value)
+const shownDays = computed(() => shownPeriod.value?.days ?? periodDays.value)
+const loading = ref(false)
 const slideDirection = ref<SlideDirection | null>(null)
 const slideFrame = ref<HTMLElement | null>(null)
 useSwipe(slideFrame, { onSwipeLeft: () => page(1), onSwipeRight: () => page(-1) })
@@ -317,8 +327,8 @@ interface CalendarDay {
 }
 
 const days = computed<CalendarDay[]>(() =>
-  Array.from({ length: periodDays.value }, (_, index) => {
-    const date = addDays(periodStart.value, index)
+  Array.from({ length: shownDays.value }, (_, index) => {
+    const date = addDays(shownStart.value, index)
     return { index, date, isToday: isSameDay(date, today), sessions: [] }
   })
 )
@@ -396,12 +406,24 @@ function displayCalendarDate(date: Date, length: 's' | 'l'): string {
 
 async function loadSessions() {
   const key = periodKey.value
-  const result = await tryApi(() => listSessions(periodStart.value, periodEnd.value))
-  // A reply overtaken by further paging is dropped: its period is gone
-  if (result && key === periodKey.value) {
-    sessions.value = result
-    loadedPeriodKey.value = key
+  const start = periodStart.value
+  const days = periodDays.value
+  // A reload of the period already shown (after a waitlist change, say) is
+  // not worth a spinner
+  if (key !== shownPeriod.value?.key) {
+    loading.value = true
   }
+  const result = await tryApi(() => listSessions(start, addDays(start, days)))
+  // A reply overtaken by further paging is dropped: its period is gone, and
+  // the later request will clear the spinner
+  if (key !== periodKey.value) {
+    return
+  }
+  if (result) {
+    sessions.value = result
+    shownPeriod.value = { key, start, days }
+  }
+  loading.value = false
 }
 
 async function loadUser() {

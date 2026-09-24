@@ -293,6 +293,41 @@ describe('SessionsView week selection', () => {
     expect(router.currentRoute.value.query.week).toBe('2025-06-09')
     expect(listSessions).toHaveBeenLastCalledWith(new Date('2025-06-09T00:00:00Z'), new Date('2025-06-16T00:00:00Z'))
   })
+
+  it('keeps the current week up with a spinner over it until the next one loads', async () => {
+    vi.mocked(listSessions).mockResolvedValue([makeSession()])
+    await mountSessions()
+    expect(wrapper.find('.loading-overlay').exists()).toBe(false)
+
+    let reply: (sessions: Session[]) => void = () => undefined
+    vi.mocked(listSessions).mockImplementation(() => new Promise((resolve) => (reply = resolve)))
+    await buttonIn(wrapper, 'Next Week').trigger('click')
+    await flushPromises()
+
+    // The old week is still up, with its own days, under the spinner
+    expect(wrapper.find('.loading-overlay .spinner-border').exists()).toBe(true)
+    expect(card().text()).toContain('10:00 HIIT')
+    expect(wrapper.text()).toContain('Showing week commencing Mon, 2 June 2025. Found 1 session(s)')
+
+    reply([])
+    await flushPromises()
+
+    expect(wrapper.find('.loading-overlay').exists()).toBe(false)
+    expect(card().exists()).toBe(false)
+    expect(wrapper.text()).toContain('Showing week commencing Mon, 9 June 2025. Found 0 session(s)')
+  })
+
+  it('drops the spinner when the load fails', async () => {
+    await mountSessions()
+    vi.mocked(listSessions).mockRejectedValue(new ApiError(500, 'error', 'Database down'))
+
+    await buttonIn(wrapper, 'Next Week').trigger('click')
+    await flushPromises()
+
+    expect(apiError.value?.message).toBe('Database down')
+    expect(wrapper.find('.loading-overlay').exists()).toBe(false)
+    clearApiError()
+  })
 })
 
 // NOW is Wednesday 4 June 2025; the fixture session is on Thursday the 5th

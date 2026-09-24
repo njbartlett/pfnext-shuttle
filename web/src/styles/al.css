@@ -141,3 +141,23 @@ button[aria-expanded=true] .text-collapsed {
         transition: none;
     }
 }
+
+/* While the next period loads, a spinner sits over the top of the stale
+   display (the frame above), which is dimmed behind it. It fades in after a
+   short delay so a quick reply never flashes it. Near the top rather than
+   centred, as the calendar runs the height of the day. */
+.slide-frame > .loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 4rem;
+    background-color: rgba(var(--bs-body-bg-rgb), 0.6);
+    animation: loading-overlay-appear 0.15s ease-out 0.2s both;
+}
+@keyframes loading-overlay-appear {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
