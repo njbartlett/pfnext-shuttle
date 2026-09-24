@@ -58,6 +58,22 @@ describe('useSwipe', () => {
     expect(onSwipeRight).not.toHaveBeenCalled()
   })
 
+  it('halts any native scrolling once a swipe is recognised, and only then', () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+    Object.defineProperty(window, 'scrollX', { value: 0, configurable: true })
+    Object.defineProperty(window, 'scrollY', { value: 340, configurable: true })
+    const { element } = mountSwipeable()
+
+    touch(element, 'touchstart', [{ x: 200, y: 100 }])
+    touch(element, 'touchend', [{ x: 170, y: 100 }]) // too short: an ordinary touch
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    touch(element, 'touchstart', [{ x: 200, y: 100 }])
+    touch(element, 'touchend', [{ x: 120, y: 110 }])
+    expect(scrollTo).toHaveBeenCalledWith({ left: 0, top: 340, behavior: 'instant' })
+    scrollTo.mockRestore()
+  })
+
   it('stops listening once unmounted', () => {
     const { wrapper, element, onSwipeLeft } = mountSwipeable()
     wrapper.unmount()

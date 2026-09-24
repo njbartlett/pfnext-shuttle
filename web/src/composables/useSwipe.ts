@@ -28,8 +28,20 @@ export function useSwipe(target: Ref<HTMLElement | null>, handlers: SwipeHandler
     const dy = touch.clientY - start.y
     start = null
     if (Math.abs(dx) >= threshold && Math.abs(dx) > 2 * Math.abs(dy)) {
+      haltNativeScrolling()
       ;(dx < 0 ? handlers.onSwipeLeft : handlers.onSwipeRight)?.()
     }
+  }
+
+  // A swipe with any vertical drift can set the page scrolling by a few
+  // pixels, and iOS keeps that scroll "decelerating" for a second or more
+  // after it has visibly stopped. A tap landing in that time is treated by
+  // WebKit as interrupting the scroll: it drops the touch start, and since
+  // iOS 18.4 then ignores the tap outright when it is far from where the
+  // swipe began (WebKit bug 284346), so the button the user paged to has to
+  // be tapped twice. Scrolling to where we already are ends the deceleration.
+  function haltNativeScrolling() {
+    window.scrollTo({ left: window.scrollX, top: window.scrollY, behavior: 'instant' })
   }
 
   function onTouchCancel() {
