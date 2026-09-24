@@ -438,6 +438,19 @@ describe('SessionsView calendar on a narrow screen', () => {
     expect(listSessions).toHaveBeenCalledTimes(5)
   })
 
+  it('selects only the first day of the next block when swiping on from the last', async () => {
+    stubScreen(true)
+    await mountSessions()
+
+    await buttonIn(wrapper, 'Fri 6 Jun').trigger('click')
+    swipe(wrapper.find('.slide-frame').element, -80, 0)
+    await flushPromises()
+
+    expect(pagerLabels()).toEqual(['Sat 7 Jun', 'Sun 8 Jun', 'Mon 9 Jun'])
+    const selected = wrapper.find('.btn-group').findAll('.btn-primary')
+    expect(selected.map((b) => b.text())).toEqual(['Sat 7 Jun'])
+  })
+
   it('does not slide when the screen is rotated', async () => {
     stubScreen(false)
     await mountSessions()

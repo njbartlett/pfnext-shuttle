@@ -97,6 +97,19 @@ button[aria-expanded=true] .text-collapsed {
     display: none;
 }
 
+/* On a touch screen there is no pointer to hover: the browser leaves the
+   last tapped spot in the hover state until the next tap, which paging by a
+   swipe never delivers, and Bootstrap paints a hovered outline button solid,
+   just like the selected one. So on such screens a button's hover look is
+   its resting look; the pressed (active) look is untouched. */
+@media (hover: none) {
+    .btn:hover {
+        color: var(--bs-btn-color);
+        background-color: var(--bs-btn-bg);
+        border-color: var(--bs-btn-border-color);
+    }
+}
+
 .hover-expand:hover {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
     /* transform: translateY(-2px); */
