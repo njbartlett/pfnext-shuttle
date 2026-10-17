@@ -1,9 +1,11 @@
 // The editors' list of all posts: drafts, scheduled and published posts with
-// read counts, and the publish/unpublish and delete actions. API calls are
-// mocked.
+// read counts, and the publish/unpublish and delete actions; and the panel
+// of uploaded images that no post embeds. API calls are mocked.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
-import { deletePost, listPosts, setPostPublication } from '@pfnext/shared'
+import {
+  deleteAllOrphanImages, deleteOrphanImage, deletePost, listOrphanImages, listPosts, setPostPublication, type OrphanImage
+} from '@pfnext/shared'
 import BlogAdminView from './BlogAdminView.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import { apiError } from '@/stores/apiError'
@@ -19,11 +21,17 @@ const POSTS = [
   makePost({ id: 3, title: 'Published', read_count: 7 })
 ]
 
+const IMAGES: OrphanImage[] = [
+  { name: 'aB3xK9pQ2mZt.jpg', url: 'https://b.lon1.cdn.digitaloceanspaces.com/pfnext/blog/images/aB3xK9pQ2mZt.jpg', size: 150_000, uploaded_at: '2025-06-01T09:00:00Z' },
+  { name: 'Zt9pQ2mB3xKa.png', url: 'https://b.lon1.cdn.digitaloceanspaces.com/pfnext/blog/images/Zt9pQ2mB3xKa.png', size: 3_000_000, uploaded_at: null }
+]
+
 let wrapper: VueWrapper | undefined
 
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(listPosts).mockResolvedValue(POSTS)
+  vi.mocked(listOrphanImages).mockResolvedValue(IMAGES)
 })
 
 afterEach(() => {
@@ -109,5 +117,62 @@ describe('the blog admin page', () => {
     await open()
     expect(wrapper!.text()).toContain('needs the admin or editor role')
     expect(listPosts).not.toHaveBeenCalled()
+    expect(listOrphanImages).not.toHaveBeenCalled()
+  })
+})
+
+describe('the orphaned images panel', () => {
+  function imageRow(name: string) {
+    return wrapper!.get(`[id="image-${name}"]`)
+  }
+
+  it('links to each image in a new tab without showing it', async () => {
+    setUser(ADMIN)
+    await open()
+    const link = imageRow('aB3xK9pQ2mZt.jpg').get('a')
+    expect(link.attributes('href')).toBe(IMAGES[0].url)
+    expect(link.attributes('target')).toBe('_blank')
+    expect(imageRow('aB3xK9pQ2mZt.jpg').text()).toContain('147 KiB')
+    expect(imageRow('Zt9pQ2mB3xKa.png').text()).toContain('2.9 MiB')
+    expect(wrapper!.find('img').exists()).toBe(false)
+    expect(wrapper!.get('[role="note"]').text()).toContain('new posts that have not been saved')
+  })
+
+  it('deletes one image and reloads the list', async () => {
+    setUser(ADMIN)
+    vi.mocked(deleteOrphanImage).mockResolvedValue(undefined)
+    await open()
+    await imageRow('Zt9pQ2mB3xKa.png').get('button').trigger('click')
+    await flushPromises()
+    expect(deleteOrphanImage).toHaveBeenCalledWith('Zt9pQ2mB3xKa.png')
+    expect(listOrphanImages).toHaveBeenCalledTimes(2)
+  })
+
+  it('deletes all images once confirmed', async () => {
+    setUser(ADMIN)
+    vi.mocked(deleteAllOrphanImages).mockResolvedValue(undefined)
+    await open()
+
+    const shown = modalEvent('shown.bs.modal')
+    await wrapper!.findAll('button').find((button) => button.text() === 'Delete All')!.trigger('click')
+    await shown
+    const modal = wrapper!.findAllComponents(ConfirmModal).find((m) => m.text().includes('orphaned image(s)'))!
+    expect(modal.text()).toContain('delete all 2 orphaned image(s)')
+    expect(deleteAllOrphanImages).not.toHaveBeenCalled()
+
+    const hidden = modalEvent('hidden.bs.modal')
+    await modal.findAll('button').find((button) => button.text() === 'Delete All')!.trigger('click')
+    await hidden
+    await flushPromises()
+    expect(deleteAllOrphanImages).toHaveBeenCalled()
+  })
+
+  it('says so when every image is in use', async () => {
+    setUser(ADMIN)
+    vi.mocked(listOrphanImages).mockResolvedValue([])
+    await open()
+    expect(wrapper!.text()).toContain('Every uploaded image is used by a post.')
+    // Only the (hidden) confirmation modal has a Delete All button
+    expect(wrapper!.findAll('.card button').some((button) => button.text() === 'Delete All')).toBe(false)
   })
 })

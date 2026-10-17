@@ -3,7 +3,8 @@
 //! bucket and embedded by CDN URL.
 //!
 //! Two groups of routes:
-//! - `api_routes`, mounted under /api: posts and image upload
+//! - `api_routes`, mounted under /api: posts, image upload, and clean-up of
+//!   uploaded images that no post embeds
 //! - `page_routes`, mounted at /: the SPA shell for /blog/posts/<title>.html
 //!   with Open Graph tags for the post, so shared links get a preview
 use std::path::PathBuf;
@@ -36,7 +37,8 @@ const IMAGES_PREFIX: &str = "pfnext/blog/images";
 const DESCRIPTION_CHARS: usize = 200;
 
 pub fn api_routes() -> Vec<Route> {
-    routes![list_posts, get_post, get_post_by_title, post_post, put_post, put_post_publication, delete_post, put_post_read, post_blob]
+    routes![list_posts, get_post, get_post_by_title, post_post, put_post, put_post_publication, delete_post, put_post_read, post_blob,
+        list_orphan_images, delete_orphan_image, delete_all_orphan_images]
 }
 
 pub fn page_routes() -> Vec<Route> {
@@ -606,6 +608,95 @@ fn image_extension(mime_type: &str) -> Option<&'static str> {
     }
 }
 
+/// An uploaded image that no post embeds
+#[derive(Debug, Deserialize, Serialize)]
+struct OrphanImage {
+    /// File name within the images directory
+    name: String,
+    url: String,
+    size: i64,
+    uploaded_at: Option<DateTime<Utc>>
+}
+
+/// The keys, of those given, that no post's content mentions
+async fn unreferenced_keys(pool: &PgPool, keys: &[String]) -> Result<Vec<String>, sqlx::Error> {
+    query_scalar("SELECT k FROM unnest($1::text[]) AS k
+            WHERE NOT EXISTS (SELECT 1 FROM post WHERE strpos(content, k) > 0)")
+        .bind(keys)
+        .fetch_all(pool)
+        .await
+}
+
+/// The images in the bucket that no post embeds
+async fn find_orphan_images(pool: &PgPool, s3: &S3Store) -> Result<Vec<OrphanImage>, ApiError> {
+    let prefix = format!("{IMAGES_PREFIX}/");
+    let objects = s3.list(&prefix).await.map_err(to_internal_server_err)?;
+    let keys: Vec<String> = objects.iter().map(|o| o.key.clone()).collect();
+    let orphans = unreferenced_keys(pool, &keys).await.map_err(to_internal_server_err)?;
+    Ok(objects.into_iter()
+        .filter(|o| orphans.contains(&o.key))
+        .map(|o| OrphanImage {
+            name: o.key[prefix.len()..].to_string(),
+            url: s3.public_url(&o.key),
+            size: o.size,
+            uploaded_at: o.last_modified
+        })
+        .collect())
+}
+
+/// Uploaded images that no post embeds, oldest first. These include images
+/// added to a post in the editor that has not been saved yet.
+#[get("/images/orphans")]
+async fn list_orphan_images(
+    pool: &State<PgPool>,
+    s3: &State<S3Store>,
+    login: LoginSession
+) -> Result<Json<Vec<OrphanImage>>, ApiError> {
+    require_editor(&login)?;
+    let mut orphans = find_orphan_images(pool, s3).await?;
+    orphans.sort_by_key(|o| o.uploaded_at);
+    Ok(Json(orphans))
+}
+
+/// Deletes one orphaned image; an image that a post embeds is refused
+#[delete("/images/orphans/<name>")]
+async fn delete_orphan_image(
+    pool: &State<PgPool>,
+    s3: &State<S3Store>,
+    login: LoginSession,
+    name: &str
+) -> Result<NoContent, ApiError> {
+    require_editor(&login)?;
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_') {
+        return Err(ApiError::new(Status::BadRequest, format!("invalid image name: {name}")));
+    }
+    let key = format!("{IMAGES_PREFIX}/{name}");
+    let keys = [key];
+    if unreferenced_keys(pool, &keys).await.map_err(to_internal_server_err)?.is_empty() {
+        return Err(ApiError::new(Status::Conflict, format!("image {name} is used by a post")));
+    }
+    s3.delete(&keys).await.map_err(to_internal_server_err)?;
+    info!("Deleted orphaned image {} for {}", keys[0], login.email);
+    Ok(NoContent)
+}
+
+/// Deletes every image that no post embeds
+#[delete("/images/orphans")]
+async fn delete_all_orphan_images(
+    pool: &State<PgPool>,
+    s3: &State<S3Store>,
+    login: LoginSession
+) -> Result<NoContent, ApiError> {
+    require_editor(&login)?;
+    let keys: Vec<String> = find_orphan_images(pool, s3).await?
+        .into_iter()
+        .map(|o| format!("{IMAGES_PREFIX}/{}", o.name))
+        .collect();
+    s3.delete(&keys).await.map_err(to_internal_server_err)?;
+    info!("Deleted {} orphaned images for {}", keys.len(), login.email);
+    Ok(NoContent)
+}
+
 impl LoginSession {
     fn is_editor(&self) -> bool {
         self.is_admin() || self.has_role(ROLE_EDITOR)
@@ -844,6 +935,17 @@ mod tests {
 
         let missing = put_post_publication(State::from(&pool), editor, 999, publication(None)).await;
         assert!(matches!(missing, Err(ApiError(status, _)) if status == Status::NotFound));
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_images_that_no_post_embeds_are_unreferenced(pool: PgPool) {
+        let admin = find_user_login_by_name(&pool, "admin", "admin").await;
+        let content = format!("<p><img src=\"https://b.lon1.cdn.digitaloceanspaces.com/{IMAGES_PREFIX}/used.jpg\"></p>");
+        PostFull::create(&pool, "Draft".to_string(), admin.uid, admin.name, admin.email, None, content).await.unwrap();
+
+        let keys = ["used.jpg", "unused.png"].map(|name| format!("{IMAGES_PREFIX}/{name}"));
+        assert_eq!(vec![keys[1].clone()], unreferenced_keys(&pool, &keys).await.unwrap());
+        assert!(unreferenced_keys(&pool, &[]).await.unwrap().is_empty());
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]

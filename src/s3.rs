@@ -7,12 +7,23 @@
 use std::env;
 
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::ObjectCannedAcl;
+use aws_sdk_s3::types::{Delete, ObjectCannedAcl, ObjectIdentifier};
+use chrono::{DateTime, Utc};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 
 /// Length of the random names given to uploaded objects
 const RANDOM_NAME_LEN: usize = 12;
+/// Most keys S3 deletes in one request
+const MAX_DELETE_KEYS: usize = 1000;
+
+/// An object listed in the bucket
+#[derive(Debug)]
+pub struct S3Object {
+    pub key: String,
+    pub size: i64,
+    pub last_modified: Option<DateTime<Utc>>
+}
 
 pub struct S3Store {
     client: aws_sdk_s3::Client,
@@ -54,6 +65,58 @@ impl S3Store {
             .send()
             .await
             .map_err(|e| format!("Failed to upload {key} to S3: {e}"))?;
+        Ok(())
+    }
+
+    /// Every object whose key starts with `prefix`
+    pub async fn list(&self, prefix: &str) -> Result<Vec<S3Object>, String> {
+        let mut objects = Vec::new();
+        let mut pages = self.client.list_objects_v2()
+            .bucket(&self.bucket)
+            .prefix(prefix)
+            .into_paginator()
+            .send();
+        while let Some(page) = pages.next().await {
+            let page = page.map_err(|e| format!("Failed to list {prefix} in S3: {e}"))?;
+            for object in page.contents() {
+                let Some(key) = object.key() else { continue };
+                objects.push(S3Object {
+                    key: key.to_string(),
+                    size: object.size().unwrap_or(0),
+                    last_modified: object.last_modified()
+                        .and_then(|t| DateTime::from_timestamp(t.secs(), t.subsec_nanos()))
+                });
+            }
+        }
+        Ok(objects)
+    }
+
+    pub async fn delete(&self, keys: &[String]) -> Result<(), String> {
+        for chunk in keys.chunks(MAX_DELETE_KEYS) {
+            let mut object_ids = Vec::with_capacity(chunk.len());
+            for key in chunk {
+                let object_id = ObjectIdentifier::builder()
+                    .key(key)
+                    .build()
+                    .map_err(|e| format!("Failed to build key for delete_object: {e:?}"))?;
+                object_ids.push(object_id);
+            }
+            let delete = Delete::builder()
+                .set_objects(Some(object_ids))
+                .build()
+                .map_err(|e| format!("Failed to build delete_object input: {e:?}"))?;
+            let output = self.client.delete_objects()
+                .bucket(&self.bucket)
+                .delete(delete)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to delete from S3: {e}"))?;
+            // Each key succeeds or fails on its own
+            if let Some(error) = output.errors().first() {
+                return Err(format!("Failed to delete {} from S3: {}",
+                    error.key().unwrap_or("?"), error.message().unwrap_or("unknown error")));
+            }
+        }
         Ok(())
     }
 

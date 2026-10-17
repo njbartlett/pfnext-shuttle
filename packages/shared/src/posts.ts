@@ -2,7 +2,7 @@
 // page is /blog/posts/<title>.html, which is also what the legacy links in
 // emails and social posts look like.
 import { apiRequest } from './api'
-import type { Post, PostSummary, SavePost } from './types'
+import type { OrphanImage, Post, PostSummary, SavePost } from './types'
 
 // Published posts, newest first; `all` (editors only) includes drafts and
 // posts scheduled for the future
@@ -35,6 +35,22 @@ export async function setPostPublication(postId: number, published: string | nul
 
 export async function deletePost(postId: number): Promise<void> {
   await apiRequest<void>(`/posts/${postId}`, { method: 'DELETE' })
+}
+
+// Editors only: uploaded images that no post embeds, oldest first. These
+// include images added in the editor to a post that has not been saved yet.
+export async function listOrphanImages(): Promise<OrphanImage[]> {
+  return apiRequest<OrphanImage[]>('/images/orphans')
+}
+
+// Editors only; refused with 409 if a post has since embedded the image
+export async function deleteOrphanImage(name: string): Promise<void> {
+  await apiRequest<void>(`/images/orphans/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+// Editors only: deletes every image that no post embeds at the time
+export async function deleteAllOrphanImages(): Promise<void> {
+  await apiRequest<void>('/images/orphans', { method: 'DELETE' })
 }
 
 // Logged-in users only: records that the user has read the post. Fetching a

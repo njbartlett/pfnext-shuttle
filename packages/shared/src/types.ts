@@ -291,6 +291,16 @@ export interface Post extends PostSummary {
   content: string
 }
 
+// An uploaded image that no post embeds
+export interface OrphanImage {
+  // File name within the bucket's images directory
+  name: string
+  url: string
+  // Bytes
+  size: number
+  uploaded_at: string | null
+}
+
 export interface SavePost {
   title: string
   content: string
