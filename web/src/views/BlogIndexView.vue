@@ -7,11 +7,8 @@
       <div class="admin-panel-icon"><i class="bi bi-lightning-fill" title="Admin/Editor Only"></i></div>
       <div class="d-flex">
         <RouterLink class="btn btn-primary btn-sm mx-1" :to="{ name: 'edit_post', params: { location: 'new' } }"><i class="bi bi-feather"></i>&nbsp;New Post</RouterLink>
-        <RouterLink v-if="showAll" class="btn btn-outline-primary btn-sm mx-1" :to="{ name: 'blog' }">Show Only Published</RouterLink>
-        <RouterLink v-else class="btn btn-outline-primary btn-sm mx-1" :to="{ name: 'blog', query: { mode: ALL_POSTS_MODE } }">Show All</RouterLink>
+        <RouterLink class="btn btn-outline-primary btn-sm mx-1" :to="{ name: 'blog_admin' }"><i class="bi bi-list-check"></i>&nbsp;Manage Posts</RouterLink>
       </div>
-      <div v-if="showAll" class="mt-3">Showing all published and unpublished posts.</div>
-      <div v-else class="mt-3">Showing published posts as of {{ displayDayMonthYear(new Date()) }}.</div>
     </div>
 
     <ul v-if="posts.length > 0" class="list-group">
@@ -21,9 +18,7 @@
             <RouterLink :to="{ name: 'blog_post', params: { location: postLocation(post.title) } }" class="stretched-link">{{ post.title }}</RouterLink>
             <span v-if="isUnread(post)" class="badge rounded-pill text-bg-primary align-middle ms-2 fs-6">New</span>
           </div>
-          By {{ post.author_name }}
-          <span v-if="post.published_at" class="fst-italic">on {{ displayDayMonthYear(post.published_at) }}</span>
-          <span v-else class="fst-italic">(unpublished)</span>.
+          By {{ post.author_name }} <span v-if="post.published_at" class="fst-italic">on {{ displayDayMonthYear(post.published_at) }}</span>.
         </div>
       </li>
     </ul>
@@ -32,30 +27,24 @@
 </template>
 
 <script setup lang="ts">
-// List of blog posts; editors can include drafts with ?mode=allposts
-import { computed, ref, watch } from 'vue'
+// List of published blog posts. Editors manage all posts, drafts included,
+// on the blog admin page.
+import { ref, watch } from 'vue'
 import { displayDayMonthYear, listPosts, postLocation, type PostSummary } from '@pfnext/shared'
 import PageTitle from '@/components/PageTitle.vue'
-import { useQueryState } from '@/composables/useQueryState'
 import { isEditor, isLoggedIn } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
 
-const ALL_POSTS_MODE = 'allposts'
-
-const query = useQueryState()
 const posts = ref<PostSummary[]>([])
 const loaded = ref(false)
 
-// Only editors may list unpublished posts; for anyone else the mode is ignored
-const showAll = computed(() => isEditor.value && query.get('mode') === ALL_POSTS_MODE)
-
-// Only logged-in users' reads are tracked, and drafts are not news
+// Only logged-in users' reads are tracked
 function isUnread(post: PostSummary): boolean {
-  return isLoggedIn.value && post.published_at !== null && post.read_at === null
+  return isLoggedIn.value && post.read_at === null
 }
 
 async function load() {
-  const result = await tryApi(() => listPosts(showAll.value))
+  const result = await tryApi(() => listPosts())
   if (result) {
     posts.value = result
   }
@@ -63,5 +52,5 @@ async function load() {
 }
 
 // Reload on login and logout too: read times are per user
-watch([showAll, isLoggedIn], load, { immediate: true })
+watch(isLoggedIn, load, { immediate: true })
 </script>

@@ -36,7 +36,7 @@ const IMAGES_PREFIX: &str = "pfnext/blog/images";
 const DESCRIPTION_CHARS: usize = 200;
 
 pub fn api_routes() -> Vec<Route> {
-    routes![list_posts, get_post, get_post_by_title, post_post, put_post, delete_post, put_post_read, post_blob]
+    routes![list_posts, get_post, get_post_by_title, post_post, put_post, put_post_publication, delete_post, put_post_read, post_blob]
 }
 
 pub fn page_routes() -> Vec<Route> {
@@ -57,24 +57,32 @@ struct PostSummary {
     last_edited_at: DateTime<FixedOffset>,
     published_at: Option<DateTime<FixedOffset>>,
     /// When the logged-in reader first read the post; always None for anonymous readers
-    read_at: Option<DateTime<FixedOffset>>
+    read_at: Option<DateTime<FixedOffset>>,
+    /// How many members have read the post; only included for editors
+    read_count: Option<i64>
 }
 impl PostSummary {
     /// `reader_id` is the logged-in reader, whose read times are included
     async fn query_list<Tz: TimeZone>(
         pool: &PgPool,
         reader_id: Option<i64>,
+        with_read_counts: bool,
         published_after: Option<&DateTime<Tz>>,
         published_before: Option<&DateTime<Tz>>
     ) -> Result<Vec<Self>, sqlx::Error> {
-        let mut qb = QueryBuilder::new("SELECT p.id, p.title, p.published_at,
+        let read_count = if with_read_counts {
+            "(SELECT COUNT(*) FROM post_read AS c WHERE c.post_id = p.id)"
+        } else {
+            "NULL::bigint"
+        };
+        let mut qb = QueryBuilder::new(format!("SELECT p.id, p.title, p.published_at,
                 p.author_id, a.name AS author_name, a.email AS author_email, p.created_at,
                 p.last_editor_id, l.name AS last_editor_name, l.email AS last_editor_email, p.last_edited_at,
-                r.read_at
+                r.read_at, {read_count} AS read_count
             FROM post AS p
             JOIN person AS a ON p.author_id = a.id
             JOIN person AS l ON p.last_editor_id = l.id
-            LEFT JOIN post_read AS r ON r.post_id = p.id AND r.person_id = ");
+            LEFT JOIN post_read AS r ON r.post_id = p.id AND r.person_id = "));
         qb.push_bind(reader_id);
         let mut wc = WhereClause::init();
 
@@ -238,7 +246,8 @@ fn not_found() -> ApiError {
 }
 
 /// Published posts, newest first. `all=true` (editors only) includes
-/// unpublished drafts and posts scheduled for the future.
+/// unpublished drafts and posts scheduled for the future, and how many
+/// members have read each post.
 #[get("/posts?<all>")]
 async fn list_posts(
     pool: &State<PgPool>,
@@ -252,7 +261,7 @@ async fn list_posts(
     let published_before = if all { None } else { Some(Utc::now().fixed_offset()) };
 
     let reader_id = login.as_ref().map(|l| l.uid);
-    let posts = PostSummary::query_list(pool.inner(), reader_id, None, published_before.as_ref()).await
+    let posts = PostSummary::query_list(pool.inner(), reader_id, all, None, published_before.as_ref()).await
         .map_err(to_internal_server_err)?;
     Ok(Json(posts))
 }
@@ -314,6 +323,35 @@ async fn put_post(
 
     post.title = update.title.clone();
     post.content = update.content.clone();
+    post.last_editor_id = login.uid;
+    post.last_editor_name = login.name;
+    post.last_editor_email = login.email;
+    post.last_edited_at = Utc::now().fixed_offset();
+    post.published_at = update.published;
+
+    post.save(pool).await.map_err(to_internal_server_err)?;
+    Ok(Json(post))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct SavePublication {
+    /// None unpublishes the post
+    published: Option<DateTime<FixedOffset>>
+}
+
+/// Publishes or unpublishes a post without changing its content
+#[put("/posts/<id>/publication", data = "<update>")]
+async fn put_post_publication(
+    pool: &State<PgPool>,
+    login: LoginSession,
+    id: i64,
+    update: Json<SavePublication>
+) -> Result<Json<PostFull>, ApiError> {
+    require_editor(&login)?;
+    let mut post = PostFull::query_by_id(pool, Some(login.uid), id).await
+        .map_err(to_internal_server_err)?
+        .ok_or_else(not_found)?;
+
     post.last_editor_id = login.uid;
     post.last_editor_name = login.name;
     post.last_editor_email = login.email;
@@ -772,6 +810,43 @@ mod tests {
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_read_counts_are_listed_for_editors_only(pool: PgPool) {
+        let id = create_published_post(&pool, "Post").await;
+        let admin = find_user_login_by_name(&pool, "admin", "admin").await;
+        for name in ["user1", "user2"] {
+            let reader = find_user_login_by_name(&pool, name, "member").await;
+            put_post_read(State::from(&pool), reader, id).await.unwrap();
+        }
+
+        let all = list_posts(State::from(&pool), Some(admin.clone()), Some(true)).await.unwrap().0;
+        assert_eq!(Some(2), all[0].read_count);
+        let published = list_posts(State::from(&pool), Some(admin), None).await.unwrap().0;
+        assert_eq!(None, published[0].read_count);
+        let anonymous = list_posts(State::from(&pool), None, None).await.unwrap().0;
+        assert_eq!(None, anonymous[0].read_count);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_editor_publishes_and_unpublishes(pool: PgPool) {
+        let id = create_published_post(&pool, "Post").await;
+        let editor = find_user_login_by_name(&pool, "user1", "member,editor").await;
+        let publication = |published| Json(SavePublication { published });
+
+        let unpublished = put_post_publication(State::from(&pool), editor.clone(), id, publication(None)).await.unwrap().0;
+        assert_eq!((None, editor.uid), (unpublished.published_at, unpublished.last_editor_id));
+        assert!(list_posts(State::from(&pool), None, None).await.unwrap().0.is_empty());
+
+        let now = Utc::now().fixed_offset();
+        put_post_publication(State::from(&pool), editor.clone(), id, publication(Some(now))).await.unwrap();
+        let republished = post_titled(&pool, "Post").await.unwrap();
+        assert_eq!(Some(now.timestamp()), republished.published_at.map(|p| p.timestamp()));
+        assert_eq!("<p>x</p>", republished.content);
+
+        let missing = put_post_publication(State::from(&pool), editor, 999, publication(None)).await;
+        assert!(matches!(missing, Err(ApiError(status, _)) if status == Status::NotFound));
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
     async fn test_members_cannot_manage_posts(pool: PgPool) {
         let id = create_published_post(&pool, "Post").await;
         for roles in ["member", "trainer"] {
@@ -780,6 +855,7 @@ mod tests {
 
             assert!(forbidden(post_post(State::from(&pool), login.clone(), save_post("New", "", None)).await.map(|_| ())), "{roles}");
             assert!(forbidden(put_post(State::from(&pool), login.clone(), id, save_post("Changed", "", None)).await.map(|_| ())), "{roles}");
+            assert!(forbidden(put_post_publication(State::from(&pool), login.clone(), id, Json(SavePublication { published: None })).await.map(|_| ())), "{roles}");
             assert!(forbidden(delete_post(State::from(&pool), login.clone(), id).await.map(|_| ())), "{roles}");
             assert!(forbidden(list_posts(State::from(&pool), Some(login), Some(true)).await.map(|_| ())), "{roles}");
         }

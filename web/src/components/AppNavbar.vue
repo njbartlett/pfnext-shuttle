@@ -35,6 +35,7 @@
               <li><RouterLink class="dropdown-item" to="/stats.html"><i class="bi bi-bar-chart-fill"></i>&nbsp;Attendance Stats</RouterLink></li>
               <li><RouterLink class="dropdown-item" to="/logs.html"><i class="bi bi-journal-text"></i>&nbsp;Logs</RouterLink></li>
               <li><RouterLink class="dropdown-item" :to="{ name: 'edit_post', params: { location: 'new' } }"><i class="bi bi-feather"></i>&nbsp;Create Blog Post</RouterLink></li>
+              <li><RouterLink class="dropdown-item" :to="{ name: 'blog_admin' }"><i class="bi bi-list-check"></i>&nbsp;Manage Blog Posts</RouterLink></li>
             </ul>
           </li>
           <li class="nav-item"><a class="nav-link" href="https://chat.whatsapp.com/CPjp84Qz6uM5t9Oq88Qb4Q" target="_blank" title="WhatsApp Help Channel"><i class="bi bi-question-circle"></i>&nbsp;Help</a></li>

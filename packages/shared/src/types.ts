@@ -281,6 +281,9 @@ export interface PostSummary {
   // When the logged-in user first read the post: null if they have not, and
   // always null when nobody is logged in
   read_at: string | null
+  // How many members have read the post; only listed for editors (all=true),
+  // otherwise null. Single-post fetches leave it out.
+  read_count?: number | null
 }
 
 export interface Post extends PostSummary {

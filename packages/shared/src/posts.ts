@@ -27,6 +27,12 @@ export async function updatePost(postId: number, post: SavePost): Promise<Post> 
   return apiRequest<Post>(`/posts/${postId}`, { method: 'PUT', body: post })
 }
 
+// Editors only: publishes the post at `published` (an ISO date-time), or
+// unpublishes it when null, leaving its content alone
+export async function setPostPublication(postId: number, published: string | null): Promise<Post> {
+  return apiRequest<Post>(`/posts/${postId}/publication`, { method: 'PUT', body: { published } })
+}
+
 export async function deletePost(postId: number): Promise<void> {
   await apiRequest<void>(`/posts/${postId}`, { method: 'DELETE' })
 }

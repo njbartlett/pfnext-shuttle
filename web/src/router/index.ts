@@ -54,6 +54,12 @@ export const routes: RouteRecordRaw[] = [
   { path: '/blog', redirect: '/blog/index.html' },
   { path: '/blog/index.html', name: 'blog', component: () => import('@/views/BlogIndexView.vue'), meta: { title: 'Posts', nav: true, stayOnLogout: true } },
   {
+    path: '/blog/admin.html',
+    name: 'blog_admin',
+    component: () => import('@/views/BlogAdminView.vue'),
+    meta: { title: 'Manage Posts', requiresLogin: true }
+  },
+  {
     path: '/blog/posts/:location',
     name: 'blog_post',
     component: () => import('@/views/BlogPostView.vue'),
