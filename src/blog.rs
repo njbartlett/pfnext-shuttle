@@ -1,16 +1,18 @@
 //! The blog: posts stored in Postgres, edited and read through the JSON API
-//! by the single-page app, plus the images embedded in them ("blobs", kept
-//! as Postgres large objects).
+//! by the single-page app, plus the images embedded in them. New images are
+//! uploaded to the S3 bucket and embedded by CDN URL; older posts embed
+//! "blobs", kept as Postgres large objects.
 //!
 //! Three groups of routes:
-//! - `api_routes`, mounted under /api: posts and blob upload
+//! - `api_routes`, mounted under /api: posts and image upload
 //! - `blob_routes`, mounted under /blog: blob download at /blog/blobs/<id>,
-//!   the URL existing post bodies embed
+//!   the URL older post bodies embed
 //! - `page_routes`, mounted at /: the SPA shell for /blog/posts/<title>.html
 //!   with Open Graph tags for the post, so shared links get a preview
 use std::path::PathBuf;
 
 use async_stream::stream;
+use aws_sdk_s3::primitives::ByteStream;
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 use futures::stream::{Stream, StreamExt};
 use multer::{parse_boundary, Multipart};
@@ -22,7 +24,6 @@ use rocket::response::{self, Responder};
 use rocket::serde::json::Json;
 use rocket::{Request, Response, Route, State};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::postgres::types::Oid;
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool, QueryBuilder};
 
@@ -30,11 +31,14 @@ use crate::apierror::ApiError;
 use crate::common::to_internal_server_err;
 use crate::config::Config;
 use crate::loginsession::LoginSession;
+use crate::s3::{self, S3Store};
 use crate::templates::SPA_INDEX;
 use crate::whereclause::{Operator, WhereClause};
 
 const ROLE_EDITOR: &str = "editor";
 const MAX_BLOB_SIZE_KIBIBYTES: usize = 512;
+/// Where uploaded images go in the S3 bucket
+const IMAGES_PREFIX: &str = "pfnext/blog/images";
 /// Length of the Open Graph description taken from the start of a post
 const DESCRIPTION_CHARS: usize = 200;
 
@@ -516,10 +520,11 @@ struct PostBlobResult {
 }
 
 /// Image upload from the post editor (a multipart form with one file field).
-/// Blobs are stored once per content hash; the response is the URL to embed.
+/// The image is stored publicly in the S3 bucket under a random name; the
+/// response is its CDN URL, to embed in the post.
 #[post("/blobs", data = "<data>")]
 async fn post_blob(
-    pool: &State<PgPool>,
+    s3: &State<S3Store>,
     login: LoginSession,
     content_type: &ContentType,
     data: Data<'_>
@@ -536,82 +541,41 @@ async fn post_blob(
     let stream = ReaderStream::new(data_stream);
     let mut multipart = Multipart::new(stream, boundary);
 
-    if let Some(mut field) = multipart.next_field().await.map_err(to_internal_server_err)? {
-        let mut tx = pool.begin()
-            .await
-            .map_err(to_internal_server_err)?;
+    let Some(field) = multipart.next_field().await.map_err(to_internal_server_err)? else {
+        return Err(ApiError::new(Status::BadRequest, "missing multipart file".to_string()));
+    };
+    let mime_type = field.content_type()
+        .map(|m| m.essence_str().to_string())
+        .unwrap_or_default();
+    let extension = image_extension(&mime_type)
+        .ok_or_else(|| ApiError::new(Status::UnsupportedMediaType, format!("unsupported image type: {mime_type}")))?;
+    let bytes = field.bytes().await
+        .map_err(|e| ApiError::new(Status::BadRequest, e.to_string()))?;
+    let size = bytes.len();
 
-        // Create a new large object
-        let loid: Oid = sqlx::query_scalar("SELECT lo_creat(-1)")
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(to_internal_server_err)?;
+    let key = format!("{IMAGES_PREFIX}/{}.{extension}", s3::random_name());
+    s3.upload(ByteStream::from(bytes), &mime_type, &key, true).await
+        .map_err(to_internal_server_err)?;
+    info!("Stored image {key} ({mime_type}, {size} bytes) for {}", login.email);
 
-        // Open the large object for writing
-        let fd: i32 = sqlx::query_scalar("SELECT lo_open($1, 131072)") // 131072 = INV_WRITE
-            .bind(loid)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(to_internal_server_err)?;
-        let mut hasher = Sha256::new();
+    let location = s3.public_url(&key);
+    let result = PostBlobResult { location: location.clone() };
+    Ok(Created::new(location).body(Json(result)))
+}
 
-        // Stream the field's contents
-        let mut size: usize = 0;
-        while let Some(chunk) = field.chunk().await
-                .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))? {
-            size += chunk.len();
-
-            let bytes = chunk.to_vec();
-            hasher.update(&bytes);
-            query("SELECT lowrite($1, $2)")
-                .bind(fd)
-                .bind(&bytes[..chunk.len()])
-                .execute(&mut *tx)
-                .await
-                .map_err(to_internal_server_err)?;
-        }
-        sqlx::query("SELECT lo_close($1)")
-            .bind(fd)
-            .execute(&mut *tx)
-            .await
-            .map_err(to_internal_server_err)?;
-
-        let mime_type = field.content_type()
-            .map(|m| m.essence_str())
-            .unwrap_or("application/octet-stream");
-
-        let hash = hasher.finalize();
-        let hash_hex = hex::encode(hash);
-        info!("Stored blob {hash_hex} ({mime_type}, {size} bytes) for {}", login.email);
-
-        // Insert metadata row
-        let id: Option<String> = query_scalar("INSERT INTO blobs (id, mime_type, oid, size, created) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT DO NOTHING RETURNING id")
-            .bind(&hash_hex)
-            .bind(mime_type)
-            .bind(loid)
-            .bind(i64::try_from(size).map_err(to_internal_server_err)?)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(to_internal_server_err)?;
-
-        // If the insert did not return a row, the record for this hash already exists. We need to delete the duplicate Large Object.
-        if id.is_none() {
-            query("SELECT lo_unlink($1)")
-                .bind(loid)
-                .execute(&mut *tx)
-                .await
-                .map_err(to_internal_server_err)?;
-        }
-
-        tx.commit()
-            .await
-            .map_err(to_internal_server_err)?;
-
-        let location = format!("/blog/blobs/{hash_hex}");
-        let result = PostBlobResult { location: location.clone() };
-        Ok(Created::new(location).body(Json(result)))
-    } else {
-        Err(ApiError::new(Status::BadRequest, "missing multipart file".to_string()))
+/// The usual file extension for an image MIME type, or None if it is not an
+/// image type that posts accept
+fn image_extension(mime_type: &str) -> Option<&'static str> {
+    match mime_type {
+        "image/jpeg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/avif" => Some("avif"),
+        "image/svg+xml" => Some("svg"),
+        "image/bmp" => Some("bmp"),
+        "image/tiff" => Some("tif"),
+        _ => None
     }
 }
 
@@ -770,6 +734,15 @@ mod tests {
         assert_eq!(first_image_src("<p>none</p>"), None);
         assert_eq!(first_image_src("<img class='x' src='a.png'><img src=\"b.png\">"), Some("a.png".to_string()));
         assert_eq!(first_image_src("<img alt=\"no source\">"), None);
+    }
+
+    #[test]
+    fn test_image_extension() {
+        assert_eq!(Some("jpg"), image_extension("image/jpeg"));
+        assert_eq!(Some("png"), image_extension("image/png"));
+        assert_eq!(Some("svg"), image_extension("image/svg+xml"));
+        assert_eq!(None, image_extension("text/html"));
+        assert_eq!(None, image_extension(""));
     }
 
     #[test]

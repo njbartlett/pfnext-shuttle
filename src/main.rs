@@ -34,6 +34,7 @@ mod loginsession;
 mod mock_chrono;
 mod notifications;
 mod polls;
+mod s3;
 mod sessions;
 mod templates;
 mod testcommon;
@@ -79,6 +80,7 @@ async fn launch() -> Rocket<Build> {
     info!("Loaded configuration: {:?}", config);
     let app_env = AppEnv::new_from_env().expect("Failed to load application environment");
     info!("Loaded application environment");
+    let s3_store = s3::S3Store::new_from_env().await.expect("Failed to configure S3 storage");
 
     // Load users agents config
     let user_agent_parser = UserAgentParser::from_path("user_agents.yaml")
@@ -125,6 +127,7 @@ async fn launch() -> Rocket<Build> {
         .manage(config)
         .manage(app_env)
         .manage(pool)
+        .manage(s3_store)
         .manage(user_agent_parser)
         .attach(cors)
         // The single-page app (web/dist); page paths with no file fall back
