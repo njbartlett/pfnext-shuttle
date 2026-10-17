@@ -407,7 +407,7 @@ async fn get_user(
     login: LoginSession,
     user_id: i64
 ) -> Result<Json<UserListingEntry>, ApiError> {
-    if !login.is_admin() && !login.uid == user_id {
+    if !login.is_admin() && login.uid != user_id {
         return Err(ApiError::new(Status::Forbidden, "cannot view user record for other users".to_string()));
     }
     let res = query_users(pool.inner(), UserSearch { user_id: Some(user_id), ..Default::default() })
@@ -509,8 +509,10 @@ async fn update_user(
     user_id: i64,
     update: Json<UserUpdate>
 ) -> Result<Accepted<String>, ApiError> {
-    if !login.is_admin() && !login.uid == user_id {
-        return Err(ApiError::new(Status::Forbidden, "cannot edit user record for other users".to_string()));
+    // Sets roles, credits and status, so admins only, even for their own
+    // record; members change their own details with PATCH
+    if !login.is_admin() {
+        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
 
     let roles_str = &update.roles.join(",");
@@ -547,8 +549,8 @@ async fn patch_user(
     user_id: i64,
     patch: Json<UserPatch>
 ) -> Result<Accepted<String>, ApiError> {
-    if !login.uid == user_id && !login.is_admin() {
-        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
+    if login.uid != user_id && !login.is_admin() {
+        return Err(ApiError::new(Status::Forbidden, "cannot edit user record for other users".to_string()));
     }
 
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("UPDATE person");
@@ -852,6 +854,111 @@ mod tests {
         // Status can be cleared again ("None")
         update_user(State::from(&pool), admin.clone(), pid, update(None)).await.unwrap();
         assert_eq!(None, get_user(State::from(&pool), admin.clone(), pid).await.unwrap().status);
+    }
+
+    fn forbidden(result: Result<impl std::fmt::Debug, ApiError>) -> bool {
+        matches!(result, Err(ApiError(status, _)) if status == Status::Forbidden)
+    }
+
+    #[sqlx::test]
+    async fn get_user_is_limited_to_self_unless_admin(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let joe = create_named_person(&pool, "Joe", "joe@example.com", "member").await;
+        let bob = create_named_person(&pool, "Bob", "bob@example.com", "member").await;
+        let joe_login = create_login(joe, "Joe", "member");
+
+        assert_eq!("joe@example.com", get_user(State::from(&pool), joe_login.clone(), joe).await.unwrap().email);
+        assert!(forbidden(get_user(State::from(&pool), joe_login, bob).await));
+        assert_eq!("bob@example.com", get_user(State::from(&pool), create_login(-1, "admin", "admin"), bob).await.unwrap().email);
+    }
+
+    #[sqlx::test]
+    async fn put_user_is_admin_only(pool: PgPool) {
+        use rocket::serde::json::Json;
+        use crate::users::{update_user, UserUpdate};
+
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let joe = create_named_person(&pool, "Joe", "joe@example.com", "member").await;
+        let bob = create_named_person(&pool, "Bob", "bob@example.com", "member").await;
+        let admin_id = create_named_person(&pool, "Admin", "admin@example.com", "admin").await;
+        let joe_login = create_login(joe, "Joe", "member");
+        let admin = create_login(admin_id, "Admin", "admin");
+
+        let update = |name: &str, email: &str, roles: &[&str], credits: i32| Json(UserUpdate {
+            name: name.to_string(),
+            email: email.to_string(),
+            phone: None, emergency_name: None, emergency_phone: None, medical_info: None,
+            roles: roles.iter().map(|r| r.to_string()).collect(),
+            credits,
+            status: None
+        });
+
+        // A member can neither promote themselves nor change anyone else
+        assert!(forbidden(update_user(State::from(&pool), joe_login.clone(), joe, update("Joe", "joe@example.com", &["admin"], 100)).await));
+        assert!(forbidden(update_user(State::from(&pool), joe_login.clone(), bob, update("Bob", "bob@example.com", &["member"], 100)).await));
+        let joe_record = get_user(State::from(&pool), admin.clone(), joe).await.unwrap().into_inner();
+        assert_eq!((vec!["member".to_string()], 0), (joe_record.roles, joe_record.credits));
+        assert_eq!(0, get_user(State::from(&pool), admin.clone(), bob).await.unwrap().credits);
+
+        // Admins can edit anyone, themselves included
+        update_user(State::from(&pool), admin.clone(), bob, update("Bob", "bob@example.com", &["member"], 3)).await.unwrap();
+        assert_eq!(3, get_user(State::from(&pool), admin.clone(), bob).await.unwrap().credits);
+        update_user(State::from(&pool), admin.clone(), admin_id, update("Admin Renamed", "admin@example.com", &["admin"], 0)).await.unwrap();
+        assert_eq!("Admin Renamed", get_user(State::from(&pool), admin.clone(), admin_id).await.unwrap().name);
+    }
+
+    #[sqlx::test]
+    async fn patch_user_is_limited_to_self_unless_admin(pool: PgPool) {
+        use rocket::serde::json::Json;
+        use crate::users::{patch_user, UserPatch};
+
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let joe = create_named_person(&pool, "Joe", "joe@example.com", "member").await;
+        let bob = create_named_person(&pool, "Bob", "bob@example.com", "member").await;
+        let admin_id = create_named_person(&pool, "Admin", "admin@example.com", "admin").await;
+        let joe_login = create_login(joe, "Joe", "member");
+        let admin = create_login(admin_id, "Admin", "admin");
+        let rename = |name: &str| Json(UserPatch {
+            name: Some(name.to_string()), phone: None, emergency_name: None, emergency_phone: None, medical_info: None
+        });
+        let name_of = |id: i64| {
+            let pool = pool.clone();
+            let admin = admin.clone();
+            async move { get_user(State::from(&pool), admin, id).await.unwrap().into_inner().name }
+        };
+
+        patch_user(State::from(&pool), joe_login.clone(), joe, rename("Joseph")).await.unwrap();
+        assert_eq!("Joseph", name_of(joe).await);
+
+        assert!(forbidden(patch_user(State::from(&pool), joe_login, bob, rename("Hacked")).await));
+        assert_eq!("Bob", name_of(bob).await);
+
+        patch_user(State::from(&pool), admin.clone(), bob, rename("Robert")).await.unwrap();
+        assert_eq!("Robert", name_of(bob).await);
+        patch_user(State::from(&pool), admin.clone(), admin_id, rename("Administrator")).await.unwrap();
+        assert_eq!("Administrator", name_of(admin_id).await);
+    }
+
+    #[sqlx::test]
+    async fn created_at_cannot_be_changed(pool: PgPool) {
+        use rocket::serde::json::{from_str, Json};
+        use crate::users::{patch_user, update_user, UserPatch, UserUpdate};
+
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let joe = create_named_person(&pool, "Joe", "joe@example.com", "member").await;
+        let admin = create_login(-1, "admin", "admin");
+        let created_at = get_user(State::from(&pool), admin.clone(), joe).await.unwrap().created_at;
+
+        // Request bodies naming created_at, from the member and from an admin
+        let patch: UserPatch = from_str(r#"{"name": "Joseph", "created_at": "2000-01-01T00:00:00Z"}"#).unwrap();
+        patch_user(State::from(&pool), create_login(joe, "Joe", "member"), joe, Json(patch)).await.unwrap();
+        let update: UserUpdate = from_str(r#"{"name": "Joe", "email": "joe@example.com", "roles": ["member"], "credits": 0,
+            "created_at": "2000-01-01T00:00:00Z"}"#).unwrap();
+        update_user(State::from(&pool), admin.clone(), joe, Json(update)).await.unwrap();
+
+        let record = get_user(State::from(&pool), admin, joe).await.unwrap();
+        assert_eq!("Joe", record.name);
+        assert_eq!(created_at, record.created_at);
     }
 
     #[sqlx::test]
