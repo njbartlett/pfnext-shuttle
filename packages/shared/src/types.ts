@@ -138,6 +138,9 @@ export interface UserRecord {
   credits: number
   pwd_defined: boolean
   status: string | null
+  // When the person record was created; records older than this field show
+  // 1 April 2024
+  created_at: string
 }
 
 // Fields a member may change about themselves (PATCH /users/<id>)

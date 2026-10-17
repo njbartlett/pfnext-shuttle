@@ -293,7 +293,7 @@ const narrowScreen = useMediaQuery(NARROW_SCREEN_QUERY)
 const sessions = ref<Session[]>([])
 const userRecord = ref<UserRecord | null>(null)
 const polls = ref<PollWithVotes[]>([])
-const unreadPosts = ref<PostSummary[]>([])
+const posts = ref<PostSummary[]>([])
 // Posts whose Mark as Read request is in flight
 const markingRead = reactive(new Set<number>())
 const viewMode = ref<ViewMode>(readViewMode())
@@ -342,8 +342,18 @@ useSwipe(slideFrame, { onSwipeLeft: () => page(1), onSwipeRight: () => page(-1) 
 
 const unvotedPolls = computed(() => polls.value.filter((entry) => entry.poll.open && entry.votes.length === 0))
 
-// Members who have never read the blog have a backlog of every past post, so
-// only the newest few are listed
+// Published posts the user has not read, leaving out those from before they
+// joined. Nothing is listed until their record (with its creation time) loads.
+const unreadPosts = computed(() => {
+  if (!userRecord.value) {
+    return []
+  }
+  const joined = new Date(userRecord.value.created_at)
+  return posts.value.filter((post) => post.read_at === null && post.published_at !== null && new Date(post.published_at) >= joined)
+})
+
+// Members who have never read the blog may still have a backlog, so only
+// the newest few are listed
 const MAX_UNREAD_POSTS_SHOWN = 3
 const singleUnreadPost = computed(() => unreadPosts.value.length === 1)
 const shownUnreadPosts = computed(() => unreadPosts.value.slice(0, MAX_UNREAD_POSTS_SHOWN))
@@ -468,14 +478,13 @@ async function loadPolls() {
   polls.value = (await tryApi(() => listPolls({ personId: user.value!.id }))) ?? []
 }
 
-// Published posts the logged-in user has not read; listPosts is newest first
-async function loadUnreadPosts() {
+// Published posts, newest first, with the logged-in user's read times
+async function loadPosts() {
   if (!user.value) {
-    unreadPosts.value = []
+    posts.value = []
     return
   }
-  const posts = (await tryApi(() => listPosts())) ?? []
-  unreadPosts.value = posts.filter((post) => post.read_at === null)
+  posts.value = (await tryApi(() => listPosts())) ?? []
 }
 
 async function markRead(post: PostSummary) {
@@ -486,7 +495,7 @@ async function markRead(post: PostSummary) {
   })
   markingRead.delete(post.id)
   if (done) {
-    unreadPosts.value = unreadPosts.value.filter((p) => p.id !== post.id)
+    posts.value = posts.value.map((p) => (p.id === post.id ? { ...p, read_at: new Date().toISOString() } : p))
   }
 }
 
@@ -637,18 +646,18 @@ watch(viewMode, (mode) => {
 watch(user, () => {
   void loadUser()
   void loadPolls()
-  void loadUnreadPosts()
+  void loadPosts()
 })
 
 void loadSessions()
 void loadUser()
 void loadPolls()
-void loadUnreadPosts()
+void loadPosts()
 
 // Re-check polls and posts when the page is restored from the back/forward cache
 const onPageReveal = () => {
   void loadPolls()
-  void loadUnreadPosts()
+  void loadPosts()
 }
 window.addEventListener('pagereveal', onPageReveal)
 onBeforeUnmount(() => window.removeEventListener('pagereveal', onPageReveal))

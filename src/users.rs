@@ -346,6 +346,7 @@ struct UserListingEntry {
     credits: i16,
     pwd_defined: bool,
     status: Option<String>,
+    created_at: DateTime<Utc>,
 }
 
 impl FromRow<'_, PgRow> for UserListingEntry {
@@ -362,6 +363,7 @@ impl FromRow<'_, PgRow> for UserListingEntry {
             credits: row.try_get("credits")?,
             pwd_defined: row.try_get("pwd_defined")?,
             status: row.try_get("status").ok(),
+            created_at: row.try_get("created_at")?,
         })
     }
 }
@@ -382,7 +384,7 @@ fn search_term(term: Option<String>) -> Option<String> {
 
 async fn query_users(pool: &PgPool, search: UserSearch) -> Result<Vec<UserListingEntry>, ApiError> {
     let mut qb: QueryBuilder<Postgres> = Default::default();
-    qb.push("SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits, status, \
+    qb.push("SELECT id, name, email, phone, emergency_name, emergency_phone, medical_info, roles, credits, status, created_at, \
             (CASE WHEN pwd IS NULL THEN false ELSE true END) AS pwd_defined \
             FROM person");
 
@@ -713,6 +715,18 @@ mod tests {
         assert_eq!("joe@example.com", get_user(State::from(&pool), login.clone(), pid1).await.unwrap().email);
         assert_eq!("bob@example.com", get_user(State::from(&pool), login.clone(), pid2).await.unwrap().email);
         assert_eq!(Err(ApiError::new(Status::NotFound, "no user found for id -1".to_string())), get_user(State::from(&pool), login.clone(), -1).await);
+    }
+
+    #[sqlx::test]
+    async fn new_person_is_created_now(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let before = Utc::now();
+        let pid = create_person(&pool, "joe@example.com", None, "member", 0).await;
+        let after = Utc::now();
+
+        let created_at = get_user(State::from(&pool), create_login(-1, "admin", "admin"), pid).await.unwrap().created_at;
+        // The database clock may be a little off the test's
+        assert!(created_at > before - chrono::Duration::seconds(5) && created_at < after + chrono::Duration::seconds(5), "{created_at}");
     }
 
     #[sqlx::test]

@@ -26,6 +26,7 @@ export function makeUserRecord(user: LoggedInUser, overrides: Partial<UserRecord
     credits: 5,
     pwd_defined: true,
     status: user.status ?? null,
+    created_at: '2024-03-31T23:00:00Z',
     ...overrides
   }
 }

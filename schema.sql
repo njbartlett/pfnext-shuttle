@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS person (
     roles text,
     status text,
     credits int2 DEFAULT 0 NOT NULL CHECK (credits >= 0),
-    url text NULL
+    url text NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS temp_password (
     person_id bigint UNIQUE NOT NULL REFERENCES person ON DELETE CASCADE,

@@ -199,6 +199,17 @@ describe('SessionsView alerts', () => {
     expect(links[0].attributes('href')).toBe('/blog/posts/Park%20Run%20&%20Picnic.html')
   })
 
+  it('leaves out posts published before the member joined', async () => {
+    vi.mocked(getUserRecord).mockResolvedValue(makeUserRecord(MEMBER, { created_at: '2025-05-01T12:00:00Z' }))
+    vi.mocked(listPosts).mockResolvedValue([
+      makePost({ id: 1, title: 'After joining', published_at: '2025-05-01T12:00:00Z' }),
+      makePost({ id: 2, title: 'Before joining', published_at: '2025-05-01T11:59:59Z' })
+    ])
+    await mountSessions()
+
+    expect(wrapper.findAll('.unread-posts li a').map((a) => a.text())).toEqual(['After joining'])
+  })
+
   it('shows no blog alert when every post has been read', async () => {
     vi.mocked(listPosts).mockResolvedValue([makePost({ read_at: '2025-06-02T10:00:00Z' })])
     await mountSessions()

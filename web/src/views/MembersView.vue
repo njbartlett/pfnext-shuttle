@@ -179,7 +179,7 @@ const newRoleReady = computed(() => newRole.value.length > 0 && newRoleError.val
 function emptyRecord(): UserRecord {
   return {
     id: 0, name: '', email: '', phone: null, emergency_name: null, emergency_phone: null,
-    medical_info: null, roles: [], credits: 0, pwd_defined: false, status: null
+    medical_info: null, roles: [], credits: 0, pwd_defined: false, status: null, created_at: ''
   }
 }
 
