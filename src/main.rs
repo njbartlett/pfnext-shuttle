@@ -134,8 +134,6 @@ async fn launch() -> Rocket<Build> {
         // to the SPA shell, and blog post pages get their Open Graph tags
         .mount("/", crate::templates::routes())
         .mount("/", blog::page_routes())
-        // Images embedded in posts keep their historical URLs
-        .mount("/blog", blog::blob_routes())
         // The "/api" catchers also cover the longer "/api/v1" prefix
         .register("/api", catchers![api_unauthorized, api_notfound])
         // Unversioned mount consumed by the website; "/api/v1" is the frozen

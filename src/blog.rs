@@ -1,30 +1,23 @@
 //! The blog: posts stored in Postgres, edited and read through the JSON API
-//! by the single-page app, plus the images embedded in them. New images are
-//! uploaded to the S3 bucket and embedded by CDN URL; older posts embed
-//! "blobs", kept as Postgres large objects.
+//! by the single-page app. Images embedded in posts are uploaded to the S3
+//! bucket and embedded by CDN URL.
 //!
-//! Three groups of routes:
+//! Two groups of routes:
 //! - `api_routes`, mounted under /api: posts and image upload
-//! - `blob_routes`, mounted under /blog: blob download at /blog/blobs/<id>,
-//!   the URL older post bodies embed
 //! - `page_routes`, mounted at /: the SPA shell for /blog/posts/<title>.html
 //!   with Open Graph tags for the post, so shared links get a preview
 use std::path::PathBuf;
 
-use async_stream::stream;
 use aws_sdk_s3::primitives::ByteStream;
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
-use futures::stream::{Stream, StreamExt};
 use multer::{parse_boundary, Multipart};
 use rocket::data::{Data, ToByteUnit};
 use rocket::http::uri::Host;
-use rocket::http::{ContentType, MediaType, Status};
+use rocket::http::{ContentType, Status};
 use rocket::response::status::{Created, NoContent};
-use rocket::response::{self, Responder};
 use rocket::serde::json::Json;
-use rocket::{Request, Response, Route, State};
+use rocket::{Route, State};
 use serde::{Deserialize, Serialize};
-use sqlx::postgres::types::Oid;
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool, QueryBuilder};
 
 use crate::apierror::ApiError;
@@ -44,10 +37,6 @@ const DESCRIPTION_CHARS: usize = 200;
 
 pub fn api_routes() -> Vec<Route> {
     routes![list_posts, get_post, get_post_by_title, post_post, put_post, delete_post, put_post_read, post_blob]
-}
-
-pub fn blob_routes() -> Vec<Route> {
-    routes![get_blob]
 }
 
 pub fn page_routes() -> Vec<Route> {
@@ -577,100 +566,6 @@ fn image_extension(mime_type: &str) -> Option<&'static str> {
         "image/tiff" => Some("tif"),
         _ => None
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct MediaStream<S> {
-    media_type: MediaType,
-    stream: S
-}
-
-impl<S> MediaStream<S> {
-    fn from_stream(media_type: MediaType, stream: S) -> Self {
-        MediaStream { media_type, stream }
-    }
-}
-impl<'r, S: futures::stream::Stream> Responder<'r, 'r> for MediaStream<S>
-    where S: Send + 'r, S::Item: AsRef<[u8]> + Send + Unpin + 'r
-{
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'r> {
-        use rocket::response::stream::ReaderStream;
-
-        Response::build()
-            .header(ContentType(self.media_type))
-            .streamed_body(ReaderStream::from(self.stream.map(std::io::Cursor::new)))
-            .ok()
-    }
-}
-
-#[derive(Debug, Deserialize, FromRow, Serialize)]
-struct BlobMetadata {
-    id: String,
-    mime_type: String,
-    size: i64,
-    created: DateTime<FixedOffset>,
-    oid: Oid
-}
-#[rocket::get("/blobs/<id>")]
-async fn get_blob<'r>(
-    pool: &'r State<PgPool>,
-    id: &str
-) -> Result<
-        MediaStream<impl Stream<Item = Vec<u8>> + use<'r>>,
-        ApiError
-    > {
-    let metadata: BlobMetadata = query_as("SELECT * FROM blobs WHERE id = $1")
-        .bind(id)
-        .fetch_optional(pool.inner())
-        .await
-        .map_err(to_internal_server_err)?
-        .ok_or_else(|| ApiError::new(Status::NotFound, format!("blob with id {id} not found")))?;
-    let media_type = MediaType::parse_flexible(&metadata.mime_type)
-        .ok_or_else(|| ApiError::new(Status::UnsupportedMediaType, metadata.mime_type))?;
-
-    let mut tx = pool.begin()
-        .await
-        .map_err(to_internal_server_err)?;
-
-    let lo_fd: i32 = sqlx::query_scalar("SELECT lo_open($1, 262144)") // 262144 = 0x40000 = INV_READ
-        .bind(metadata.oid)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(to_internal_server_err)?;
-
-    let stream = stream! {
-        loop {
-            let chunk_result: Result<Option<Vec<u8>>, sqlx::Error> = query_scalar("SELECT loread($1, 2048)")
-                .bind(lo_fd)
-                .fetch_optional(&mut *tx)
-                .await;
-            if chunk_result.is_err() {
-                error!("Failed to read next chunk from Large Object {:?}: {}", &metadata.oid, chunk_result.unwrap_err());
-                break;
-            }
-            match chunk_result.unwrap() {
-                Some(chunk) => {
-                    if chunk.is_empty() {
-                        break;
-                    }
-                    yield chunk;
-                },
-                None => {
-                    break;
-                }
-            }
-        }
-        let _ = query("SELECT lo_close($1)")
-            .bind(lo_fd)
-            .execute(&mut *tx)
-            .await
-            .inspect_err(|e| warn!("Failed to close Large Object {:?}: {e}", metadata.oid));
-        let _ = tx.commit()
-            .await
-            .inspect_err(|e| warn!("Failed to commit transaction: {e}"));
-    };
-
-    Ok(MediaStream::from_stream(media_type, stream))
 }
 
 impl LoginSession {

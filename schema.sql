@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS activity (
     amount real NOT NULL
 );
 
--- Blog posts and media blobs
+-- Blog posts
 
 CREATE TABLE IF NOT EXISTS post (
     id bigserial PRIMARY KEY,
@@ -167,14 +167,6 @@ CREATE TABLE IF NOT EXISTS post_read (
     PRIMARY KEY (person_id, post_id)
 );
 CREATE INDEX IF NOT EXISTS post_read_post_id_idx ON post_read (post_id);
-
-CREATE TABLE IF NOT EXISTS blobs (
-    id text NOT NULL PRIMARY KEY,
-    mime_type text NOT NULL,
-    oid oid NOT NULL UNIQUE,
-    created timestamptz NOT NULL,
-    size int8 NOT NULL
-);
 
 CREATE TABLE IF NOT EXISTS poll (
     id bigserial PRIMARY KEY,
