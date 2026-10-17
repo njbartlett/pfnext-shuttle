@@ -17,7 +17,7 @@
             </div>
             <div class="col-md">
               <label for="searchRole" class="form-label">Role</label>
-              <input id="searchRole" v-model="criteria.role" type="search" class="form-control" placeholder="e.g. member, trainer, admin" autocomplete="off">
+              <input id="searchRole" v-model="criteria.role" type="search" class="form-control" placeholder="e.g. member, limited-member, trainer, editor, admin" autocomplete="off">
             </div>
             <div class="col-md-auto">
               <button type="submit" class="btn btn-primary" :disabled="!hasCriteria || searching"><i class="bi bi-search"></i>&nbsp;Search</button>
@@ -125,7 +125,10 @@
                       </span>
                       <div class="input-group my-2 p-0">
                         <span class="input-group-text">+</span>
-                        <input v-model="newRole" class="form-control" type="text" placeholder="New role name" :class="{ 'is-invalid': newRoleError }">
+                        <input v-model="newRole" class="form-control" type="text" placeholder="New role name" list="knownRoles" :class="{ 'is-invalid': newRoleError }">
+                        <datalist id="knownRoles">
+                          <option v-for="role in KNOWN_ROLES" :key="role" :value="role">{{ ROLE_DESCRIPTIONS[role] }}</option>
+                        </datalist>
                         <button type="button" class="btn btn-outline-primary" :disabled="!newRoleReady" @click.prevent="addRole">Add Role</button>
                         <div class="invalid-feedback">{{ newRoleError }}</div>
                       </div>
@@ -157,6 +160,15 @@ import { useDirtyTracking } from '@/composables/useDirtyTracking'
 import { tryApi } from '@/stores/apiError'
 
 const ROLE_PATTERN = /^[a-z0-9-]+$/
+// Roles the site acts on, suggested when adding one; any other name may be used
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+  member: 'Unlimited sessions',
+  'limited-member': 'One session per week without using credits',
+  trainer: 'Runs sessions',
+  editor: 'Writes, edits and deletes blog posts',
+  admin: 'Full access'
+}
+const KNOWN_ROLES = Object.keys(ROLE_DESCRIPTIONS)
 
 const criteria = reactive({ name: '', email: '', role: '' })
 const results = ref<UserRecord[]>([])

@@ -848,4 +848,75 @@ mod tests {
         let reads: i64 = query_scalar("SELECT COUNT(*) FROM post_read").fetch_one(&pool).await.unwrap();
         assert_eq!(0, reads);
     }
+
+    #[test]
+    fn test_editors_are_not_admins() {
+        let login = |roles: &str| LoginSession { roles: crate::loginsession::Roles::parse(roles), ..login_without_roles() };
+        assert!(login("editor").is_editor());
+        assert!(!login("editor").is_admin());
+        assert!(login("admin").is_editor());
+        assert!(!login("member").is_editor());
+        assert!(!login("trainer").is_editor());
+    }
+
+    fn login_without_roles() -> LoginSession {
+        LoginSession {
+            sessionid: "xxx".to_string(), uid: 0, name: "x".to_string(), email: "x@example.com".to_string(),
+            roles: crate::loginsession::Roles::parse(""), status: None, loggedin: None, loggedin_from: None,
+            expiry: Utc::now().fixed_offset()
+        }
+    }
+
+    fn save_post(title: &str, content: &str, published: Option<DateTime<FixedOffset>>) -> Json<SavePost> {
+        Json(SavePost { title: title.to_string(), content: content.to_string(), published })
+    }
+
+    async fn post_titled(pool: &PgPool, title: &str) -> Option<PostFull> {
+        PostFull::query_by_title(pool, None, title).await.unwrap()
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_editor_manages_posts(pool: PgPool) {
+        let editor = find_user_login_by_name(&pool, "user1", "member,editor").await;
+
+        // Create a draft, which only editors can list
+        post_post(State::from(&pool), editor.clone(), save_post("Draft", "<p>one</p>", None)).await.unwrap();
+        let draft = post_titled(&pool, "Draft").await.unwrap();
+        assert_eq!(editor.uid, draft.author_id);
+        let all = list_posts(State::from(&pool), Some(editor.clone()), Some(true)).await.unwrap().0;
+        assert_eq!(vec!["Draft"], all.iter().map(|p| p.title.as_str()).collect::<Vec<_>>());
+
+        // Edit every field, on its own post and on the admin's
+        let published = Some(Utc::now().fixed_offset() - chrono::Days::new(1));
+        put_post(State::from(&pool), editor.clone(), draft.id, save_post("Published", "<p>two</p>", published)).await.unwrap();
+        let edited = post_titled(&pool, "Published").await.unwrap();
+        assert_eq!(("<p>two</p>", published.map(|p| p.timestamp())), (edited.content.as_str(), edited.published_at.map(|p| p.timestamp())));
+
+        let admins = create_published_post(&pool, "Admin's post").await;
+        put_post(State::from(&pool), editor.clone(), admins, save_post("Admin's post, edited", "<p>three</p>", None)).await.unwrap();
+        let edited = post_titled(&pool, "Admin's post, edited").await.unwrap();
+        assert_eq!((editor.uid, None), (edited.last_editor_id, edited.published_at));
+
+        // Delete both
+        delete_post(State::from(&pool), editor.clone(), draft.id).await.unwrap();
+        delete_post(State::from(&pool), editor.clone(), admins).await.unwrap();
+        assert!(list_posts(State::from(&pool), Some(editor), Some(true)).await.unwrap().0.is_empty());
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_members_cannot_manage_posts(pool: PgPool) {
+        let id = create_published_post(&pool, "Post").await;
+        for roles in ["member", "trainer"] {
+            let login = find_user_login_by_name(&pool, "user1", roles).await;
+            let forbidden = |result: Result<_, ApiError>| matches!(result, Err(ApiError(status, _)) if status == Status::Forbidden);
+
+            assert!(forbidden(post_post(State::from(&pool), login.clone(), save_post("New", "", None)).await.map(|_| ())), "{roles}");
+            assert!(forbidden(put_post(State::from(&pool), login.clone(), id, save_post("Changed", "", None)).await.map(|_| ())), "{roles}");
+            assert!(forbidden(delete_post(State::from(&pool), login.clone(), id).await.map(|_| ())), "{roles}");
+            assert!(forbidden(list_posts(State::from(&pool), Some(login), Some(true)).await.map(|_| ())), "{roles}");
+        }
+        let anonymous = list_posts(State::from(&pool), None, Some(true)).await.map(|_| ());
+        assert!(matches!(anonymous, Err(ApiError(status, _)) if status == Status::Unauthorized));
+        assert_eq!("Post", post_titled(&pool, "Post").await.unwrap().title);
+    }
 }
