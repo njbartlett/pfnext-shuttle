@@ -275,6 +275,9 @@ export interface PostSummary {
   last_edited_at: string
   // null for an unpublished draft
   published_at: string | null
+  // When the logged-in user first read the post: null if they have not, and
+  // always null when nobody is logged in
+  read_at: string | null
 }
 
 export interface Post extends PostSummary {

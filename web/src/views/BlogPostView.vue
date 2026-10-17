@@ -53,11 +53,11 @@
 // page itself is rendered here.
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ApiError, deletePost, displayDayMonthYear, getPostByTitle, postTitle, type Post } from '@pfnext/shared'
+import { ApiError, deletePost, displayDayMonthYear, getPostByTitle, markPostRead, postTitle, type Post } from '@pfnext/shared'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import PageTitle from '@/components/PageTitle.vue'
 import { SITE_NAME } from '@/app/site'
-import { isEditor } from '@/stores/auth'
+import { isEditor, isLoggedIn } from '@/stores/auth'
 import { reportApiError, tryApi } from '@/stores/apiError'
 
 const route = useRoute()
@@ -80,6 +80,7 @@ async function load() {
   try {
     post.value = await getPostByTitle(postTitleValue)
     document.title = `${post.value.title} – ${SITE_NAME}`
+    recordRead(post.value)
   } catch (error) {
     post.value = null
     if (error instanceof ApiError && error.status === 404) {
@@ -87,6 +88,15 @@ async function load() {
     } else {
       reportApiError(error)
     }
+  }
+}
+
+// Logged-in readers' reads are recorded so the list can show what is new to
+// them. A failure only means the post stays marked unread, so it is not
+// reported.
+function recordRead(readPost: Post) {
+  if (isLoggedIn.value && readPost.read_at === null) {
+    markPostRead(readPost.id).catch((error: unknown) => console.warn('Failed to record post read', error))
   }
 }
 

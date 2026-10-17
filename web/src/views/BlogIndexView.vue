@@ -19,6 +19,7 @@
         <div class="ms-2 me-auto">
           <div class="fw-bold fs-5">
             <RouterLink :to="{ name: 'blog_post', params: { location: postLocation(post.title) } }" class="stretched-link">{{ post.title }}</RouterLink>
+            <span v-if="isUnread(post)" class="badge rounded-pill text-bg-primary align-middle ms-2 fs-6">New</span>
           </div>
           By {{ post.author_name }}
           <span v-if="post.published_at" class="fst-italic">on {{ displayDayMonthYear(post.published_at) }}</span>
@@ -36,7 +37,7 @@ import { computed, ref, watch } from 'vue'
 import { displayDayMonthYear, listPosts, postLocation, type PostSummary } from '@pfnext/shared'
 import PageTitle from '@/components/PageTitle.vue'
 import { useQueryState } from '@/composables/useQueryState'
-import { isEditor } from '@/stores/auth'
+import { isEditor, isLoggedIn } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
 
 const ALL_POSTS_MODE = 'allposts'
@@ -48,6 +49,11 @@ const loaded = ref(false)
 // Only editors may list unpublished posts; for anyone else the mode is ignored
 const showAll = computed(() => isEditor.value && query.get('mode') === ALL_POSTS_MODE)
 
+// Only logged-in users' reads are tracked, and drafts are not news
+function isUnread(post: PostSummary): boolean {
+  return isLoggedIn.value && post.published_at !== null && post.read_at === null
+}
+
 async function load() {
   const result = await tryApi(() => listPosts(showAll.value))
   if (result) {
@@ -56,5 +62,6 @@ async function load() {
   loaded.value = true
 }
 
-watch(showAll, load, { immediate: true })
+// Reload on login and logout too: read times are per user
+watch([showAll, isLoggedIn], load, { immediate: true })
 </script>

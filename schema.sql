@@ -158,6 +158,15 @@ CREATE TABLE IF NOT EXISTS post (
     content text NOT NULL
 );
 
+-- When each member first read each post; anonymous reads are not recorded
+CREATE TABLE IF NOT EXISTS post_read (
+    person_id bigint NOT NULL REFERENCES person ON DELETE CASCADE,
+    post_id bigint NOT NULL REFERENCES post ON DELETE CASCADE,
+    read_at timestamptz NOT NULL,
+    PRIMARY KEY (person_id, post_id)
+);
+CREATE INDEX IF NOT EXISTS post_read_post_id_idx ON post_read (post_id);
+
 CREATE TABLE IF NOT EXISTS blobs (
     id text NOT NULL PRIMARY KEY,
     mime_type text NOT NULL,

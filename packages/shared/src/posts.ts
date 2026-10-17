@@ -31,6 +31,12 @@ export async function deletePost(postId: number): Promise<void> {
   await apiRequest<void>(`/posts/${postId}`, { method: 'DELETE' })
 }
 
+// Logged-in users only: records that the user has read the post. Fetching a
+// post does not, as the editor fetches it too. Repeats keep the first read.
+export async function markPostRead(postId: number): Promise<void> {
+  await apiRequest<void>(`/posts/${postId}/read`, { method: 'PUT' })
+}
+
 // The last path segment of a post's page, in decoded form: the router
 // encodes it when building the URL and decodes it when reading the params
 export function postLocation(title: string): string {

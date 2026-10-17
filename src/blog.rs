@@ -39,7 +39,7 @@ const MAX_BLOB_SIZE_KIBIBYTES: usize = 512;
 const DESCRIPTION_CHARS: usize = 200;
 
 pub fn api_routes() -> Vec<Route> {
-    routes![list_posts, get_post, get_post_by_title, post_post, put_post, delete_post, post_blob]
+    routes![list_posts, get_post, get_post_by_title, post_post, put_post, delete_post, put_post_read, post_blob]
 }
 
 pub fn blob_routes() -> Vec<Route> {
@@ -62,20 +62,27 @@ struct PostSummary {
     last_editor_name: String,
     last_editor_email: String,
     last_edited_at: DateTime<FixedOffset>,
-    published_at: Option<DateTime<FixedOffset>>
+    published_at: Option<DateTime<FixedOffset>>,
+    /// When the logged-in reader first read the post; always None for anonymous readers
+    read_at: Option<DateTime<FixedOffset>>
 }
 impl PostSummary {
+    /// `reader_id` is the logged-in reader, whose read times are included
     async fn query_list<Tz: TimeZone>(
         pool: &PgPool,
+        reader_id: Option<i64>,
         published_after: Option<&DateTime<Tz>>,
         published_before: Option<&DateTime<Tz>>
     ) -> Result<Vec<Self>, sqlx::Error> {
         let mut qb = QueryBuilder::new("SELECT p.id, p.title, p.published_at,
                 p.author_id, a.name AS author_name, a.email AS author_email, p.created_at,
-                p.last_editor_id, l.name AS last_editor_name, l.email AS last_editor_email, p.last_edited_at
+                p.last_editor_id, l.name AS last_editor_name, l.email AS last_editor_email, p.last_edited_at,
+                r.read_at
             FROM post AS p
             JOIN person AS a ON p.author_id = a.id
-            JOIN person AS l ON p.last_editor_id = l.id");
+            JOIN person AS l ON p.last_editor_id = l.id
+            LEFT JOIN post_read AS r ON r.post_id = p.id AND r.person_id = ");
+        qb.push_bind(reader_id);
         let mut wc = WhereClause::init();
 
         if let Some(published_after) = published_after {
@@ -105,27 +112,34 @@ struct PostFull {
     last_editor_email: String,
     last_edited_at: DateTime<FixedOffset>,
     published_at: Option<DateTime<FixedOffset>>,
+    /// When the logged-in reader first read the post; always None for anonymous readers
+    read_at: Option<DateTime<FixedOffset>>,
     content: String
 }
 impl PostFull {
+    /// $1 is the reader's person id, or NULL for an anonymous reader
     const BASE_QUERY: &str = "SELECT p.id, p.title, p.published_at, p.content,
                     p.author_id, a.name AS author_name, a.email AS author_email, p.created_at,
-                    p.last_editor_id, l.name AS last_editor_name, l.email AS last_editor_email, p.last_edited_at
+                    p.last_editor_id, l.name AS last_editor_name, l.email AS last_editor_email, p.last_edited_at,
+                    r.read_at
                 FROM post AS p
                 JOIN person AS a ON p.author_id = a.id
-                JOIN person AS l ON p.last_editor_id = l.id";
-    async fn query_by_id(pool: &PgPool, id: i64) -> Result<Option<Self>, sqlx::Error> {
+                JOIN person AS l ON p.last_editor_id = l.id
+                LEFT JOIN post_read AS r ON r.post_id = p.id AND r.person_id = $1";
+    async fn query_by_id(pool: &PgPool, reader_id: Option<i64>, id: i64) -> Result<Option<Self>, sqlx::Error> {
         let mut query = Self::BASE_QUERY.to_string();
-        query.push_str(" WHERE p.id = $1");
+        query.push_str(" WHERE p.id = $2");
         query_as(&query)
+            .bind(reader_id)
             .bind(id)
             .fetch_optional(pool)
             .await
     }
-    async fn query_by_title(pool: &PgPool, title: &str) -> Result<Option<Self>, sqlx::Error> {
+    async fn query_by_title(pool: &PgPool, reader_id: Option<i64>, title: &str) -> Result<Option<Self>, sqlx::Error> {
         let mut query = Self::BASE_QUERY.to_string();
-        query.push_str(" WHERE p.title = $1");
+        query.push_str(" WHERE p.title = $2");
         query_as(&query)
+            .bind(reader_id)
             .bind(title)
             .fetch_optional(pool)
             .await
@@ -136,7 +150,7 @@ impl PostFull {
         let title_opt = location.strip_suffix(".html")
             .and_then(|s| urlencoding::decode(s).ok());
         match title_opt {
-            Some(title) => Ok(Self::query_by_title(pool, &title).await?),
+            Some(title) => Ok(Self::query_by_title(pool, None, &title).await?),
             None => Ok(None)
         }
     }
@@ -167,7 +181,7 @@ impl PostFull {
             id, title, content,
             author_id, author_name: author_name.clone(), author_email: author_email.clone(), created_at: now,
             last_editor_id: author_id, last_editor_name: author_name, last_editor_email: author_email, last_edited_at: now,
-            published_at: published
+            published_at: published, read_at: None
         })
     }
     async fn save(&self, pool: &PgPool) -> Result<(), sqlx::Error> {
@@ -198,6 +212,26 @@ impl PostFull {
     }
 }
 
+/// Records that the person has read the post, keeping the time of the first
+/// read. Fails with RowNotFound if there is no such post.
+async fn record_read(pool: &PgPool, person_id: i64, post_id: i64) -> Result<(), sqlx::Error> {
+    let post_exists: bool = query_scalar("WITH inserted AS (
+                INSERT INTO post_read (person_id, post_id, read_at)
+                SELECT $1, id, NOW() FROM post WHERE id = $2
+                ON CONFLICT DO NOTHING
+            )
+            SELECT EXISTS (SELECT 1 FROM post WHERE id = $2)")
+        .bind(person_id)
+        .bind(post_id)
+        .fetch_one(pool)
+        .await?;
+    if post_exists {
+        Ok(())
+    } else {
+        Err(sqlx::Error::RowNotFound)
+    }
+}
+
 fn require_editor(login: &LoginSession) -> Result<(), ApiError> {
     if login.is_editor() {
         Ok(())
@@ -224,14 +258,17 @@ async fn list_posts(
     }
     let published_before = if all { None } else { Some(Utc::now().fixed_offset()) };
 
-    let posts = PostSummary::query_list(pool.inner(), None, published_before.as_ref()).await
+    let reader_id = login.as_ref().map(|l| l.uid);
+    let posts = PostSummary::query_list(pool.inner(), reader_id, None, published_before.as_ref()).await
         .map_err(to_internal_server_err)?;
     Ok(Json(posts))
 }
 
+/// Readable by anyone; for a logged-in reader `read_at` says whether they
+/// have read it before. Reading does not record a read: see `put_post_read`.
 #[get("/posts/<id>")]
-async fn get_post(pool: &State<PgPool>, id: i64) -> Result<Json<PostFull>, ApiError> {
-    PostFull::query_by_id(pool, id).await
+async fn get_post(pool: &State<PgPool>, login: Option<LoginSession>, id: i64) -> Result<Json<PostFull>, ApiError> {
+    PostFull::query_by_id(pool, login.map(|l| l.uid), id).await
         .map_err(to_internal_server_err)?
         .map(Json)
         .ok_or_else(not_found)
@@ -240,8 +277,8 @@ async fn get_post(pool: &State<PgPool>, id: i64) -> Result<Json<PostFull>, ApiEr
 /// The post with exactly this title (the SPA's post page is addressed by
 /// title, as the legacy /blog/posts/<title>.html links were)
 #[get("/posts/by-title/<title>")]
-async fn get_post_by_title(pool: &State<PgPool>, title: &str) -> Result<Json<PostFull>, ApiError> {
-    PostFull::query_by_title(pool, title).await
+async fn get_post_by_title(pool: &State<PgPool>, login: Option<LoginSession>, title: &str) -> Result<Json<PostFull>, ApiError> {
+    PostFull::query_by_title(pool, login.map(|l| l.uid), title).await
         .map_err(to_internal_server_err)?
         .map(Json)
         .ok_or_else(not_found)
@@ -278,7 +315,7 @@ async fn put_post(
     update: Json<SavePost>
 ) -> Result<Json<PostFull>, ApiError> {
     require_editor(&login)?;
-    let mut post = PostFull::query_by_id(pool, id).await
+    let mut post = PostFull::query_by_id(pool, Some(login.uid), id).await
         .map_err(to_internal_server_err)?
         .ok_or_else(not_found)?;
 
@@ -301,13 +338,29 @@ async fn delete_post(
     id: i64
 ) -> Result<NoContent, ApiError> {
     require_editor(&login)?;
-    let post = PostFull::query_by_id(pool, id).await
+    let post = PostFull::query_by_id(pool, None, id).await
         .map_err(to_internal_server_err)?
         .ok_or_else(not_found)?;
     post.delete(pool)
         .await
         .map_err(to_internal_server_err)
         .map(|_| NoContent)
+}
+
+/// Marks the post as read by the logged-in user. Sent by the post page when
+/// a member opens it, rather than recorded by the GETs, which the editor
+/// also uses. Repeating it keeps the time of the first read.
+#[put("/posts/<id>/read")]
+async fn put_post_read(
+    pool: &State<PgPool>,
+    login: LoginSession,
+    id: i64
+) -> Result<NoContent, ApiError> {
+    match record_read(pool, login.uid, id).await {
+        Ok(()) => Ok(NoContent),
+        Err(sqlx::Error::RowNotFound) => Err(not_found()),
+        Err(e) => Err(to_internal_server_err(e))
+    }
 }
 
 /// The SPA shell for a post's page, with the post's Open Graph tags added so
@@ -667,6 +720,7 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
+    use crate::testcommon::find_user_login_by_name;
 
     fn post(title: &str, content: &str) -> PostFull {
         let now = Utc::now().fixed_offset();
@@ -674,7 +728,7 @@ mod tests {
             id: 7, title: title.to_string(), content: content.to_string(),
             author_id: 1, author_name: "admin".to_string(), author_email: "admin@example.com".to_string(), created_at: now,
             last_editor_id: 1, last_editor_name: "admin".to_string(), last_editor_email: "admin@example.com".to_string(), last_edited_at: now,
-            published_at: Some(now)
+            published_at: Some(now), read_at: None
         }
     }
 
@@ -721,5 +775,77 @@ mod tests {
     #[test]
     fn test_shell_without_head_is_unchanged() {
         assert_eq!(with_open_graph_tags("<p>x</p>", &post("t", ""), "b", "u"), "<p>x</p>");
+    }
+
+    async fn create_published_post(pool: &PgPool, title: &str) -> i64 {
+        let admin = find_user_login_by_name(pool, "admin", "admin").await;
+        let published = Some(Utc::now().fixed_offset() - chrono::Days::new(1));
+        PostFull::create(pool, title.to_string(), admin.uid, admin.name, admin.email, published, "<p>x</p>".to_string())
+            .await.unwrap()
+            .id
+    }
+
+    async fn list_read_at(pool: &PgPool, login: Option<LoginSession>) -> Vec<(String, Option<DateTime<FixedOffset>>)> {
+        list_posts(State::from(pool), login, None).await.unwrap().0
+            .into_iter()
+            .map(|p| (p.title, p.read_at))
+            .collect()
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_reads_are_tracked_per_member(pool: PgPool) {
+        let first = create_published_post(&pool, "First").await;
+        create_published_post(&pool, "Second").await;
+        let user1 = find_user_login_by_name(&pool, "user1", "member").await;
+        let user2 = find_user_login_by_name(&pool, "user2", "member").await;
+
+        put_post_read(State::from(&pool), user1.clone(), first).await.unwrap();
+
+        let for_user1 = list_read_at(&pool, Some(user1.clone())).await;
+        let read: Vec<&str> = for_user1.iter().filter(|(_, r)| r.is_some()).map(|(t, _)| t.as_str()).collect();
+        assert_eq!(vec!["First"], read);
+        assert!(list_read_at(&pool, Some(user2.clone())).await.iter().all(|(_, r)| r.is_none()));
+        assert!(list_read_at(&pool, None).await.iter().all(|(_, r)| r.is_none()));
+
+        assert!(get_post(State::from(&pool), Some(user1), first).await.unwrap().0.read_at.is_some());
+        assert!(get_post(State::from(&pool), Some(user2), first).await.unwrap().0.read_at.is_none());
+        // Anonymous readers can still read the post
+        let anonymous = get_post_by_title(State::from(&pool), None, "First").await.unwrap().0;
+        assert_eq!("<p>x</p>", anonymous.content);
+        assert!(anonymous.read_at.is_none());
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_rereading_keeps_the_first_read(pool: PgPool) {
+        let id = create_published_post(&pool, "Post").await;
+        let user1 = find_user_login_by_name(&pool, "user1", "member").await;
+
+        put_post_read(State::from(&pool), user1.clone(), id).await.unwrap();
+        let first_read = get_post(State::from(&pool), Some(user1.clone()), id).await.unwrap().0.read_at;
+        put_post_read(State::from(&pool), user1.clone(), id).await.unwrap();
+        let after_reread = get_post(State::from(&pool), Some(user1), id).await.unwrap().0.read_at;
+
+        assert!(first_read.is_some());
+        assert_eq!(first_read, after_reread);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_reading_a_missing_post_is_not_found(pool: PgPool) {
+        let user1 = find_user_login_by_name(&pool, "user1", "member").await;
+        let err = put_post_read(State::from(&pool), user1, 999).await.unwrap_err();
+        assert_eq!(Status::NotFound, err.0);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_deleting_a_post_deletes_its_reads(pool: PgPool) {
+        let id = create_published_post(&pool, "Post").await;
+        let user1 = find_user_login_by_name(&pool, "user1", "member").await;
+        let admin = find_user_login_by_name(&pool, "admin", "admin").await;
+        put_post_read(State::from(&pool), user1, id).await.unwrap();
+
+        delete_post(State::from(&pool), admin, id).await.unwrap();
+
+        let reads: i64 = query_scalar("SELECT COUNT(*) FROM post_read").fetch_one(&pool).await.unwrap();
+        assert_eq!(0, reads);
     }
 }
