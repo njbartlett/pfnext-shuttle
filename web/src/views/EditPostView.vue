@@ -73,6 +73,7 @@ import 'tinymce/plugins/advlist'
 import 'tinymce/plugins/image'
 import 'tinymce/plugins/link'
 import 'tinymce/plugins/lists'
+import 'tinymce/plugins/emoticons'
 import {
   ApiError, apiBaseUrl, createPost, getPostByTitle, postLocation, postTitle, updatePost, type Post, type SavePost
 } from '@pfnext/shared'
@@ -111,8 +112,11 @@ const valid = computed(() => Object.values(errors.value).every((error) => error 
 const editorInit = computed(() => {
   const dark = theme.value === 'dark'
   return {
-    plugins: 'advlist link image lists',
+    plugins: 'advlist link image lists emoticons',
     menubar: 'edit view insert format',
+    // TinyMCE's default toolbar, plus bulleted and numbered lists (the
+    // advlist plugin adds a choice of bullet and numbering styles)
+    toolbar: 'undo redo | styles | bold italic | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent',
     placeholder: 'Type here...',
     height: 500,
     promotion: false,
