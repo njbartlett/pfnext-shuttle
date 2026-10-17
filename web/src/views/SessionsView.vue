@@ -12,6 +12,26 @@
       <i class="bi bi-info-circle"></i>&nbsp;There is an open poll: <RouterLink :to="{ path: '/polls.html', hash: '#poll-' + entry.poll.id }" class="alert-link">{{ entry.poll.question }}</RouterLink>
     </div>
 
+    <!-- Unread blog posts, newest first. A single post sits on the heading's
+         line; several are listed beneath it. -->
+    <div v-if="unreadPosts.length > 0" class="alert alert-info unread-posts" role="alert">
+      <template v-if="!singleUnreadPost"><i class="bi bi-newspaper"></i>&nbsp;There are new blog posts:</template>
+      <ul class="list-unstyled mb-0" :class="{ 'mt-2': !singleUnreadPost }">
+        <li v-for="post in shownUnreadPosts" :key="post.id" class="d-flex align-items-center gap-2" :class="{ 'mt-1': !singleUnreadPost }">
+          <span class="me-auto">
+            <template v-if="singleUnreadPost"><i class="bi bi-newspaper"></i>&nbsp;There is a new blog post: </template>
+            <RouterLink :to="{ name: 'blog_post', params: { location: postLocation(post.title) } }" class="alert-link">{{ post.title }}</RouterLink>
+          </span>
+          <button type="button" class="btn btn-outline-primary btn-sm text-nowrap" :disabled="markingRead.has(post.id)" @click="markRead(post)">
+            <i class="bi bi-check2"></i> Mark as Read
+          </button>
+        </li>
+      </ul>
+      <div v-if="hiddenUnreadCount > 0" class="mt-2">
+        &hellip;and <RouterLink :to="{ name: 'blog' }" class="alert-link">{{ hiddenUnreadCount }} more</RouterLink>.
+      </div>
+    </div>
+
     <div v-if="!user" class="alert alert-light" role="alert">
       You are not logged in.
       <RouterLink :to="loginRoute(route.fullPath)" role="button" class="btn btn-success rounded-pill mx-2">Login to Book</RouterLink>
@@ -229,8 +249,8 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   addDays, bookSession, cancelBooking, deleteSession, displayDate, displayDateRange, displayFullDate, displayLongDate, displayRelativeDay,
-  displayVenueDate, displayVenueTime, getUserRecord, isPast, isSameDay, joinWaitlist, leaveWaitlist, listPolls, listSessions, saveFeedback,
-  startOfDay, startOfWeek, type PollWithVotes, type Session, type UserRecord
+  displayVenueDate, displayVenueTime, getUserRecord, isPast, isSameDay, joinWaitlist, leaveWaitlist, listPolls, listPosts, listSessions,
+  markPostRead, postLocation, saveFeedback, startOfDay, startOfWeek, type PollWithVotes, type PostSummary, type Session, type UserRecord
 } from '@pfnext/shared'
 import BookingCountPill from '@/components/BookingCountPill.vue'
 import BsModal from '@/components/BsModal.vue'
@@ -273,6 +293,9 @@ const narrowScreen = useMediaQuery(NARROW_SCREEN_QUERY)
 const sessions = ref<Session[]>([])
 const userRecord = ref<UserRecord | null>(null)
 const polls = ref<PollWithVotes[]>([])
+const unreadPosts = ref<PostSummary[]>([])
+// Posts whose Mark as Read request is in flight
+const markingRead = reactive(new Set<number>())
 const viewMode = ref<ViewMode>(readViewMode())
 
 // The period shown is a week, or a single day for the calendar on a narrow
@@ -318,6 +341,13 @@ const slideFrame = ref<HTMLElement | null>(null)
 useSwipe(slideFrame, { onSwipeLeft: () => page(1), onSwipeRight: () => page(-1) })
 
 const unvotedPolls = computed(() => polls.value.filter((entry) => entry.poll.open && entry.votes.length === 0))
+
+// Members who have never read the blog have a backlog of every past post, so
+// only the newest few are listed
+const MAX_UNREAD_POSTS_SHOWN = 3
+const singleUnreadPost = computed(() => unreadPosts.value.length === 1)
+const shownUnreadPosts = computed(() => unreadPosts.value.slice(0, MAX_UNREAD_POSTS_SHOWN))
+const hiddenUnreadCount = computed(() => unreadPosts.value.length - shownUnreadPosts.value.length)
 
 interface CalendarDay {
   index: number
@@ -436,6 +466,28 @@ async function loadPolls() {
     return
   }
   polls.value = (await tryApi(() => listPolls({ personId: user.value!.id }))) ?? []
+}
+
+// Published posts the logged-in user has not read; listPosts is newest first
+async function loadUnreadPosts() {
+  if (!user.value) {
+    unreadPosts.value = []
+    return
+  }
+  const posts = (await tryApi(() => listPosts())) ?? []
+  unreadPosts.value = posts.filter((post) => post.read_at === null)
+}
+
+async function markRead(post: PostSummary) {
+  markingRead.add(post.id)
+  const done = await tryApi(async () => {
+    await markPostRead(post.id)
+    return true
+  })
+  markingRead.delete(post.id)
+  if (done) {
+    unreadPosts.value = unreadPosts.value.filter((p) => p.id !== post.id)
+  }
 }
 
 function selectPeriod(offset: number) {
@@ -585,14 +637,19 @@ watch(viewMode, (mode) => {
 watch(user, () => {
   void loadUser()
   void loadPolls()
+  void loadUnreadPosts()
 })
 
 void loadSessions()
 void loadUser()
 void loadPolls()
+void loadUnreadPosts()
 
-// Re-check polls when the page is restored from the back/forward cache
-const onPageReveal = () => void loadPolls()
+// Re-check polls and posts when the page is restored from the back/forward cache
+const onPageReveal = () => {
+  void loadPolls()
+  void loadUnreadPosts()
+}
 window.addEventListener('pagereveal', onPageReveal)
 onBeforeUnmount(() => window.removeEventListener('pagereveal', onPageReveal))
 </script>

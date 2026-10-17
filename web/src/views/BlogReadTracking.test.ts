@@ -9,29 +9,10 @@ import BlogIndexView from './BlogIndexView.vue'
 import BlogPostView from './BlogPostView.vue'
 import { apiError } from '@/stores/apiError'
 import { setUser } from '@/stores/auth'
-import { MEMBER } from '@/testing/fixtures'
+import { makePost, MEMBER } from '@/testing/fixtures'
 import { mountAt } from '@/testing/mount'
 
 vi.mock('@pfnext/shared', () => import('@/testing/sharedMock').then((m) => m.mockedShared()))
-
-function makePost(overrides: Partial<Post> = {}): Post {
-  return {
-    id: 5,
-    title: 'Park Run',
-    author_id: 1,
-    author_name: 'admin',
-    author_email: 'admin@example.com',
-    created_at: '2025-06-01T09:00:00Z',
-    last_editor_id: 1,
-    last_editor_name: 'admin',
-    last_editor_email: 'admin@example.com',
-    last_edited_at: '2025-06-01T09:00:00Z',
-    published_at: '2025-06-01T09:00:00Z',
-    read_at: null,
-    content: '<p>We ran.</p>',
-    ...overrides
-  }
-}
 
 let wrapper: VueWrapper | undefined
 

@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import type { Router } from 'vue-router'
-import { getUserRecord, listBookings, listPolls, listSessions, login, logout } from '@pfnext/shared'
+import { getUserRecord, listBookings, listPolls, listPosts, listSessions, login, logout } from '@pfnext/shared'
 import App from './App.vue'
 import { SITE_NAME } from '@/app/site'
 import { apiError } from '@/stores/apiError'
@@ -33,6 +33,7 @@ beforeEach(() => {
   vi.mocked(listSessions).mockResolvedValue([])
   vi.mocked(getUserRecord).mockResolvedValue(makeUserRecord(MEMBER))
   vi.mocked(listPolls).mockResolvedValue([])
+  vi.mocked(listPosts).mockResolvedValue([])
 })
 
 afterEach(() => {

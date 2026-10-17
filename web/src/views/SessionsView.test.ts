@@ -6,12 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, type BaseWrapper, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import type { Router } from 'vue-router'
 import {
-  ApiError, bookSession, cancelBooking, getUserRecord, joinWaitlist, listPolls, listSessions, type Session
+  ApiError, bookSession, cancelBooking, getUserRecord, joinWaitlist, listPolls, listPosts, listSessions, markPostRead, type Session
 } from '@pfnext/shared'
 import SessionsView from './SessionsView.vue'
 import { apiError, clearApiError } from '@/stores/apiError'
 import { setUser } from '@/stores/auth'
-import { makeSession, makeUserRecord, MEMBER, NOW } from '@/testing/fixtures'
+import { makePost, makeSession, makeUserRecord, MEMBER, NOW } from '@/testing/fixtures'
 import { mountAt } from '@/testing/mount'
 
 vi.mock('@pfnext/shared', () => import('@/testing/sharedMock').then((m) => m.mockedShared()))
@@ -114,6 +114,7 @@ beforeEach(() => {
   vi.mocked(listSessions).mockResolvedValue([])
   vi.mocked(getUserRecord).mockResolvedValue(makeUserRecord(MEMBER))
   vi.mocked(listPolls).mockResolvedValue([])
+  vi.mocked(listPosts).mockResolvedValue([])
   setUser(MEMBER)
 })
 
@@ -135,6 +136,8 @@ describe('SessionsView logged out', () => {
     expect(listSessions).toHaveBeenCalledWith(new Date('2025-06-02T00:00:00Z'), new Date('2025-06-09T00:00:00Z'))
     expect(getUserRecord).not.toHaveBeenCalled()
     expect(listPolls).not.toHaveBeenCalled()
+    expect(listPosts).not.toHaveBeenCalled()
+    expect(wrapper.find('.unread-posts').exists()).toBe(false)
 
     expect(wrapper.text()).toContain('You are not logged in.')
     expect(wrapper.find('a.btn-success').attributes('href')).toBe('/login.html?return=/sessions.html')
@@ -173,6 +176,79 @@ describe('SessionsView alerts', () => {
     expect(alerts).toHaveLength(1)
     expect(alerts[0].text()).toContain('Which day suits?')
     expect(alerts[0].find('a').attributes('href')).toBe('/polls.html#poll-4')
+  })
+
+  it('lists unread blog posts below the polls, linking to each', async () => {
+    const poll = { id: 4, question: 'Which day suits?', limit_per_person: 1, description: null, open: true }
+    vi.mocked(listPolls).mockResolvedValue([{ poll, votes: [] }])
+    vi.mocked(listPosts).mockResolvedValue([
+      makePost({ id: 1, title: 'Park Run & Picnic' }),
+      makePost({ id: 2, title: 'Already read', read_at: '2025-06-02T10:00:00Z' })
+    ])
+    await mountSessions()
+
+    const alerts = wrapper.findAll('.alert-info')
+    expect(alerts).toHaveLength(2)
+    expect(alerts[1].classes()).toContain('unread-posts')
+    // One post shares the heading's line, with its button
+    const item = alerts[1].find('li')
+    expect(item.text()).toContain('There is a new blog post: Park Run & Picnic')
+    expect(item.find('button').text()).toBe('Mark as Read')
+    const links = alerts[1].findAll('li a')
+    expect(links.map((a) => a.text())).toEqual(['Park Run & Picnic'])
+    expect(links[0].attributes('href')).toBe('/blog/posts/Park%20Run%20&%20Picnic.html')
+  })
+
+  it('shows no blog alert when every post has been read', async () => {
+    vi.mocked(listPosts).mockResolvedValue([makePost({ read_at: '2025-06-02T10:00:00Z' })])
+    await mountSessions()
+    expect(wrapper.find('.unread-posts').exists()).toBe(false)
+  })
+
+  it('marks a post as read from the alert', async () => {
+    vi.mocked(listPosts).mockResolvedValue([makePost({ id: 1, title: 'First' }), makePost({ id: 2, title: 'Second' })])
+    vi.mocked(markPostRead).mockResolvedValue(undefined)
+    await mountSessions()
+
+    // Several posts are listed beneath the heading
+    expect(wrapper.find('.unread-posts').text()).toMatch(/^There are new blog posts:/)
+    expect(wrapper.find('.unread-posts li').text()).not.toContain('There are new blog posts')
+
+    await wrapper.findAll('.unread-posts button')[0].trigger('click')
+    await flushPromises()
+
+    expect(markPostRead).toHaveBeenCalledWith(1)
+    expect(wrapper.findAll('.unread-posts li a').map((a) => a.text())).toEqual(['Second'])
+    // The one left moves up onto the heading's line
+    expect(wrapper.find('.unread-posts li').text()).toContain('There is a new blog post: Second')
+
+    await wrapper.find('.unread-posts button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.unread-posts').exists()).toBe(false)
+  })
+
+  it('keeps a post listed if marking it read fails', async () => {
+    vi.mocked(listPosts).mockResolvedValue([makePost({ id: 1, title: 'First' })])
+    vi.mocked(markPostRead).mockRejectedValue(new ApiError(500, 'error', 'Database down'))
+    await mountSessions()
+
+    await wrapper.find('.unread-posts button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.unread-posts li a').map((a) => a.text())).toEqual(['First'])
+    expect(wrapper.find('.unread-posts button').attributes('disabled')).toBeUndefined()
+    expect(apiError.value).not.toBeNull()
+    clearApiError()
+  })
+
+  it('lists only the newest few unread posts, linking to the blog for the rest', async () => {
+    vi.mocked(listPosts).mockResolvedValue([1, 2, 3, 4, 5].map((id) => makePost({ id, title: `Post ${id}` })))
+    await mountSessions()
+
+    const alert = wrapper.find('.unread-posts')
+    expect(alert.findAll('li a').map((a) => a.text())).toEqual(['Post 1', 'Post 2', 'Post 3'])
+    expect(alert.text()).toContain('and 2 more')
+    expect(alert.findAll('a').at(-1)!.attributes('href')).toBe('/blog/index.html')
   })
 })
 

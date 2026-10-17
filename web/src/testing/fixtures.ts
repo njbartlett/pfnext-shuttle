@@ -1,7 +1,7 @@
 // Test data for component tests. The clock is pinned to a Wednesday in June
 // 2025 with vi.setSystemTime(NOW) so that "this week", "past" and countdowns
 // are deterministic; SESSION is the next morning.
-import type { LoggedInUser, Session, SessionLocation, SessionType, UserRecord } from '@pfnext/shared'
+import type { LoggedInUser, Post, Session, SessionLocation, SessionType, UserRecord } from '@pfnext/shared'
 
 export const NOW = new Date('2025-06-04T10:00:00Z')
 
@@ -58,6 +58,26 @@ export function makeSession(overrides: Partial<Session> = {}): Session {
     cost: 0,
     booking_deadline_duration_mins: 60,
     booking_deadline: '2025-06-05T08:00:00Z',
+    ...overrides
+  }
+}
+
+// A published post by the admin that the logged-in user has not read
+export function makePost(overrides: Partial<Post> = {}): Post {
+  return {
+    id: 5,
+    title: 'Park Run',
+    author_id: ADMIN.id,
+    author_name: ADMIN.name,
+    author_email: ADMIN.email,
+    created_at: '2025-06-01T09:00:00Z',
+    last_editor_id: ADMIN.id,
+    last_editor_name: ADMIN.name,
+    last_editor_email: ADMIN.email,
+    last_edited_at: '2025-06-01T09:00:00Z',
+    published_at: '2025-06-01T09:00:00Z',
+    read_at: null,
+    content: '<p>We ran.</p>',
     ...overrides
   }
 }
