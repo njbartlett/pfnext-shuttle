@@ -3,7 +3,7 @@ import type { VueWrapper } from '@vue/test-utils'
 import type { Session } from '@pfnext/shared'
 import SessionControls from './SessionControls.vue'
 import { setUser } from '@/stores/auth'
-import { ADMIN, makeSession, MEMBER, NOW, TRAINER } from '@/testing/fixtures'
+import { ADMIN, FULL_MEMBER, LIMITED_MEMBER, makeSession, MEMBER, NOW, TRAINER } from '@/testing/fixtures'
 import { mountAt } from '@/testing/mount'
 
 // The page the controls sit on; the admin tools link back to it
@@ -37,7 +37,7 @@ describe('SessionControls for a member', () => {
   beforeEach(() => setUser(MEMBER))
 
   it('offers to book a future session with a distant deadline', async () => {
-    const session = makeSession()
+    const session = makeSession({ cost: 2 })
     await mountControls(session)
     expect(buttonLabels()).toEqual(['Book'])
 
@@ -47,9 +47,27 @@ describe('SessionControls for a member', () => {
 
   it('shows the time left when the deadline is within three hours', async () => {
     await mountControls(
-      makeSession({ datetime: '2025-06-04T13:00:00Z', booking_deadline: '2025-06-04T12:00:00Z' })
+      makeSession({ cost: 2, datetime: '2025-06-04T13:00:00Z', booking_deadline: '2025-06-04T12:00:00Z' })
     )
     expect(wrapper.find('button').text()).toMatch(/^Book\swithin 2h 0m$/)
+  })
+
+  it('marks a free session on the Book button, after any countdown', async () => {
+    await mountControls(makeSession())
+    expect(wrapper.find('button').text()).toMatch(/^Book\s·\sFree$/)
+
+    await mountControls(
+      makeSession({ datetime: '2025-06-04T13:00:00Z', booking_deadline: '2025-06-04T12:00:00Z' })
+    )
+    expect(wrapper.find('button').text()).toMatch(/^Book\swithin 2h 0m\s·\sFree$/)
+  })
+
+  it('tells a pay-as-you-go member a free session needs no credits', async () => {
+    await mountControls(makeSession())
+    expect(wrapper.text()).toContain('No credits needed')
+
+    await mountControls(makeSession({ cost: 2 }))
+    expect(wrapper.text()).not.toContain('No credits needed')
   })
 
   it('refuses once the deadline has passed', async () => {
@@ -123,6 +141,34 @@ describe('SessionControls for a member', () => {
   })
 })
 
+describe('SessionControls by membership tier', () => {
+  it("tells a limited member a free session doesn't use their weekly session", async () => {
+    setUser(LIMITED_MEMBER)
+    await mountControls(makeSession())
+    expect(wrapper.text()).toContain("Doesn't use your weekly session")
+    expect(wrapper.text()).not.toContain('No credits needed')
+  })
+
+  it('drops the note once the session is booked or the deadline has passed', async () => {
+    setUser(LIMITED_MEMBER)
+    await mountControls(makeSession({ booked: true, booking_count: 2 }))
+    expect(wrapper.text()).not.toContain('weekly session')
+
+    await mountControls(
+      makeSession({ datetime: '2025-06-04T11:00:00Z', booking_deadline: '2025-06-04T09:00:00Z' })
+    )
+    expect(wrapper.text()).not.toContain('weekly session')
+  })
+
+  it('says nothing about cost to a full member', async () => {
+    setUser(FULL_MEMBER)
+    await mountControls(makeSession())
+    expect(wrapper.find('button').text()).toMatch(/^Book\s·\sFree$/)
+    expect(wrapper.text()).not.toContain('weekly session')
+    expect(wrapper.text()).not.toContain('credits')
+  })
+})
+
 describe('SessionControls for staff', () => {
   it('gives admins the tools menu, linking back to this page', async () => {
     setUser(ADMIN)
@@ -157,6 +203,7 @@ describe('SessionControls for staff', () => {
     await mountControls(makeSession({ trainer: { id: 99, name: 'someone', email: 'x@example.com', url: null } }))
 
     expect(wrapper.find('a.btn').exists()).toBe(false)
-    expect(buttonLabels()).toEqual(['Book'])
+    expect(buttonLabels()).toHaveLength(1)
+    expect(buttonLabels()[0]).toMatch(/^Book\s·\sFree$/)
   })
 })

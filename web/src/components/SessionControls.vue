@@ -38,7 +38,7 @@
           <button v-else type="button" class="btn btn-outline-primary btn-sm" @click="emit('join-waitlist', session)">Join Waitlist</button>
         </span>
         <button v-else type="button" class="btn btn-primary btn-sm" @click="emit('book', session)">
-          <span>Book</span><span v-if="isSoon(session.booking_deadline, DEADLINE_WARNING_MINUTES, now)">&nbsp;within {{ timeLeft }}</span>
+          <span>Book</span><span v-if="isSoon(session.booking_deadline, DEADLINE_WARNING_MINUTES, now)">&nbsp;within {{ timeLeft }}</span><span v-if="isFree">&nbsp;&middot;&nbsp;Free</span>
         </button>
       </span>
     </span>
@@ -57,6 +57,12 @@
       </ul>
     </div>
     <RouterLink v-else-if="isSessionTrainer" class="btn btn-outline-primary btn-sm" :to="toolRoute('attendance', { id: session.id })"><i class="bi bi-list-check"></i> Attendance</RouterLink>
+
+    <!-- What "free" means for this member's tier; full members need no
+         reassurance (see check_bookable in src/bookings.rs). A block child of
+         the root, not nested in the inline spans above: a block inside an
+         inline with a margin leaves an empty line box after it -->
+    <div v-if="freeNote" class="form-text text-success mt-0"><i class="bi bi-check-circle"></i>&nbsp;{{ freeNote }}</div>
   </div>
 </template>
 
@@ -68,7 +74,7 @@ import { computed } from 'vue'
 import { useRoute, type RouteLocationRaw } from 'vue-router'
 import { formatDuration, isFull, type Session } from '@pfnext/shared'
 import { isPastAt, isSoon } from '@/composables/useNow'
-import { isAdmin, isTrainer, user } from '@/stores/auth'
+import { isAdmin, isLimitedMember, isPayAsYouGo, isTrainer, user } from '@/stores/auth'
 
 const DEADLINE_WARNING_MINUTES = 180
 
@@ -95,4 +101,23 @@ const isSessionTrainer = computed(
 const timeLeft = computed(() =>
   formatDuration(new Date(props.session.booking_deadline).getTime() - props.now.getTime())
 )
+
+// Zero-cost sessions spend no credits and don't count as a limited member's
+// weekly session; worth saying while the member can still book one
+const isFree = computed(() => props.session.cost === 0)
+const canStillBook = computed(
+  () => !props.session.booked && !isPastAt(props.session.booking_deadline, props.now)
+)
+const freeNote = computed(() => {
+  if (!isFree.value || !canStillBook.value) {
+    return null
+  }
+  if (isLimitedMember.value) {
+    return "Doesn't use your weekly session"
+  }
+  if (isPayAsYouGo.value) {
+    return 'No credits needed'
+  }
+  return null
+})
 </script>

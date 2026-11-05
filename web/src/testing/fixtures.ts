@@ -7,6 +7,10 @@ export const NOW = new Date('2025-06-04T10:00:00Z')
 
 // The same accounts as src/fixtures/users.sql
 export const MEMBER: LoggedInUser = { id: 3, name: 'user1', email: 'user1@example.com', roles: [], status: null }
+// Membership tiers (see check_bookable in src/bookings.rs); MEMBER above has
+// no membership role, so books with pay-as-you-go credits
+export const FULL_MEMBER: LoggedInUser = { id: 4, name: 'full', email: 'full@example.com', roles: ['member'], status: null }
+export const LIMITED_MEMBER: LoggedInUser = { id: 5, name: 'limited', email: 'limited@example.com', roles: ['limited-member'], status: null }
 export const TRAINER: LoggedInUser = { id: 2, name: 'trainer', email: 'trainer@example.com', roles: ['trainer'], status: 'green' }
 export const ADMIN: LoggedInUser = { id: 1, name: 'admin', email: 'admin@example.com', roles: ['admin'], status: null }
 

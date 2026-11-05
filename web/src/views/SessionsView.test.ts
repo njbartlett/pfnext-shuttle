@@ -269,7 +269,7 @@ describe('SessionsView booking', () => {
     vi.mocked(bookSession).mockResolvedValue({ outcome: 'booked' })
     await mountSessions()
 
-    await buttonIn(card(), 'Book').trigger('click')
+    await buttonIn(card(), /^Book\s·\sFree$/).trigger('click')
     await flushPromises()
 
     expect(bookSession).toHaveBeenCalledWith(MEMBER.id, 7, 0, 0)
@@ -307,11 +307,11 @@ describe('SessionsView booking', () => {
     vi.mocked(bookSession).mockRejectedValue(new ApiError(400, 'error', 'No membership or credits'))
     await mountSessions()
 
-    await buttonIn(card(), 'Book').trigger('click')
+    await buttonIn(card(), /^Book\s·\sFree$/).trigger('click')
     await flushPromises()
 
     expect(apiError.value?.message).toBe('No membership or credits')
-    expect(buttonIn(card(), 'Book').exists()).toBe(true)
+    expect(buttonIn(card(), /^Book\s·\sFree$/).exists()).toBe(true)
     expect(card().find('.badge').text()).toBe('1')
     clearApiError()
   })
@@ -327,7 +327,7 @@ describe('SessionsView booking', () => {
     await flushPromises()
 
     expect(cancelBooking).toHaveBeenCalledWith(MEMBER.id, 7)
-    expect(buttonIn(card(), 'Book').exists()).toBe(true)
+    expect(buttonIn(card(), /^Book\s·\sFree$/).exists()).toBe(true)
     expect(card().find('.badge').text()).toBe('1')
   })
 

@@ -14,6 +14,12 @@ export const isAdmin = computed(() => hasRole('admin'))
 export const isTrainer = computed(() => hasRole('trainer'))
 // May write blog posts
 export const isEditor = computed(() => isAdmin.value || hasRole('editor'))
+// Membership tiers, as check_bookable in src/bookings.rs sees them: full
+// members book freely, limited members get one paid session a week, and
+// everyone else pays with credits
+export const isFullMember = computed(() => hasRole('member'))
+export const isLimitedMember = computed(() => hasRole('limited-member'))
+export const isPayAsYouGo = computed(() => isLoggedIn.value && !isFullMember.value && !isLimitedMember.value)
 
 function hasRole(role: string): boolean {
   return currentUser.value?.roles?.includes(role) ?? false

@@ -92,6 +92,7 @@
               <span v-else>{{ session.location.name }}</span>
             </span>
             <BookingCountPill :session="session" />
+            <FreeSessionPill :session="session" />
             <SessionRatings :session="session" />
           </td>
           <td v-if="user">
@@ -130,6 +131,7 @@
               <div class="d-flex align-items-center mb-1">
                 <strong>{{ displayVenueTime(session.datetime) }} {{ session.session_type.name }}</strong>
                 <BookingCountPill :session="session" class="ms-auto" />
+                <FreeSessionPill :session="session" class="ms-1" />
               </div>
               <div v-if="session.location">
                 <a v-if="session.location.url" :href="session.location.url" :class="{ 'link-secondary': isPast(session.datetime) }"><i class="bi bi-geo-alt-fill"></i>&nbsp;{{ session.location.name }}</a>
@@ -253,6 +255,7 @@ import {
   markPostRead, postLocation, saveFeedback, startOfDay, startOfWeek, type PollWithVotes, type PostSummary, type Session, type UserRecord
 } from '@pfnext/shared'
 import BookingCountPill from '@/components/BookingCountPill.vue'
+import FreeSessionPill from '@/components/FreeSessionPill.vue'
 import BsModal from '@/components/BsModal.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 import PagerBar from '@/components/PagerBar.vue'

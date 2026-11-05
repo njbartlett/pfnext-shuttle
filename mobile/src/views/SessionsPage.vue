@@ -30,6 +30,7 @@
               </p>
               <p v-if="spacesText(session)" class="session-meta">{{ spacesText(session) }}</p>
             </ion-label>
+            <ion-badge v-if="session.cost === 0" color="success" slot="end">Free</ion-badge>
             <session-status-badge :session="session" slot="end" />
           </ion-item>
         </template>
@@ -45,7 +46,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import {
-  IonContent, IonHeader, IonItem, IonItemDivider, IonLabel, IonList,
+  IonBadge, IonContent, IonHeader, IonItem, IonItemDivider, IonLabel, IonList,
   IonPage, IonRefresher, IonRefresherContent, IonTitle, IonToolbar,
   onIonViewWillEnter
 } from '@ionic/vue'
