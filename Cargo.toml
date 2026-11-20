@@ -15,10 +15,9 @@ dotenv = "0.15.0"
 env_logger = "0.11.8"
 futures = "0.3.31"
 hex = "0.4.3"
-jsonwebtoken = { version = "9.3.0", default-features = false }
 lazy_static = "1.4.0"
 log = { version = "0.4.27", features = ["std"] }
-mail-send = "0.5.1"
+mail-send = { version = "0.5.2", default-features = false, features = ["builder", "ring", "tls12", "digest-md5", "cram-md5"] }
 multer = "3.1.0"
 passwords = "3.1.16"
 password-auth = "1"
