@@ -1,7 +1,5 @@
 use chrono::{DateTime, Datelike, Days, Duration, FixedOffset, NaiveTime, TimeZone};
 use chrono_tz::Tz;
-use rocket::futures::stream::BoxStream;
-use rocket::futures::StreamExt;
 use rocket::http::Status;
 use rocket::response::status::{Created, NoContent};
 use crate::apierror::{ApiError, CREDITS_OPT_IN_REQUIRED};
@@ -9,8 +7,8 @@ use rocket::serde::json::Json;
 use rocket::serde::Serialize;
 use rocket::{Route, State};
 use serde::Deserialize;
-use sqlx::postgres::{PgQueryResult, PgRow};
-use sqlx::{query, query_as, query_scalar, raw_sql, Error, FromRow, PgPool, Postgres, QueryBuilder, Row};
+use sqlx::postgres::PgRow;
+use sqlx::{query, query_as, query_scalar, Error, FromRow, PgConnection, PgExecutor, PgPool, Postgres, QueryBuilder, Row};
 use unicode_segmentation::UnicodeSegmentation;
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
@@ -222,13 +220,6 @@ async fn list_bookings(
     Ok(Json(bookings))
 }
 
-async fn take_result_from_stream<'a>(stream: &mut BoxStream<'a, Result<PgQueryResult, Error>>) -> Result<PgQueryResult, ApiError> {
-    stream.next()
-        .await
-        .ok_or(ApiError::new(Status::InternalServerError, "no more results".to_string()))?
-        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
-}
-
 type CreditsCost = i16;
 
 #[post("/bookings", data="<booking>")]
@@ -238,11 +229,19 @@ async fn create_booking(
     login: LoginSession,
     booking: Json<SessionBooking>
 ) -> Result<Created<Json<SessionBooking>>, ApiError> {
+    let is_admin_for_session = user_is_admin_for_session(pool, &login, booking.session_id).await?;
+
+    // Lock the booking person for the whole check-and-book, so that concurrent
+    // bookings for the same person cannot both pass the credits or weekly-limit
+    // checks before either has been recorded
+    let mut tx = pool.begin().await.map_err(to_internal_server_err)?;
+    lock_person(&mut tx, booking.person_id).await?;
+
     // Load details of the booking person and session
-    let person_and_session = PersonSessionBookingDetails::load(pool, booking.person_id, booking.session_id).await?;
+    let person_and_session = PersonSessionBookingDetails::load(&mut *tx, booking.person_id, booking.session_id).await?;
 
     // Admins can always make a booking for any user. Admin for a session includes the trainer of that session.
-    let credits_to_use = if user_is_admin_for_session(pool, &login, booking.session_id).await? {
+    let credits_to_use = if is_admin_for_session {
         0
     } else {
         // Non-admins can only book on their own behalf
@@ -265,17 +264,28 @@ async fn create_booking(
         }
 
         let credits_to_use = booking.credits_used.unwrap_or(0);
-        check_bookable(pool, config, &person_and_session, credits_to_use >= person_and_session.cost).await?
+        check_bookable(&mut tx, config, &person_and_session, credits_to_use >= person_and_session.cost).await?
     };
 
-    make_booking(pool, &person_and_session, credits_to_use, login.email)
-        .await
-        .map(|_| Created::new(format!("/bookings?sessionid={},person_id={}", booking.session_id, booking.person_id)))
+    make_booking(&mut tx, &person_and_session, credits_to_use).await?;
+    tx.commit().await.map_err(to_internal_server_err)?;
+    log_booking(pool, &person_and_session, credits_to_use, login.email).await?;
 
+    Ok(Created::new(format!("/bookings?sessionid={},person_id={}", booking.session_id, booking.person_id)))
+}
+
+/// Takes a row lock on the person, held until the transaction ends
+async fn lock_person(conn: &mut PgConnection, person_id: i64) -> Result<(), ApiError> {
+    query("SELECT id FROM person WHERE id = $1 FOR UPDATE")
+        .bind(person_id)
+        .fetch_optional(conn)
+        .await
+        .map_err(to_internal_server_err)?;
+    Ok(())
 }
 
 async fn check_bookable(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     config: &Config,
     person_and_session: &PersonSessionBookingDetails,
     use_credits: bool
@@ -291,7 +301,7 @@ async fn check_bookable(
             Ok(0)
         } else {
             let timezone = config.get_timezone().map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
-            check_limited_member_has_no_bookings_in_same_week(pool, &timezone, person_and_session.person_id, &person_and_session.datetime)
+            check_limited_member_has_no_bookings_in_same_week(conn, &timezone, person_and_session.person_id, &person_and_session.datetime)
                 .await
                 .map(|_| 0)
         }
@@ -320,28 +330,38 @@ async fn check_bookable(
     }
 }
 
+/// Records the booking and debits its credits. Both happen in the caller's
+/// transaction, so a booking is never kept without its credits being paid.
 async fn make_booking(
+    conn: &mut PgConnection,
+    person_and_session: &PersonSessionBookingDetails,
+    credits_to_use: CreditsCost
+) -> Result<(), ApiError> {
+    // Make the booking
+    if let Some(max_booking_count) = person_and_session.max_booking_count {
+        book_session_with_max_bookings(&mut *conn, person_and_session.person_id, person_and_session.session_id, max_booking_count, credits_to_use).await?;
+    } else {
+        book_session_no_max_bookings(&mut *conn, person_and_session.person_id, person_and_session.session_id, credits_to_use).await?;
+    }
+
+    // Debit the credits used from the user if required; never below zero
+    if credits_to_use > 0 {
+        query("UPDATE person SET credits = credits - $1 WHERE id = $2 AND credits >= $1 RETURNING id")
+            .bind(credits_to_use)
+            .bind(person_and_session.person_id)
+            .fetch_optional(&mut *conn)
+            .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+            .ok_or_else(|| ApiError::new(Status::Forbidden, "Insufficient Pay As You Go credits.".to_string()))?;
+    }
+    Ok(())
+}
+
+async fn log_booking(
     pool: &PgPool,
     person_and_session: &PersonSessionBookingDetails,
     credits_to_use: CreditsCost,
     originator: String
 ) -> Result<(), ApiError> {
-    // Make the booking
-    if let Some(max_booking_count) = person_and_session.max_booking_count {
-        book_session_with_max_bookings(pool, person_and_session.person_id, person_and_session.session_id, max_booking_count, credits_to_use).await?;
-    } else {
-        book_session_no_max_bookings(pool, person_and_session.person_id, person_and_session.session_id, credits_to_use).await?;
-    }
-
-    // Debit the credits used from the user if required
-    if credits_to_use > 0 {
-        query("UPDATE person SET credits = credits - $1 WHERE id = $2 RETURNING id")
-            .bind(credits_to_use)
-            .bind(person_and_session.person_id)
-            .fetch_one(pool)
-            .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
-    }
-
     append_log(pool, &Some(originator), "CREATED BOOKING", format!("{}, credits_used={}", person_and_session, credits_to_use).as_str()).await?;
     Ok(())
 }
@@ -393,7 +413,7 @@ impl Display for PersonSessionBookingDetails {
 }
 
 impl PersonSessionBookingDetails {
-    async fn load(pool: &PgPool, person_id: i64, session_id: i64) -> Result<PersonSessionBookingDetails, ApiError> {
+    async fn load<'e, E: PgExecutor<'e>>(executor: E, person_id: i64, session_id: i64) -> Result<PersonSessionBookingDetails, ApiError> {
         query_as("SELECT p.id AS person_id, p.name AS person_name, p.email AS person_email, p.roles AS person_roles, p.credits AS person_credits, s.id AS session_id, s.datetime, s.booking_deadline_mins, s.cost, st.name AS session_type_name, l.name AS session_location_name, s.max_booking_count,
             (SELECT COUNT(*) FROM booking AS b WHERE b.session_id = $1) AS booking_count
             FROM person AS p, session as s
@@ -404,13 +424,13 @@ impl PersonSessionBookingDetails {
             .bind(session_id)
             .bind(person_id)
             .bind(session_id)
-            .fetch_one(pool)
+            .fetch_one(executor)
             .await
             .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
     }
 }
 
-async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezone: &Tz, uid: i64, session_datetime: &DateTime<FixedOffset>) -> Result<(), ApiError> {
+async fn check_limited_member_has_no_bookings_in_same_week(conn: &mut PgConnection, timezone: &Tz, uid: i64, session_datetime: &DateTime<FixedOffset>) -> Result<(), ApiError> {
     // Get the date/time of the session and work out the start and end of the week that the session occurs in
     let datetime_in_local = timezone.from_utc_datetime(&session_datetime.naive_utc());
     let start_of_week_local = datetime_in_local
@@ -430,7 +450,7 @@ async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezo
         .bind(uid)
         .bind(start_of_week_local)
         .bind(end_of_week_local)
-        .fetch_one(pool)
+        .fetch_one(conn)
         .await
         .and_then(|r| r.try_get(0))
         .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
@@ -443,45 +463,46 @@ async fn check_limited_member_has_no_bookings_in_same_week(pool: &PgPool, timezo
     Ok(())
 }
 
-async fn book_session_no_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, credits_used: CreditsCost) -> Result<(), ApiError> {
+async fn book_session_no_max_bookings(conn: &mut PgConnection, person_id: i64, session_id: i64, credits_used: CreditsCost) -> Result<(), ApiError> {
     let now = Utc::now();
-    query_as("INSERT INTO booking (person_id, session_id, credits_used, booked_timestamp) VALUES ($1, $2, $3, $4) RETURNING person_id, session_id")
+    query("INSERT INTO booking (person_id, session_id, credits_used, booked_timestamp) VALUES ($1, $2, $3, $4) RETURNING person_id, session_id")
         .bind(person_id)
         .bind(session_id)
         .bind(credits_used)
         .bind(now)
-        .fetch_one(pool)
+        .fetch_one(conn)
         .await
+        .map(|_| ())
         .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))
 }
 
-async fn book_session_with_max_bookings(pool: &PgPool, person_id: i64, session_id: i64, max_bookings: i64, credits_used: CreditsCost) -> Result<(), ApiError> {
-    let time_now_iso8601 = Utc::now().to_rfc3339();
-    // Atomically update the booking table to insert a new booking if and only if the count of
-    // bookings for the referenced session is less than the maximum. Adapted from this StackOverflow
+async fn book_session_with_max_bookings(conn: &mut PgConnection, person_id: i64, session_id: i64, max_bookings: i64, credits_used: CreditsCost) -> Result<(), ApiError> {
+    // Insert a new booking if and only if the count of bookings for the referenced session is
+    // less than the maximum. Locking the session row serialises concurrent bookings for the
+    // same session until the caller's transaction ends. Adapted from this StackOverflow
     // answer: https://dba.stackexchange.com/a/167283
-    //
-    // NB simple string interpolation without prepared statements is safe for numeric arguments and for the generated time string
-    let sql = format!("BEGIN;
-        SELECT id FROM session WHERE id = {session_id} FOR NO KEY UPDATE;
-        INSERT INTO booking (person_id, session_id, credits_used, booked_timestamp)
-            SELECT {person_id}, {session_id}, {credits_used}, '{time_now_iso8601}'
+    query("SELECT id FROM session WHERE id = $1 FOR NO KEY UPDATE")
+        .bind(session_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(to_internal_server_err)?;
+    let inserted = query("INSERT INTO booking (person_id, session_id, credits_used, booked_timestamp)
+            SELECT $1, $2, $3, $4
             FROM booking
-            WHERE session_id = {session_id}
-            HAVING count(*) < {max_bookings}
+            WHERE session_id = $2
+            HAVING count(*) < $5
         ON CONFLICT DO NOTHING
-        RETURNING person_id, session_id;
-        COMMIT; END;
-    ");
-    debug!("Executing raw SQL: {}", &sql);
-    let mut result_stream = raw_sql(&sql).execute_many(pool);
+        RETURNING person_id, session_id")
+        .bind(person_id)
+        .bind(session_id)
+        .bind(credits_used)
+        .bind(Utc::now())
+        .bind(max_bookings)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(to_internal_server_err)?;
 
-    let _ = take_result_from_stream(&mut result_stream).await?; // result from BEGIN;
-    let _ = take_result_from_stream(&mut result_stream).await?; // result from SELECT..FOR UPDATE;
-    let insert_result = take_result_from_stream(&mut result_stream).await?; // result from INSERT..RETURNING;
-    info!("Insert result: {:?}", insert_result);
-
-    if insert_result.rows_affected() == 0 {
+    if inserted.is_none() {
         return Err(ApiError::new(Status::Conflict, format!("Session has reached it maximum number of bookings: {}.", max_bookings)));
     }
     Ok(())
@@ -500,17 +521,20 @@ async fn delete_booking(
     if !is_admin && person_id != login.uid {
         return Err(ApiError::new(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string()));
     }
-    let person_booking_details = PersonSessionBookingDetails::load(pool, person_id, session_id).await?;
+    let person_booking_details = PersonSessionBookingDetails::load(pool.inner(), person_id, session_id).await?;
     let was_fully_booked = Some(person_booking_details.booking_count) == person_booking_details.max_booking_count;
 
     // Error if session is in the past
     if !is_admin && person_booking_details.datetime.lt(&Utc::now()) {
         return Err(ApiError::new(Status::Forbidden, "Cannot cancel past booking.".to_string()));
     }
+    // Lock the person first, in the same order as booking does, so the two cannot deadlock
+    let mut tx = pool.begin().await.map_err(to_internal_server_err)?;
+    lock_person(&mut tx, person_id).await?;
     let booking_deleted: SessionBooking = query_as("DELETE FROM booking WHERE person_id = $1 AND session_id = $2 RETURNING person_id, session_id, credits_used")
         .bind(person_id)
         .bind(session_id)
-        .fetch_optional(pool.inner())
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
         .ok_or(ApiError::new(Status::NotFound, format!("No booking found with person_id={} and session_id={}.", person_id, session_id)))?;
@@ -521,11 +545,12 @@ async fn delete_booking(
         query("UPDATE person SET credits = credits + $1 WHERE id = $2 RETURNING id")
             .bind(booking_deleted.credits_used)
             .bind(person_id)
-            .fetch_one(pool.inner())
+            .fetch_one(&mut *tx)
             .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     }
+    tx.commit().await.map_err(to_internal_server_err)?;
 
-    let log_record = PersonSessionBookingDetails::load(pool, booking_deleted.person_id, booking_deleted.session_id).await?;
+    let log_record = PersonSessionBookingDetails::load(pool.inner(), booking_deleted.person_id, booking_deleted.session_id).await?;
     append_log(pool, &Some(login.email), "DELETED BOOKING", format!("{}, credits_refunded={}", log_record, credits_refund).as_str()).await?;
 
     // Check for waitlist entries that can be promoted to bookings
@@ -550,16 +575,21 @@ async fn promote_from_waitlist(
     while waitlist_entry_opt.is_some() {
         let waitlist_entry = waitlist_entry_opt.unwrap();
         info!("Taken waitlist entry: {:?}", waitlist_entry);
-        let waitlisted_person_session = PersonSessionBookingDetails::load(pool, waitlist_entry.person_id, waitlist_entry.session_id).await?;
+        let mut tx = pool.begin().await.map_err(to_internal_server_err)?;
+        lock_person(&mut tx, waitlist_entry.person_id).await?;
+        let waitlisted_person_session = PersonSessionBookingDetails::load(&mut *tx, waitlist_entry.person_id, waitlist_entry.session_id).await?;
         let local_datetime = waitlisted_person_session.datetime.with_timezone(&timezone);
 
         // Check if we can make a booking for the top person on the waitlist
-        let check_result = check_bookable(pool, config, &waitlisted_person_session, true).await;
+        let check_result = check_bookable(&mut tx, config, &waitlisted_person_session, true).await;
         if check_result.is_ok() {
             // Top waitlist person is eligible to book, so book them.
             // If internal errors occur here they abort the function.
             info!("Waitlist entry IS ELIGIBLE for booking: {:?}", waitlist_entry);
-            make_booking(pool, &waitlisted_person_session, check_result.unwrap(), "<< waitlist >>".to_string()).await?;
+            let credits_to_use = check_result.unwrap();
+            make_booking(&mut tx, &waitlisted_person_session, credits_to_use).await?;
+            tx.commit().await.map_err(to_internal_server_err)?;
+            log_booking(pool, &waitlisted_person_session, credits_to_use, "<< waitlist >>".to_string()).await?;
             let text = format!(include_str!("waitlist_promoted_email.txt"),
                 &waitlisted_person_session.person_name,
                 &waitlisted_person_session.session_type_name,
@@ -1527,6 +1557,29 @@ mod tests {
             ("PAYG@example.org".to_string(), "CREATED BOOKING".to_string(), format!("person=PAYG User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_used=1", session_datetime)),
             ("PAYG@example.org".to_string(), "DELETED BOOKING".to_string(), format!("person=PAYG User, type=HIIT, datetime={}, location=Oak Hill Park, cost=1, credits_refunded=1", session_datetime))
         ], read_logged(&pool).await);
+    }
+
+    #[sqlx::test]
+    async fn concurrent_bookings_cannot_overspend_credits(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let member_id = create_person(&pool, "PAYG User", "member@example.org", "", 1).await;
+        let session_datetime = Utc::now().fixed_offset().add(TimeDelta::days(1));
+        let session1 = create_session(&pool, &session_datetime, trainer_id, "HIIT", "Oak Hill Park").await;
+        let session2 = create_session(&pool, &session_datetime.add(TimeDelta::hours(2)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let config = Config::load().unwrap();
+        let login = create_login(member_id, "PAYG", "");
+
+        // Two simultaneous bookings, each costing the member's only credit
+        let book = |session_id| crate::bookings::create_booking(State::from(&pool), State::from(&config), login.clone(),
+            Json(crate::bookings::SessionBooking { person_id: member_id, session_id, credits_used: Some(1) }));
+        let (r1, r2) = tokio::join!(book(session1), book(session2));
+
+        assert_eq!(1, [r1.is_ok(), r2.is_ok()].iter().filter(|ok| **ok).count(), "exactly one booking should succeed");
+        assert_eq!(1, count_bookings(&pool).await);
+        let member_record = UserLoginRecord::load_by_id(&pool, member_id).await.unwrap().unwrap();
+        assert_eq!(0, member_record.credits);
     }
 
     #[sqlx::test]

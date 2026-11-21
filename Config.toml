@@ -12,3 +12,7 @@ email_replyto_address = "noreply@anotherlevelfitness.uk"
 email_admin_notifications = ["njbartlett@gmail.com", "anotherlevelcommunityfitness@gmail.com"]
 
 timezone_name = "Europe/London"
+
+# Public origin of the website; links in emails are built from this.
+# Override with the SITE_URL environment variable for local development.
+site_url = "https://anotherlevelfitness.uk"

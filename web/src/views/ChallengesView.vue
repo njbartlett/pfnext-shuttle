@@ -52,7 +52,7 @@
               </div>
               <ul class="list-group list-group-flush">
                 <li v-if="challenge.description" class="list-group-item">
-                  <div v-html="challenge.description"></div>
+                  <div v-html="sanitizeHtml(challenge.description)"></div>
                 </li>
 
                 <li v-if="challenge.goal || challenge.individual_goal || challenge.daily_goal" class="list-group-item">
@@ -178,6 +178,7 @@ import { rankByScore } from '@/composables/useRanking'
 import { loadSelectableMembers } from '@/composables/useSelectableMembers'
 import { user } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
+import { sanitizeHtml } from '@/app/sanitize'
 
 // Days after the finish during which a challenge still counts as current
 const GRACE_DAYS = 1

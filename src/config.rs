@@ -29,7 +29,11 @@ pub(crate) struct Config {
     pub(crate) email_replyto_name: String,
     pub(crate) email_replyto_address: String,
     pub(crate) email_admin_notifications: Vec<String>,
-    pub(crate) timezone_name: String
+    pub(crate) timezone_name: String,
+    /// The website's public origin, e.g. https://example.org. Links in emails
+    /// are built from this, never from values supplied by the client.
+    /// Overridden by the SITE_URL environment variable (e.g. for local development).
+    pub(crate) site_url: String
 }
 
 impl Default for Config {
@@ -44,12 +48,29 @@ impl Config {
             .map_err(|e| ConfigError::new(format!("failed to get current directory: {}", e)))?;
         config_path.push("Config.toml");
         info!("Loading config from path {}", &config_path.display());
-        let config: Self = confy::load_path(config_path).map_err(|e| ConfigError::new(e.to_string()))?;
+        let mut config: Self = confy::load_path(config_path).map_err(|e| ConfigError::new(e.to_string()))?;
+        if let Ok(site_url) = env::var("SITE_URL") {
+            config.site_url = site_url;
+        }
+        config.site_url = config.site_url.trim_end_matches('/').to_string();
 
         // Validate
         config.get_timezone()?;
+        if !(config.site_url.starts_with("https://") || config.site_url.starts_with("http://")) {
+            return Err(ConfigError::new(format!("site_url must be an http(s) URL: {}", config.site_url)));
+        }
 
         Ok(config)
+    }
+
+    /// The website's password reset page
+    pub(crate) fn password_reset_url(&self) -> String {
+        format!("{}/passwordreset.html", self.site_url)
+    }
+
+    /// The website's host name, for naming the site in emails
+    pub(crate) fn site_host(&self) -> &str {
+        self.site_url.split_once("://").map(|(_, host)| host).unwrap_or(&self.site_url)
     }
 
     pub(crate) fn get_timezone(&self) -> Result<Tz, ConfigError> {

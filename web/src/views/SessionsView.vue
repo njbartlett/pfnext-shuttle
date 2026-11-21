@@ -100,7 +100,7 @@
           </td>
         </tr>
         <tr v-if="session.notes" class="border-bottom" :class="{ 'session-past': isPast(session.datetime), 'session-booked': isBookedUpcoming(session) }">
-          <td colspan="4" v-html="session.notes"></td>
+          <td colspan="4" v-html="sanitizeHtml(session.notes)"></td>
         </tr>
       </tbody>
     </table>
@@ -142,7 +142,7 @@
                 <span v-else><i class="bi bi-person-arms-up"></i>&nbsp;{{ session.trainer.name }}</span>
               </div>
               <SessionRatings :session="session" />
-              <div v-if="session.notes" class="text-wrap" style="max-width: 15rem;" v-html="session.notes"></div>
+              <div v-if="session.notes" class="text-wrap" style="max-width: 15rem;" v-html="sanitizeHtml(session.notes)"></div>
               <SessionControls :session="session" :now="now" v-bind="controlHandlers" />
             </div>
           </td>
@@ -270,6 +270,7 @@ import { useSwipe } from '@/composables/useSwipe'
 import { loginRoute } from '@/router'
 import { user } from '@/stores/auth'
 import { tryApi } from '@/stores/apiError'
+import { sanitizeHtml } from '@/app/sanitize'
 
 const MILLIS_IN_DAY = 24 * 60 * 60 * 1000
 const MILLIS_IN_WEEK = 7 * MILLIS_IN_DAY

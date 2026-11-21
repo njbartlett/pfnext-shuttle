@@ -29,7 +29,7 @@
       </div>
 
       <!-- Post bodies are HTML written by editors -->
-      <div class="post-content" v-html="post.content"></div>
+      <div class="post-content" v-html="sanitizeHtml(post.content)"></div>
 
       <ConfirmModal ref="deleteModal" title="Delete Post" icon="bi-exclamation-triangle-fill" header-class="text-bg-danger" confirm-label="Delete" confirm-icon="bi-trash" confirm-class="btn-danger" @confirm="confirmedDelete">
         <p>Are you sure you want to delete this Post?</p>
@@ -59,6 +59,7 @@ import PageTitle from '@/components/PageTitle.vue'
 import { SITE_NAME } from '@/app/site'
 import { isEditor, isLoggedIn } from '@/stores/auth'
 import { reportApiError, tryApi } from '@/stores/apiError'
+import { sanitizeHtml } from '@/app/sanitize'
 
 const route = useRoute()
 const router = useRouter()

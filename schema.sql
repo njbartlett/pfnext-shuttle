@@ -20,6 +20,14 @@ CREATE TABLE IF NOT EXISTS temp_password (
     sent timestamp with time zone NOT NULL,
     expiry timestamp with time zone NOT NULL
 );
+-- Guesses made against the temporary password; it is discarded after too many
+ALTER TABLE temp_password ADD COLUMN IF NOT EXISTS attempts int2 NOT NULL DEFAULT 0;
+-- Recent failed logins, for throttling password guessing
+CREATE TABLE IF NOT EXISTS failed_login (
+    email text NOT NULL,
+    attempted timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS failed_login_email_idx ON failed_login (email, attempted);
 CREATE TABLE IF NOT EXISTS loginsession (
     id text PRIMARY KEY,
     uid bigint NOT NULL REFERENCES person ON DELETE CASCADE,

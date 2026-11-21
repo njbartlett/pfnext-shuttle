@@ -22,6 +22,9 @@ use crate::{apierror::ApiError, config::AppEnv, transaction_log::append_log, use
 const SESSION_ID: &str = "sessionid";
 const ADMIN: &str = "admin";
 const SESSION_DURATION: Duration = Duration::days(7);
+/// Failed logins allowed per email address within FAILED_LOGIN_WINDOW
+const MAX_FAILED_LOGINS: i64 = 5;
+const FAILED_LOGIN_WINDOW: Duration = Duration::minutes(30);
 
 pub fn routes() -> Vec<Route> {
     routes![
@@ -45,6 +48,7 @@ pub enum AuthenticationError {
 enum LoginError {
     InvalidLogin,
     ResetRequired,
+    TooManyAttempts,
     Internal(String)
 }
 
@@ -53,6 +57,7 @@ impl Display for LoginError {
         match self {
             LoginError::InvalidLogin => f.write_str("Incorrect user email or password"),
             LoginError::ResetRequired => f.write_str("You are required to reset your password"),
+            LoginError::TooManyAttempts => write!(f, "Too many failed logins, please try again in {} minutes or reset your password", FAILED_LOGIN_WINDOW.num_minutes()),
             LoginError::Internal(msg) => write!(f, "Server error: {}", msg),
         }
     }
@@ -140,7 +145,6 @@ impl<'r> FromRequest<'r> for LoginSession {
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
         let sessionid = sessionid.unwrap();
-        info!("Verifying login session for id {}", sessionid);
 
         // Load the session record
         let load_result = LoginSession::load(&pool, &sessionid).await;
@@ -156,8 +160,9 @@ impl<'r> FromRequest<'r> for LoginSession {
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
 
-        info!("Authenticated user session {:?}", login_session);
-        Outcome::Success(login_session.unwrap())
+        let login_session = login_session.unwrap();
+        info!("Authenticated user id {}", login_session.uid);
+        Outcome::Success(login_session)
     }
 
 }
@@ -219,6 +224,45 @@ impl LoginSession {
     async fn login(pool: &PgPool, email: &str, password: &str, ipinfo: &Option<String>) -> Result<LoginSession, LoginError> {
         let now = Utc::now().fixed_offset();
         Self::clear_expired(pool, &now).await;
+
+        // Throttle password guessing against any one email address
+        let window_start = now - FAILED_LOGIN_WINDOW;
+        let recent_failures: i64 = query("SELECT count(*) FROM failed_login WHERE email = LOWER($1) AND attempted > $2")
+            .bind(email)
+            .bind(window_start)
+            .fetch_one(pool)
+            .await
+            .and_then(|r| r.try_get(0))
+            .map_err(|e| LoginError::Internal(e.to_string()))?;
+        if recent_failures >= MAX_FAILED_LOGINS {
+            return Err(LoginError::TooManyAttempts);
+        }
+
+        let result = Self::verify_and_create(pool, email, password, ipinfo, &now).await;
+        match &result {
+            Err(LoginError::InvalidLogin) => {
+                let _ = query("INSERT INTO failed_login (email, attempted) VALUES (LOWER($1), $2)")
+                    .bind(email)
+                    .bind(now)
+                    .execute(pool)
+                    .await
+                    .inspect_err(|e| error!("Failed to record failed login: {}", e));
+            },
+            Ok(_) => {
+                let _ = query("DELETE FROM failed_login WHERE email = LOWER($1) OR attempted <= $2")
+                    .bind(email)
+                    .bind(window_start)
+                    .execute(pool)
+                    .await
+                    .inspect_err(|e| error!("Failed to clear failed logins: {}", e));
+            },
+            Err(_) => {}
+        }
+        result
+    }
+
+    async fn verify_and_create(pool: &PgPool, email: &str, password: &str, ipinfo: &Option<String>, now: &DateTime<FixedOffset>) -> Result<LoginSession, LoginError> {
+        let now = *now;
 
         // Fetch login record
         let login_record = UserLoginRecord::load_by_email(pool, email)
@@ -325,7 +369,7 @@ impl LoginSession {
             .await
             .map(|rows| rows.iter().map(|r| r.try_get("id").unwrap_or("<missing id>").to_string()).collect());
         match expired {
-            Ok(expired) => info!("Deleted {} expired sessions: {:?}", expired.len(), expired),
+            Ok(expired) => info!("Deleted {} expired sessions", expired.len()),
             Err(e) => error!("Failed to delete expired sessions: {}", e),
         };
     }
@@ -552,9 +596,9 @@ async fn logout(
     // If there is a loginsession associated with a cookie, delete it
     if let Some(login) = login {
         match login.delete(pool.inner()).await {
-            Ok(true) => info!("Deleted session record {:?}", login),
-            Ok(false) => info!("No session record to delete for {:?}", login),
-            Err(e) => error!("Failed to delete session record {:?}: {}", login, e)
+            Ok(true) => info!("Deleted session record for user id {}", login.uid),
+            Ok(false) => info!("No session record to delete for user id {}", login.uid),
+            Err(e) => error!("Failed to delete session record for user id {}: {}", login.uid, e)
         };
     }
 
@@ -660,6 +704,7 @@ async fn delete_session_by_id(
 fn to_http_err(e: LoginError) -> ApiError {
     let status = match e {
         LoginError::Internal(_) => Status::InternalServerError,
+        LoginError::TooManyAttempts => Status::TooManyRequests,
         _ => Status::Unauthorized
     };
     ApiError::new(status, e.to_string())
@@ -714,6 +759,24 @@ mod tests {
     async fn test_login_incorrect_user(pool: PgPool) {
         let err = LoginSession::login(&pool, "missing@example.com", "password", &None).await.unwrap_err();
         assert_eq!(LoginError::InvalidLogin, err);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]
+    async fn test_login_throttled_after_repeated_failures(pool: PgPool) {
+        set_timestamp_rfc3339("2030-01-01T00:00:00Z");
+        for _ in 0..super::MAX_FAILED_LOGINS {
+            let err = LoginSession::login(&pool, "user1@example.com", "wrong", &None).await.unwrap_err();
+            assert_eq!(LoginError::InvalidLogin, err);
+        }
+
+        // Even the right password is refused while throttled, and the address
+        // is matched case-insensitively
+        let err = LoginSession::login(&pool, "USER1@example.com", "password", &None).await.unwrap_err();
+        assert_eq!(LoginError::TooManyAttempts, err);
+
+        // Once the window has passed, the right password works again
+        set_timestamp_rfc3339("2030-01-01T00:16:00Z");
+        LoginSession::login(&pool, "user1@example.com", "password", &None).await.unwrap();
     }
 
     #[sqlx::test(fixtures("../schema.sql", "fixtures/users.sql"))]

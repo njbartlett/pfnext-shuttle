@@ -18,16 +18,19 @@ use crate::loginsession::LoginSession;
 use crate::notifications::{send_admin_email, send_email, send_email_async};
 use crate::whereclause::{like_contains, Operator, WhereClause};
 
+// 8 characters from 0-9 and A-Z less similar-looking characters: about 10^11
+// combinations, of which an attacker gets MAX_TEMP_PASSWORD_ATTEMPTS guesses
 const PASSWORD_GENERATOR: PasswordGenerator = PasswordGenerator {
-    length: 6,
+    length: 8,
     numbers: true,
     lowercase_letters: false,
-    uppercase_letters: false,
+    uppercase_letters: true,
     symbols: false,
     spaces: false,
-    exclude_similar_characters: false,
+    exclude_similar_characters: true,
     strict: false
 };
+const MAX_TEMP_PASSWORD_ATTEMPTS: i16 = 5;
 const INVALID_LOGIN_MESSAGE: &str = "incorrect username or password";
 const TEMP_PASSWORD_MINIMUM_RESEND_WAIT: Duration = Duration::minutes(-2);
 const TEMP_PASSWORD_EXPIRY: Duration = Duration::minutes(10);
@@ -125,16 +128,14 @@ struct UpdatePasswordRequest {
     new_password: String
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct NewUserRequest {
     name: String,
     email: String,
     phone: Option<String>,
     emergency_name: Option<String>,
     emergency_phone: Option<String>,
-    medical_info: Option<String>,
-    website_url: String,
-    reset_url: String
+    medical_info: Option<String>
 }
 
 #[derive(Serialize, FromRow, Debug)]
@@ -144,9 +145,7 @@ struct UserUpdated {
 
 #[derive(Deserialize)]
 struct PasswordResetRequest {
-    email: String,
-    website_url: String,
-    reset_url: String
+    email: String
 }
 
 #[post("/request_pwd_reset", data="<reset_request>")]
@@ -175,7 +174,7 @@ async fn request_pwd_reset(
 
     // Create temp password and send
     let temp_password = create_temp_password(state.inner(), user_record.id).await?;
-    let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &reset_request.reset_url, encode(&user_record.email), encode(&temp_password));
+    let reset_url_with_params = format!("{}?email={}&temp_pwd={}", config.password_reset_url(), encode(&user_record.email), encode(&temp_password));
     let text = format!(include_str!("reset_email.txt"), &config.inner().branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     send_email(config, app_env, &user_record.name, &user_record.email, &format!("Password Reset for {}", &config.inner().branding), &text)
         .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
@@ -208,11 +207,11 @@ async fn register_user(
         .fetch_one(state.inner())
         .await
         .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
-    info!("Created new user id {} for {:?}", user_updated.id, &new_user);
+    info!("Created new user id {} for {}", user_updated.id, &new_user.email);
 
     // Create temp password and send to email
     let temp_password = create_temp_password(state.inner(), user_updated.id).await?;
-    let reset_url_with_params = format!("{}?email={}&temp_pwd={}", &new_user.reset_url, encode(&new_user.email), encode(&temp_password));
+    let reset_url_with_params = format!("{}?email={}&temp_pwd={}", config.password_reset_url(), encode(&new_user.email), encode(&temp_password));
     let text = format!(include_str!("register_email.txt"), &config.branding, temp_password, reset_url_with_params, TEMP_PASSWORD_EXPIRY.num_minutes());
     send_email_async(config, app_env, &new_user.name, &new_user.email, &format!("New User Registration for {}", &config.branding), &text)
         .await
@@ -245,7 +244,7 @@ async fn create_temp_password(pool: &PgPool, user_id: i64) -> Result<String, Api
     let user_updated: UserUpdated = query_as(
         "INSERT INTO temp_password (person_id, pwd, sent, expiry) \
             VALUES ($1, $2, $3, $4) \
-            ON CONFLICT (person_id) DO UPDATE SET pwd = $5, sent = $6, expiry = $7 \
+            ON CONFLICT (person_id) DO UPDATE SET pwd = $5, sent = $6, expiry = $7, attempts = 0 \
             RETURNING person_id AS id")
         .bind(user_id)
         .bind(&temp_password_hash)
@@ -273,8 +272,7 @@ async fn create_temp_password(pool: &PgPool, user_id: i64) -> Result<String, Api
 struct UserPasswordReset {
     email: String,
     temp_password: String,
-    new_password: String,
-    website_url: String
+    new_password: String
 }
 
 #[derive(FromRow)]
@@ -297,16 +295,23 @@ async fn reset_pwd(
         .await.map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
         .ok_or(ApiError::new(Status::BadRequest, format!("User does not exist with email address {}", &user_pwd_reset.email)))?;
 
-    // Get the temporary password record and verify against user input
-    let temp_pwd_record: TempPasswordRecord = query_as("SELECT person_id, pwd, expiry FROM temp_password WHERE person_id = $1")
+    // Get the temporary password record, counting this guess against it in the same
+    // statement so that concurrent guesses cannot exceed the limit
+    let temp_pwd_record: TempPasswordRecord = query_as("UPDATE temp_password SET attempts = attempts + 1 \
+            WHERE person_id = $1 AND attempts < $2 \
+            RETURNING pwd, expiry")
         .bind(&user_record.id)
-        .fetch_one(state.inner())
+        .bind(MAX_TEMP_PASSWORD_ATTEMPTS)
+        .fetch_optional(state.inner())
         .await
-        .map_err(|_e| ApiError::new(Status::Forbidden, "Password reset has not been requested, or it has expired.".to_string()))?;
+        .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?
+        .ok_or_else(|| ApiError::new(Status::Forbidden, "Password reset has not been requested, or it has expired. Please request a new one.".to_string()))?;
     if temp_pwd_record.expiry.lt(&Utc::now()) {
         return Err(ApiError::new(Status::Forbidden, "Password reset has expired.".to_string()))
     }
-    verify_password(&user_pwd_reset.temp_password, &temp_pwd_record.pwd)
+    // Generated temporary passwords are upper case; accept them typed in either case
+    let temp_password = user_pwd_reset.temp_password.trim().to_uppercase();
+    verify_password(&temp_password, &temp_pwd_record.pwd)
         .map_err(|_e| ApiError::new(Status::Forbidden, INVALID_LOGIN_MESSAGE.to_string()))?;
 
     // Update the user's main password
@@ -318,6 +323,14 @@ async fn reset_pwd(
         .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
     info!("Updated password for user id {}", updated_user.id);
 
+    // Log out all existing sessions, which may belong to whoever knew the old password
+    let _ = query("DELETE FROM loginsession WHERE uid = $1")
+        .bind(user_record.id)
+        .execute(state.inner())
+        .await
+        .map(|r| info!("Deleted {} login session(s) for user id {}", r.rows_affected(), user_record.id))
+        .inspect_err(|e| error!("Failed to delete login sessions for user id {}: {}", user_record.id, e));
+
     // Clean up the temporary password record
     let _ = query_as("DELETE FROM temp_password WHERE person_id = $1 RETURNING person_id AS id")
         .bind(&user_record.id)
@@ -327,7 +340,7 @@ async fn reset_pwd(
         .inspect_err(|e| error!("Failed to delete temporary password for user {}: {}", &user_record.email, e));
 
     // Send acknowledgement email
-    let text = format!(include_str!("post_reset_email.txt"), &user_record.name, &user_record.email, &user_pwd_reset.website_url);
+    let text = format!(include_str!("post_reset_email.txt"), &user_record.name, &user_record.email, config.site_host());
     let _ = send_email(config, app_env, &user_record.name, &user_record.email, &format!("Password Changed for {}", &config.branding), &text);
 
     Ok(Accepted(format!("Updated password for user with email {}", &user_record.email)))
@@ -448,8 +461,7 @@ async fn list_users(
 
 #[derive(Deserialize)]
 struct UserDeletionRequest {
-    password: Option<String>,
-    website_url: String
+    password: Option<String>
 }
 
 #[delete("/users/<user_id>", data="<deletion>")]
@@ -485,7 +497,7 @@ async fn delete_user(
         .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
 
     // Send an email to the user confirming their account has been deleted
-    let text = format!(include_str!("post_delete_profile_email.txt"), &login_record.email, &deletion.website_url);
+    let text = format!(include_str!("post_delete_profile_email.txt"), &login_record.email, config.site_host());
     let _ = send_email(config, app_env, &login_record.name, &login_record.email, &format!("User Profile Deleted for {}", &config.branding), &text);
 
     Ok(NoContent)
@@ -628,6 +640,7 @@ fn parse_roles(roles_str: &str) -> Vec<String> {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use chrono::{Days, Utc};
     use rocket::http::Status;
@@ -988,4 +1001,80 @@ mod tests {
         assert_eq!(false, result.get(1).unwrap().pwd_defined);
     }
 
+
+    #[test]
+    fn reset_request_ignores_client_supplied_urls() {
+        // Clients may still send the old URL fields; they are accepted and ignored
+        let request: crate::users::PasswordResetRequest = rocket::serde::json::from_str(
+            r#"{"email": "joe@example.com", "website_url": "evil.example", "reset_url": "https://evil.example/reset"}"#).unwrap();
+        assert_eq!("joe@example.com", request.email);
+    }
+
+    #[sqlx::test]
+    async fn reset_email_links_to_configured_site(pool: PgPool) {
+        use rocket::serde::json::{from_str, Json};
+        use crate::config::{AppEnv, Config};
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
+        let config = Config::load().unwrap();
+
+        let request: crate::users::PasswordResetRequest = from_str(
+            r#"{"email": "joe@example.com", "reset_url": "https://evil.example/reset"}"#).unwrap();
+        crate::users::request_pwd_reset(State::from(&pool), State::from(&config), State::from(&AppEnv::default()), Json(request)).await.unwrap();
+
+        let sent = crate::notifications::get_sent_messages();
+        let body = &sent.last().expect("reset email should be sent").2;
+        assert!(body.contains(&format!("{}?email=joe%40example.com&temp_pwd=", config.password_reset_url())), "{body}");
+        assert!(!body.contains("evil.example"), "{body}");
+    }
+
+    async fn reset_pwd(pool: &PgPool, email: &str, temp_password: &str) -> Result<(), ApiError> {
+        use rocket::serde::json::Json;
+        use crate::config::{AppEnv, Config};
+        let request = crate::users::UserPasswordReset {
+            email: email.to_string(),
+            temp_password: temp_password.to_string(),
+            new_password: "new password".to_string()
+        };
+        crate::users::reset_pwd(State::from(pool), State::from(&Config::load().unwrap()), State::from(&AppEnv::default()), Json(request))
+            .await
+            .map(|_| ())
+    }
+
+    #[sqlx::test]
+    async fn temp_password_is_discarded_after_too_many_guesses(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let joe = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
+        let temp_password = crate::users::create_temp_password(&pool, joe).await.unwrap();
+        assert_eq!(8, temp_password.len());
+
+        for _ in 0..crate::users::MAX_TEMP_PASSWORD_ATTEMPTS {
+            let err = reset_pwd(&pool, "joe@example.com", "WRONGPWD").await.unwrap_err();
+            assert_eq!(Status::Forbidden, err.0);
+        }
+
+        // Even the right temporary password is now refused
+        let err = reset_pwd(&pool, "joe@example.com", &temp_password).await.unwrap_err();
+        assert_eq!(Status::Forbidden, err.0);
+    }
+
+    #[sqlx::test]
+    async fn password_reset_logs_out_existing_sessions(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+        let joe = create_person(&pool, "joe@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
+        let bob = create_person(&pool, "bob@example.com", DEFAULT_PASSWORD_HASH, "member", 0).await;
+        for (id, uid) in [("joe1", joe), ("joe2", joe), ("bob1", bob)] {
+            query("INSERT INTO loginsession (id, uid, expiry) VALUES ($1, $2, now() + interval '1 day')")
+                .bind(id).bind(uid).execute(&pool).await.unwrap();
+        }
+        let temp_password = crate::users::create_temp_password(&pool, joe).await.unwrap();
+
+        // Lower case is accepted for the (upper case) temporary password
+        reset_pwd(&pool, "joe@example.com", &temp_password.to_lowercase()).await.unwrap();
+
+        let remaining: Vec<String> = query("SELECT id FROM loginsession ORDER BY id")
+            .fetch_all(&pool).await.unwrap()
+            .iter().map(|r| r.get("id")).collect();
+        assert_eq!(vec!["bob1".to_string()], remaining);
+    }
 }
