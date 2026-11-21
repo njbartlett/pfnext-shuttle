@@ -74,6 +74,7 @@ fn api_notfound(_: &Request) -> ApiError {
 async fn launch() -> Rocket<Build> {
     dotenv().ok();
     env_logger::init();
+    notifications::install_crypto_provider();
 
     // Load config
     let config = Config::load().expect("Failed to load config properties");

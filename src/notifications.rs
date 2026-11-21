@@ -8,6 +8,15 @@ use mail_send::smtp::message::{IntoMessage, Message};
 
 use crate::config::{AppEnv, Config};
 
+/// Select ring as the process-wide rustls crypto provider. Must be called before
+/// any email is sent: the build enables both the ring (mail-send) and aws-lc-rs
+/// (AWS SDK) rustls providers, and with no default installed rustls panics when
+/// mail-send builds its TLS config in SmtpClientBuilder::new. Safe to call again.
+pub fn install_crypto_provider() {
+    // Err only means a provider is already installed
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 pub fn send_email<'a>(
     config: &'a Config,
     app_env: &AppEnv,
@@ -168,4 +177,21 @@ async fn internal_send_message<'a>(
     info!("Sent message over SMTP");
     
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use mail_send::SmtpClientBuilder;
+
+    use super::install_crypto_provider;
+
+    #[test]
+    fn smtp_client_builder_does_not_panic_once_crypto_provider_installed() {
+        install_crypto_provider();
+        // Calling it again must also be harmless
+        install_crypto_provider();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+        // This panicked in production when both ring and aws-lc-rs were enabled
+        let _builder = SmtpClientBuilder::new("smtp.example.com".to_string(), 587);
+    }
 }
