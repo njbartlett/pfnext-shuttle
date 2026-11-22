@@ -64,9 +64,10 @@
         </form>
       </li>
 
-      <li v-if="waitlist.length > 0" class="list-group-item">
+      <li v-if="waitlistOpen" class="list-group-item">
         <h2 class="my-2">Waitlist</h2>
-        <table class="table table-hover table-sm">
+        <p v-if="waitlist.length === 0">The session is full and nobody is on the waitlist.</p>
+        <table v-else class="table table-hover table-sm">
           <thead>
             <tr>
               <th>&num;</th>
@@ -87,15 +88,23 @@
             </tr>
           </tbody>
         </table>
+
+        <form @submit.prevent="addToWaitlist">
+          <div class="input-group m-0 p-0">
+            <span class="input-group-text">+</span>
+            <MemberPicker ref="waitlistPicker" v-model="waitlistingMember" :members="waitlistCandidates" input-id="waitlistMember" />
+            <button type="submit" class="btn btn-primary" :disabled="!waitlistingMember"><i class="bi bi-hourglass-split"></i>&nbsp;Add to Waitlist</button>
+          </div>
+        </form>
       </li>
     </ul>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import {
-  addBooking, cancelBooking, displayDateTime, displayFullDate, displayVenueTime, getSession, leaveWaitlist,
+  addBooking, cancelBooking, displayDateTime, displayFullDate, displayVenueTime, getSession, joinWaitlist, leaveWaitlist,
   listSessionBookings, listWaitlist, setAttendance, sortByField,
   type Booking, type Session, type UserSummary, type WaitlistEntry
 } from '@pfnext/shared'
@@ -116,9 +125,29 @@ const waitlist = ref<WaitlistEntry[]>([])
 const members = ref<UserSummary[]>([])
 const addingMember = ref<UserSummary | null>(null)
 const picker = ref<InstanceType<typeof MemberPicker> | null>(null)
+const waitlistingMember = ref<UserSummary | null>(null)
+const waitlistPicker = ref<InstanceType<typeof MemberPicker> | null>(null)
 const sort = reactive<{ field: keyof Booking; ascending: boolean }>({ field: 'person_name', ascending: true })
 
 const sessionId = Number(query.get('id'))
+
+// The waitlist only applies once a session with a booking limit is full
+const waitlistOpen = computed(() => {
+  const max = session.value?.max_booking_count ?? null
+  return max !== null && bookings.value.length >= max
+})
+
+// Members who could join the waitlist: not already booked or waiting, and not the trainer
+const waitlistCandidates = computed(() => {
+  const excluded = new Set<number>([
+    ...bookings.value.map((booking) => booking.person_id),
+    ...waitlist.value.map((entry) => entry.person_id)
+  ])
+  if (session.value?.trainer) {
+    excluded.add(session.value.trainer.id)
+  }
+  return members.value.filter((member) => !excluded.has(member.id))
+})
 
 function sortBookings() {
   sortByField(bookings.value, sort.field, sort.ascending)
@@ -153,6 +182,20 @@ async function addMember() {
   if (done) {
     picker.value?.clear()
     await loadBookings()
+  }
+}
+
+async function addToWaitlist() {
+  if (!waitlistingMember.value) {
+    return
+  }
+  const done = await tryApi(async () => {
+    await joinWaitlist(waitlistingMember.value!.id, sessionId)
+    return true
+  })
+  if (done) {
+    waitlistPicker.value?.clear()
+    await loadWaitlist()
   }
 }
 

@@ -925,8 +925,8 @@ async fn list_waitlist(
     login: LoginSession,
     session_id: i64
 ) -> Result<Json<Vec<WaitlistEntryFull>>, ApiError> {
-    if !login.is_admin() {
-        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
+    if !user_is_admin_for_session(pool, &login, session_id).await? {
+        return Err(ApiError::new(Status::Forbidden, "listing the waitlist requires session trainer or admin".to_string()));
     }
     let waitlist = WaitlistEntryFull::list_by_session(pool, session_id).await
         .map_err(|e| ApiError::new(Status::InternalServerError, e.to_string()))?;
@@ -945,8 +945,9 @@ async fn add_waitlist(
     login: LoginSession,
     new_entry: Json<WaitlistEntry>
 ) -> Result<Created<Json<WaitlistEntryFull>>, ApiError> {
-    if !login.is_admin() && login.uid != new_entry.person_id {
-        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
+    // Members can join the waitlist themselves; admins and the session trainer can add anyone
+    if login.uid != new_entry.person_id && !user_is_admin_for_session(pool, &login, new_entry.session_id).await? {
+        return Err(ApiError::new(Status::Forbidden, "adding another member to the waitlist requires session trainer or admin".to_string()));
     }
     let session_trainer_id: Option<i64> = query_scalar("SELECT trainer FROM session WHERE id = $1")
         .bind(new_entry.session_id)
@@ -978,8 +979,9 @@ async fn delete_waitlist(
     person_id: i64,
     session_id: i64
 ) -> Result<NoContent, ApiError> {
-    if !login.is_admin() && login.uid != person_id {
-        return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
+    // Members can leave the waitlist themselves; admins and the session trainer can remove anyone
+    if login.uid != person_id && !user_is_admin_for_session(pool, &login, session_id).await? {
+        return Err(ApiError::new(Status::Forbidden, "removing another member from the waitlist requires session trainer or admin".to_string()));
     }
     query("DELETE FROM waitlist WHERE person_id = $1 AND session_id = $2 RETURNING id")
         .bind(person_id)
@@ -1030,7 +1032,7 @@ mod tests {
     use crate::mock_chrono::{set_timestamp_datetime, set_timestamp_rfc3339, Utc};
     use crate::notifications;
     use crate::users::UserLoginRecord;
-    use crate::bookings::{add_waitlist, delete_booking, list_bookings, list_waitlist, BookingUpdate, Feedback, SessionBooking, WaitlistEntry};
+    use crate::bookings::{add_waitlist, delete_booking, delete_waitlist, list_bookings, list_waitlist, BookingUpdate, Feedback, SessionBooking, WaitlistEntry};
     use crate::config::{AppEnv, Config};
 
     #[derive(FromRow)]
@@ -2076,6 +2078,40 @@ mod tests {
         assert_eq!("trainer@example.org".to_string(), notification_emails.get(0).unwrap().0);
         assert_eq!("We were unable to confirm your booking.".to_string(), notification_emails.get(0).unwrap().1);
         assert_eq!("user2@example.com".to_string(), notification_emails.get(1).unwrap().0);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql"))]
+    async fn waitlist_managed_by_session_trainer(pool: PgPool) {
+        let trainer_id = create_person(&pool, "Trainer", "trainer@example.org", "member,trainer", 0).await;
+        let trainer_login = create_login(trainer_id, "Trainer", "member,trainer");
+        let member_id = create_person(&pool, "Member", "member@example.com", "member", 0).await;
+        let session_id = create_session_max_bookings(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park", Some(0)).await;
+
+        add_waitlist(State::from(&pool), trainer_login.clone(), Json(WaitlistEntry { person_id: member_id, session_id })).await.unwrap();
+        let waitlist = list_waitlist(State::from(&pool), trainer_login.clone(), session_id).await.unwrap().0;
+        assert_eq!(1, waitlist.len());
+        assert_eq!(member_id, waitlist.get(0).unwrap().person_id);
+
+        delete_waitlist(State::from(&pool), trainer_login.clone(), member_id, session_id).await.unwrap();
+        assert_eq!(0, list_waitlist(State::from(&pool), trainer_login, session_id).await.unwrap().len());
+    }
+
+    #[sqlx::test(fixtures("../schema.sql"))]
+    async fn waitlist_not_managed_by_other_trainer_or_member(pool: PgPool) {
+        let trainer_id = create_person(&pool, "Trainer", "trainer@example.org", "member,trainer", 0).await;
+        let other_trainer_id = create_person(&pool, "Other Trainer", "other@example.org", "member,trainer", 0).await;
+        let other_trainer_login = create_login(other_trainer_id, "Other Trainer", "member,trainer");
+        let member1_id = create_person(&pool, "Member1", "member1@example.com", "member", 0).await;
+        let member2_id = create_person(&pool, "Member2", "member2@example.com", "member", 0).await;
+        let member2_login = create_login(member2_id, "Member2", "member");
+        let session_id = create_session_max_bookings(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park", Some(0)).await;
+        query("INSERT INTO waitlist (person_id, session_id) VALUES ($1, $2)").bind(member1_id).bind(session_id).execute(&pool).await.unwrap();
+
+        for login in [other_trainer_login, member2_login] {
+            assert_eq!(Status::Forbidden, list_waitlist(State::from(&pool), login.clone(), session_id).await.unwrap_err().0);
+            assert_eq!(Status::Forbidden, add_waitlist(State::from(&pool), login.clone(), Json(WaitlistEntry { person_id: member1_id, session_id })).await.map(|_| ()).unwrap_err().0);
+            assert_eq!(Status::Forbidden, delete_waitlist(State::from(&pool), login.clone(), member1_id, session_id).await.unwrap_err().0);
+        }
     }
 
     fn create_login(uid: i64, name: &str, role: &str) -> LoginSession {
