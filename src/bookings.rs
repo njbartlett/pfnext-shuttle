@@ -240,6 +240,9 @@ async fn create_booking(
     // Load details of the booking person and session
     let person_and_session = PersonSessionBookingDetails::load(&mut *tx, booking.person_id, booking.session_id).await?;
 
+    // Nobody, not even an admin, can book the trainer of a session as an attendee of that session
+    check_not_session_trainer(person_and_session.session_trainer_id, booking.person_id, booking.session_id, login.uid)?;
+
     // Admins can always make a booking for any user. Admin for a session includes the trainer of that session.
     let credits_to_use = if is_admin_for_session {
         0
@@ -272,6 +275,17 @@ async fn create_booking(
     log_booking(pool, &person_and_session, credits_to_use, login.email).await?;
 
     Ok(Created::new(format!("/bookings?sessionid={},person_id={}", booking.session_id, booking.person_id)))
+}
+
+const TRAINER_CANNOT_ATTEND_MESSAGE: &str = "The trainer of a session cannot book onto it as an attendee.";
+
+/// Rejects a booking or waitlist entry that would make the session's trainer an attendee of that session
+fn check_not_session_trainer(session_trainer_id: Option<i64>, person_id: i64, session_id: i64, originator_id: i64) -> Result<(), ApiError> {
+    if session_trainer_id == Some(person_id) {
+        info!("person id {} attempted to add person id {} as an attendee of session id {} which they are training; denied", originator_id, person_id, session_id);
+        return Err(ApiError::new(Status::Conflict, TRAINER_CANNOT_ATTEND_MESSAGE.to_string()));
+    }
+    Ok(())
 }
 
 /// Takes a row lock on the person, held until the transaction ends
@@ -394,6 +408,7 @@ struct PersonSessionBookingDetails {
     booking_deadline_mins: i64,
     cost: i16,
     session_id: i64,
+    session_trainer_id: Option<i64>,
     session_type_name: String,
     session_location_name: Option<String>,
     booking_count: i64,
@@ -414,7 +429,7 @@ impl Display for PersonSessionBookingDetails {
 
 impl PersonSessionBookingDetails {
     async fn load<'e, E: PgExecutor<'e>>(executor: E, person_id: i64, session_id: i64) -> Result<PersonSessionBookingDetails, ApiError> {
-        query_as("SELECT p.id AS person_id, p.name AS person_name, p.email AS person_email, p.roles AS person_roles, p.credits AS person_credits, s.id AS session_id, s.datetime, s.booking_deadline_mins, s.cost, st.name AS session_type_name, l.name AS session_location_name, s.max_booking_count,
+        query_as("SELECT p.id AS person_id, p.name AS person_name, p.email AS person_email, p.roles AS person_roles, p.credits AS person_credits, s.id AS session_id, s.trainer AS session_trainer_id, s.datetime, s.booking_deadline_mins, s.cost, st.name AS session_type_name, l.name AS session_location_name, s.max_booking_count,
             (SELECT COUNT(*) FROM booking AS b WHERE b.session_id = $1) AS booking_count
             FROM person AS p, session as s
             JOIN session_type AS st ON s.session_type = st.id
@@ -581,7 +596,10 @@ async fn promote_from_waitlist(
         let local_datetime = waitlisted_person_session.datetime.with_timezone(&timezone);
 
         // Check if we can make a booking for the top person on the waitlist
-        let check_result = check_bookable(&mut tx, config, &waitlisted_person_session, true).await;
+        let check_result = match check_not_session_trainer(waitlisted_person_session.session_trainer_id, waitlist_entry.person_id, session_id, waitlist_entry.person_id) {
+            Ok(()) => check_bookable(&mut tx, config, &waitlisted_person_session, true).await,
+            Err(e) => Err(e),
+        };
         if check_result.is_ok() {
             // Top waitlist person is eligible to book, so book them.
             // If internal errors occur here they abort the function.
@@ -930,6 +948,13 @@ async fn add_waitlist(
     if !login.is_admin() && login.uid != new_entry.person_id {
         return Err(ApiError::new(Status::Forbidden, "admin role required".to_string()));
     }
+    let session_trainer_id: Option<i64> = query_scalar("SELECT trainer FROM session WHERE id = $1")
+        .bind(new_entry.session_id)
+        .fetch_optional(pool.inner())
+        .await
+        .map_err(to_internal_server_err)?
+        .flatten();
+    check_not_session_trainer(session_trainer_id, new_entry.person_id, new_entry.session_id, login.uid)?;
     let waitlist_id: i64 = query("INSERT INTO waitlist (person_id, session_id) VALUES ($1, $2) RETURNING id")
         .bind(new_entry.person_id)
         .bind(new_entry.session_id)
@@ -1254,6 +1279,44 @@ mod tests {
         assert_eq!(Err(ApiError::new(Status::Forbidden, "Not allowed to cancel bookings for other users.".to_string())), result);
 
         assert_eq!(0, read_logged(&pool).await.len());
+    }
+
+    #[sqlx::test]
+    async fn book_session_trainer_as_attendee_of_own_session(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let booking = crate::bookings::SessionBooking {
+            person_id: trainer_id,
+            session_id,
+            credits_used: None
+        };
+
+        let login = create_login(trainer_id, "Trainer User", "member,trainer");
+        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
+        assert_eq!(Err(ApiError::new(Status::Conflict, "The trainer of a session cannot book onto it as an attendee.".to_string())), result);
+        assert_eq!(0, count_bookings(&pool).await);
+        assert_eq!(0, read_logged(&pool).await.len());
+    }
+
+    #[sqlx::test]
+    async fn book_session_admin_books_trainer_onto_own_session(pool: PgPool) {
+        pool.execute(include_str!("../schema.sql")).await.unwrap();
+
+        let admin_id = create_person(&pool, "Admin User", "admin@example.org", "admin", 0).await;
+        let trainer_id = create_person(&pool, "Trainer User", "trainer@example.org", "member,trainer", 0).await;
+        let session_id = create_session(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park").await;
+        let booking = crate::bookings::SessionBooking {
+            person_id: trainer_id,
+            session_id,
+            credits_used: None
+        };
+
+        let login = create_login(admin_id, "Admin User", "admin");
+        let result = crate::bookings::create_booking(State::from(&pool), State::from(&Config::load().unwrap()), login, Json(booking)).await;
+        assert_eq!(Err(ApiError::new(Status::Conflict, "The trainer of a session cannot book onto it as an attendee.".to_string())), result);
+        assert_eq!(0, count_bookings(&pool).await);
     }
 
     #[sqlx::test]
@@ -1965,6 +2028,54 @@ mod tests {
         assert_eq!("We were unable to confirm your booking.".to_string(), notification_emails.get(0).unwrap().1);
         assert_eq!("user3@example.com".to_string(), notification_emails.get(1).unwrap().0);
         assert_eq!("The wait is over, your session booking has been confirmed!".to_string(), notification_emails.get(1).unwrap().1);
+    }
+
+    #[sqlx::test(fixtures("../schema.sql"))]
+    async fn add_waitlist_trainer_of_session(pool: PgPool) {
+        let admin_id = create_person(&pool, "Admin", "admin@example.com", "admin", 0).await;
+        let admin_login = create_login(admin_id, "Admin", "admin");
+        let trainer_id = create_person(&pool, "Trainer", "trainer@example.org", "member,trainer", 0).await;
+        let trainer_login = create_login(trainer_id, "Trainer", "member,trainer");
+        let session_id = create_session_max_bookings(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park", Some(0)).await;
+
+        let expected = ApiError::new(Status::Conflict, "The trainer of a session cannot book onto it as an attendee.".to_string());
+        let err = add_waitlist(State::from(&pool), trainer_login, Json(WaitlistEntry { person_id: trainer_id, session_id })).await.unwrap_err();
+        assert_eq!(expected, err);
+        let err = add_waitlist(State::from(&pool), admin_login.clone(), Json(WaitlistEntry { person_id: trainer_id, session_id })).await.unwrap_err();
+        assert_eq!(expected, err);
+        assert_eq!(0, list_waitlist(State::from(&pool), admin_login, session_id).await.unwrap().len());
+    }
+
+    #[sqlx::test(fixtures("../schema.sql"))]
+    async fn delete_booking_waitlist_promotion_skips_trainer_of_session(pool: PgPool) {
+        let admin_id = create_person(&pool, "Admin", "admin@example.com", "admin", 0).await;
+        let admin_login = create_login(admin_id, "Admin", "admin");
+        let trainer_id = create_person(&pool, "Trainer", "trainer@example.org", "member,trainer", 0).await;
+        let user1_id = create_person(&pool, "User1", "user1@example.com", "member", 0).await;
+        let user1_login = create_login(user1_id, "User1", "member");
+        let user2_id = create_person(&pool, "User2", "user2@example.com", "member", 0).await;
+        let user2_login = create_login(user2_id, "User2", "member");
+
+        let session_id = create_session_max_bookings(&pool, &Utc::now().fixed_offset().add(TimeDelta::days(1)), trainer_id, "HIIT", "Oak Hill Park", Some(1)).await;
+        create_booking(&pool, user1_id, session_id, None).await;
+
+        // Trainer's waitlist entry predates the check (or the trainer was assigned after joining), so insert it directly
+        query("INSERT INTO waitlist (person_id, session_id) VALUES ($1, $2)").bind(trainer_id).bind(session_id).execute(&pool).await.unwrap();
+        add_waitlist(State::from(&pool), user2_login.clone(), Json(WaitlistEntry { person_id: user2_id, session_id })).await.unwrap();
+
+        delete_booking(State::from(&pool), State::from(&Config::load().unwrap()), State::from(&AppEnv::default()), user1_login.clone(), user1_id, session_id).await.unwrap();
+
+        // Trainer is skipped; user2 gets the place
+        let bookings = list_bookings(State::from(&pool), admin_login.clone(), Some(session_id), None, None, None).await.unwrap().0;
+        assert_eq!(1, bookings.len());
+        assert_eq!(user2_id, bookings.get(0).unwrap().person_id);
+        assert_eq!(0, list_waitlist(State::from(&pool), admin_login.clone(), session_id).await.unwrap().len());
+
+        let notification_emails = notifications::get_sent_messages();
+        assert_eq!(2, notification_emails.len());
+        assert_eq!("trainer@example.org".to_string(), notification_emails.get(0).unwrap().0);
+        assert_eq!("We were unable to confirm your booking.".to_string(), notification_emails.get(0).unwrap().1);
+        assert_eq!("user2@example.com".to_string(), notification_emails.get(1).unwrap().0);
     }
 
     fn create_login(uid: i64, name: &str, role: &str) -> LoginSession {
