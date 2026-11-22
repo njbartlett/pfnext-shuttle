@@ -775,7 +775,8 @@ mod tests {
         assert_eq!(LoginError::TooManyAttempts, err);
 
         // Once the window has passed, the right password works again
-        set_timestamp_rfc3339("2030-01-01T00:16:00Z");
+        let after_window = DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z").unwrap() + super::FAILED_LOGIN_WINDOW + chrono::Duration::minutes(1);
+        set_timestamp_datetime(&after_window);
         LoginSession::login(&pool, "user1@example.com", "password", &None).await.unwrap();
     }
 
