@@ -29,7 +29,9 @@ mod blog;
 mod bookings;
 mod common;
 mod config;
+mod geoip;
 mod transaction_log;
+mod unauthorized_log;
 mod loginsession;
 mod mock_chrono;
 mod notifications;
@@ -130,7 +132,10 @@ async fn launch() -> Rocket<Build> {
         .manage(pool)
         .manage(s3_store)
         .manage(user_agent_parser)
+        .manage(geoip::GeoIp::new())
         .attach(cors)
+        // Logs requests whose login session could not be authenticated
+        .attach(unauthorized_log::UnauthorizedLogger)
         // The single-page app (web/dist); page paths with no file fall back
         // to the SPA shell, and blog post pages get their Open Graph tags
         .mount("/", crate::templates::routes())

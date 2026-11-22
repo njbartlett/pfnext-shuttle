@@ -17,7 +17,7 @@ use rocket::{
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::{PgRow, PgTypeInfo}, query, Decode, FromRow, PgPool, Postgres, QueryBuilder, Row, Type};
 
-use crate::{apierror::ApiError, config::AppEnv, transaction_log::append_log, users::UserLoginRecord, whereclause::{Operator, WhereClause}};
+use crate::{apierror::ApiError, config::AppEnv, geoip::GeoIp, unauthorized_log::AuthFailure, transaction_log::append_log, users::UserLoginRecord, whereclause::{Operator, WhereClause}};
 
 const SESSION_ID: &str = "sessionid";
 const ADMIN: &str = "admin";
@@ -129,19 +129,29 @@ impl<'r> FromRequest<'r> for LoginSession {
 
         // Get the session id from the Authorization header (mobile/API clients),
         // falling back to the private session cookie (browsers)
-        let sessionid: Option<String> = request.headers()
-            .get_one("Authorization")
+        let authorization = request.headers().get_one("Authorization");
+        let bearer_token = authorization
             .and_then(|h| h.strip_prefix("Bearer "))
             .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
+            .filter(|t| !t.is_empty());
+        let credential = if bearer_token.is_some() { "bearer token" } else { "session cookie" };
+        let sessionid: Option<String> = bearer_token
             .or_else(|| request.cookies()
                 .get_private(SESSION_ID)
                 .map(|c| c.value().to_string()));
 
-        // No bearer token or cookie in request header => browser has expired the session
+        // No bearer token or cookie in request header => browser has expired the session.
+        // The reason is logged, with details of the request, by UnauthorizedLogger.
         if sessionid.is_none() {
-            info!("Session cookie not sent by client");
-            let _ = append_log(pool, &None, "UNAUTHORIZED", "Session cookie not sent by client").await;
+            let reason = if request.cookies().get(SESSION_ID).is_some() {
+                "Session cookie could not be decrypted (tampered with, or issued under a different secret key)"
+            } else if authorization.is_some() {
+                "Authorization header is not a bearer token, and no session cookie sent"
+            } else {
+                "Session cookie not sent by client"
+            };
+            info!("{reason}");
+            AuthFailure::record(request, reason.to_string());
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
         let sessionid = sessionid.unwrap();
@@ -155,8 +165,9 @@ impl<'r> FromRequest<'r> for LoginSession {
 
         // No session record in db => we have expired the session
         if login_session.is_none() {
-            info!("Session record not found in table");
-            let _ = append_log(pool, &None, "UNAUTHORIZED", "Session record not found in table").await;
+            let reason = format!("Session record not found in table (expired or logged out), sent as {credential}");
+            info!("{reason}");
+            AuthFailure::record(request, reason);
             return Self::set_outcome_error(AuthenticationError::MissingSession, request);
         }
 
@@ -494,22 +505,13 @@ impl Display for ClientInfo<'_> {
 
 impl ClientInfo<'_> {
     async fn extract_ip_info<'r>(request: &'r Request<'_>) -> Option<String> {
-        let client_addr = request.guard::<ClientRealAddr>().await.succeeded();
-        match client_addr {
-            Some(addr) => {
-                let ip = addr.get_ipv6().to_canonical();
-                match public_ip_address::perform_lookup(Some(ip)).await {
-                    Ok(lookup_result) => Some(lookup_result.to_string()),
-                        //.inspect_err(|e| error!("Failed to serialize public IP address lookup {:?}: {}", lookup_result, e))
-                        //.ok(),
-                    Err(err) => {
-                        warn!("Failed to lookup IP info for client {}: {}", ip, err);
-                        None
-                    }
-                }
-            },
+        let ip = request.guard::<ClientRealAddr>().await.succeeded()?.get_ipv6().to_canonical();
+        let location = match request.rocket().state::<GeoIp>() {
+            Some(geoip) => geoip.lookup(ip).await,
             None => None
-        }
+        };
+        // Always record the address, even when it cannot be located
+        Some(location.map(|l| l.to_string()).unwrap_or_else(|| format!("IP: {ip}")))
     }
 }
 
